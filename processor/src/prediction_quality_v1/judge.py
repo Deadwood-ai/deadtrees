@@ -135,7 +135,10 @@ def parse(judge: str, text: str) -> Answer:
 			modes=modes,
 			errors=[str(e)[:200] for e in (v.get('errors') if isinstance(v.get('errors'), list) else [])][:10],
 		)
-	return Answer(judge=judge, assessable=bool(values.get('assessable', True)), layers=layers, raw=text)
+	assessable = values.get('assessable', True)
+	if isinstance(assessable, str):
+		assessable = assessable.strip().lower() != 'false'
+	return Answer(judge=judge, assessable=bool(assessable), layers=layers, raw=text)
 
 
 def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: int = 1) -> Answer:
@@ -151,8 +154,9 @@ def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: in
 
 
 def combined(answers: Sequence[Answer], layer: str) -> dict:
-	"""The judges' answers for one layer, averaged: what the dataset rule reads."""
-	present = [a.layers[layer] for a in answers]
+	"""The judges' answers for one layer, averaged: what the dataset rule reads. A judge that
+	could not assess the crop does not count, whatever likelihood the reply format made it give."""
+	present = [a.layers[layer] for a in answers if a.assessable]
 	if not present:
 		return {'major_likelihood': None, 'area_pct': None, 'judges': 0}
 	n = len(present)

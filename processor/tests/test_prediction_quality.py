@@ -67,6 +67,13 @@ def test_combined_averages_judges():
 	answers = [judge.parse('luna', _answer(dw_major=40)), judge.parse('haiku', _answer(dw_major=80))]
 	c = judge.combined(answers, 'deadwood')
 	assert c == {'major_likelihood': 60, 'area_pct': len(judge.MODES['deadwood']), 'judges': 2}
+	# a judge that could not assess the crop does not count
+	blind = json.loads(_answer(dw_major=100))
+	for value in (False, 'false'):
+		blind['assessable'] = value
+		answers[1] = judge.parse('haiku', json.dumps(blind))
+		assert not answers[1].assessable and judge.combined(answers, 'deadwood')['major_likelihood'] == 40
+	assert judge.combined(answers[1:], 'deadwood')['major_likelihood'] is None
 
 
 def _tile(i, dw, fc):
@@ -342,7 +349,8 @@ def test_write_stores_crops_once_and_links_every_row():
 		put_image=lambda path, data, dataset_id: stored.__setitem__(path, data),
 	)
 	out = store.write(client, 5, result, **kw)
-	assert out == {'crops': 1, 'assessments': 5, 'images_not_shown': []}  # gate + 2 layers + 2 rule rows
+	assert (out['crops'], out['assessments']) == (1, 5)  # gate + 2 layers + 2 rule rows
+	assert out['judged'] == {'crops': [{'crop_id': 1, 'sets': ['exclude'], 'weight': None}], 'images_not_shown': []}
 	assert len(stored) == 3 and all(p.startswith(f'audit/prediction_quality/42/{sha[:16]}/crop-1/') for p in stored)
 	# a file is named by its content, so another image of the crop never replaces it
 	assert all(row['sha256'][:16] in row['storage_path'] for row in client.db['images'])
@@ -354,7 +362,9 @@ def test_write_stores_crops_once_and_links_every_row():
 	again = store.write(client, 6, result, **kw)
 	assert len(client.db['crops']) == 1
 	# the images are stored already: nothing is uploaded or inserted twice
-	assert len(stored) == 3 and len(client.db['images']) == 3 and again['images_not_shown'] == []
+	assert len(stored) == 3 and len(client.db['images']) == 3 and again['judged']['images_not_shown'] == []
+	# the crop row holds every run's sets; the run says which were its own
+	assert again['judged']['crops'] == [{'crop_id': 1, 'sets': ['exclude', 'training'], 'weight': 0.5}]
 	crop_updates = client.db['updates']  # the run row stays the worker's
 	assert len(crop_updates) == 1 and crop_updates[0][0] == 'crops' and crop_updates[0][2] == [('id', 1)]
 	assert crop_updates[0][1]['crop_sets'] == ['exclude', 'training']
@@ -364,8 +374,9 @@ def test_write_stores_crops_once_and_links_every_row():
 	crop.in_aoi = np.zeros(crop.valid.shape, bool)
 	other = store.write(client, 7, result, **kw)
 	assert len(stored) == 6 and len(client.db['images']) == 3
-	assert [i['kind'] for i in other['images_not_shown']] == ['raw', 'deadwood_overlay', 'forest_cover_overlay']
-	assert all(i['storage_path'] in stored and i['crop_id'] == 1 for i in other['images_not_shown'])
+	not_shown = other['judged']['images_not_shown']
+	assert [i['kind'] for i in not_shown] == ['raw', 'deadwood_overlay', 'forest_cover_overlay']
+	assert all(i['storage_path'] in stored and i['crop_id'] == 1 for i in not_shown)
 
 
 # ---------------------------------------------------------------------------
@@ -405,14 +416,20 @@ def test_a_dataset_without_an_aoi_is_judged_on_all_its_tiles(ortho_file):
 
 	judges = {'luna-medium': lambda prompt, images: _answer(dw_major=80), 'haiku-5.5': lambda *_: _answer()}
 	dead = _to_wgs(box(*_squares()[0]))
-	predictions = {'deadwood': [dead], 'forest': []}
-	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, predictions, judges)
+	predictions = lambda: {'deadwood': [dead], 'forest': []}  # noqa: E731 (the check empties the dict)
+	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, predictions(), judges)
 	assert result.tiles_total == 4 and len(result.crops) == 4
 	assert all(r.crop.in_aoi is None and len(r.answers) == 2 for r in result.crops)
 	assert result.cost['haiku-5.5']['calls'] == 4 and result.cost['luna-medium']['cost_usd'] is None
 	# an AOI limits the check to the tiles inside it
-	inside = run_prediction_quality(42, ortho_file, _check_tiles(), _to_wgs(box(*_squares()[0])), predictions, judges)
+	inside = run_prediction_quality(42, ortho_file, _check_tiles(), _to_wgs(box(*_squares()[0])), predictions(), judges)
 	assert inside.tiles_total == 1 and [r.tile.tile_id for r in inside.crops] == [1]
+	# an AOI smaller than a tile is judged on the tile it touches, not left without crops
+	corner = box(*_squares()[1]).centroid.buffer(5)
+	small = run_prediction_quality(
+		42, ortho_file, _check_tiles(), _to_wgs(corner), {'deadwood': [], 'forest': []}, judges
+	)
+	assert [r.tile.tile_id for r in small.crops] == [2]
 
 
 def test_login_and_limit_errors_reach_the_worker_and_other_errors_stay_with_the_crop(ortho_file):
@@ -437,16 +454,16 @@ def test_login_and_limit_errors_reach_the_worker_and_other_errors_stay_with_the_
 		return _answer()
 
 	good = lambda prompt, images: _answer()  # noqa: E731
-	none = {'deadwood': [], 'forest': []}
+	none = lambda: {'deadwood': [], 'forest': []}  # noqa: E731
 	for failing, error in ((expired, LoginExpired), (limited, LimitReached)):
 		with pytest.raises(error):
-			run_prediction_quality(42, ortho_file, _check_tiles(), None, none, {'a': good, 'b': failing})
-	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, none, {'a': good, 'b': flaky})
+			run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': failing})
+	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': flaky})
 	failed = [r for r in result.crops if r.failures]
 	assert len(failed) == 1 and 'boom' in failed[0].failures['b'] and len(failed[0].answers) == 1
 	# the cuts are calibrated on both judges: a judge that answers no crop fails the run
 	with pytest.raises(RuntimeError, match='b answered no crop: RuntimeError: boom'):
-		run_prediction_quality(42, ortho_file, _check_tiles(), None, none, {'a': good, 'b': broken})
+		run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': broken})
 
 
 def _dataset(aois=()):
@@ -507,7 +524,7 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	from processor.src.prediction_quality_v1 import handler
 
 	monkeypatch.setattr(handler, 'local_cog', lambda *args: ortho_file)
-	client, stored = _FakeClient(_dataset()), {}
+	client, stored, refreshed = _FakeClient(_dataset()), {}, []
 	judges = {
 		'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major'),
 		'haiku-5.5': lambda prompt, images: _answer(dw_major=70, verdict='major'),
@@ -516,6 +533,7 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	ctx = SimpleNamespace(
 		run={'id': 5, 'dataset_id': 42},
 		version={'config': {'rule_config': strict}},
+		refresh=lambda: refreshed.append(not client.db.get('assessments')),
 		client=client,
 		judges=judges,
 		token='t',
@@ -534,7 +552,8 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	assert rule_rows['deadwood']['verdict'] == 'major' and rule_rows['deadwood']['details']['major_crops'] == 4
 	# the registered version's cuts decide: a forest cut of 5 makes the judges' 10 major
 	assert rule_rows['forest_cover']['verdict'] == 'major' and rule_rows['forest_cover']['label_id'] == 12
-	assert out['evidence']['images_not_shown'] == []
+	assert out['evidence']['judged']['images_not_shown'] == [] and len(out['evidence']['judged']['crops']) == 4
+	assert refreshed == [True], 'the login is renewed before the writes'
 	# only the newest preferred prediction is drawn, without its deleted polygons
 	covered = {c['pixel_x0']: c['selection']['exclude']['predicted']['deadwood'] for c in client.db['crops']}
 	assert covered[0] == pytest.approx(1, abs=0.05) and covered[512] == covered[1024] == 0

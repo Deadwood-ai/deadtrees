@@ -112,6 +112,7 @@ def handle(ctx) -> dict:
 			ctx.judges,
 			rule_config=config['rule_config'],
 		)
+	ctx.refresh()  # the judges can take longer than the login lasts
 	stored = store.write(
 		client,
 		ctx.run['id'],
@@ -121,7 +122,7 @@ def handle(ctx) -> dict:
 		footprints={r['id']: mapping(r['geometry']) for r in rows},
 		put_image=ctx.put_image,
 	)
-	images_not_shown = stored.pop('images_not_shown')
+	judged = stored.pop('judged')
 	logger.info(
 		'Prediction quality stored',
 		LogContext(
@@ -140,7 +141,7 @@ def handle(ctx) -> dict:
 		# what was judged, read at run time: the ortho, AOI or predictions may have changed since queueing
 		'inputs': identity(sha256, aoi, label_ids),
 		**summary,
-		'evidence': {**summary['evidence'], 'images_not_shown': images_not_shown},
+		'evidence': {**summary['evidence'], 'judged': judged},
 	}
 
 

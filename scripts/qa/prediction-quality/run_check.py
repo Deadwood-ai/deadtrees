@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from processor.src.prediction_quality_v1.check import VERSIONS, run_prediction_quality  # noqa: E402
 from processor.src.prediction_quality_v1.render import judge_images  # noqa: E402
 from processor.src.prediction_quality_v1.tiles import Tile  # noqa: E402
+from processor.src.utils.stored_inputs import select_aoi  # noqa: E402
 
 COG_ROOT = 'https://data2.deadtrees.earth/cogs/v1/'
 INPUTS_SQL = """
@@ -45,9 +46,7 @@ WITH pref AS (
     AND EXISTS (SELECT 1 FROM v2_model_preferences p WHERE p.label_data = l.label_data::text AND l.model_config = p.model_config)
   ORDER BY l.label_data, l.id DESC)
 SELECT c.cog_path, (SELECT id FROM pref WHERE layer = 'deadwood') AS deadwood_label_id,
-  (SELECT id FROM pref WHERE layer = 'forest_cover') AS forest_label_id,
-  (SELECT ST_AsGeoJSON(ST_GeomFromGeoJSON(COALESCE(geometry->'geometry', geometry)))::jsonb FROM v2_aois
-   WHERE dataset_id = %(id)s ORDER BY created_at DESC, id DESC LIMIT 1) AS aoi
+  (SELECT id FROM pref WHERE layer = 'forest_cover') AS forest_label_id
 FROM v2_cogs c WHERE c.dataset_id = %(id)s
 """
 
@@ -60,6 +59,13 @@ def analyst():
 
 def inputs(db, dataset_id):
 	row = db.execute(INPUTS_SQL, {'id': dataset_id}).fetchone()
+	# the AOI the worker judges in (an auditor's before the predicted one; none judges every tile)
+	aoi = select_aoi(
+		db.execute(
+			'SELECT geometry, is_whole_image, source::text, created_at::text FROM v2_aois WHERE dataset_id = %s',
+			(dataset_id,),
+		).fetchall()
+	)
 	tiles = [
 		Tile(
 			tile_id=r['id'],
@@ -88,7 +94,7 @@ def inputs(db, dataset_id):
 			if row[key]
 			else []
 		)
-	return row, tiles, geoms
+	return row, tiles, geoms, aoi
 
 
 def jpeg_bytes(image, quality=90):
@@ -248,15 +254,15 @@ if __name__ == '__main__':
 		if (out / 'result.json').exists():
 			continue
 		with analyst() as db:
-			row, tiles, geoms = inputs(db, dataset_id)
-		if not row or not row['aoi'] or not tiles:
-			print({'dataset': dataset_id, 'skipped': 'no COG, AOI or CLIP tiles'}, flush=True)
+			row, tiles, geoms, aoi = inputs(db, dataset_id)
+		if not row or not tiles:
+			print({'dataset': dataset_id, 'skipped': 'no COG or CLIP tiles'}, flush=True)
 			continue
 		result = run_prediction_quality(
 			dataset_id,
 			COG_ROOT + quote(row['cog_path'], safe='/'),
 			tiles,
-			shape(row['aoi']),
+			shape(aoi) if aoi else None,
 			geoms,
 			backends,
 			workers=a.workers,

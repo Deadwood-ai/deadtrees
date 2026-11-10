@@ -15,7 +15,8 @@ the base tables as the audit worker.
 A crop is one CLIP tile (`v2_tile_embeddings`: 51.2 m on the 10 cm UTM grid, in the UTM
 zone of the ortho's centre), rendered at 5 cm (1024 px) from the stored COG, so private
 datasets work. Only tiles inside the AOI
-are judged; a dataset without an AOI is judged on all its tiles. The predictions are the
+(90% of the tile) are judged; an AOI smaller than a tile is judged on the tiles it
+touches, and a dataset without an AOI on all its tiles. The predictions are the
 dataset's active labels of the preferred model (`v2_model_preferences`), the newest per
 layer.
 
@@ -34,9 +35,11 @@ content, so a later run on the same ortho never replaces a file a row points at.
 image is stored once per crop and prediction: a later run uploads nothing that is
 already there. When its image differs from the stored one (the AOI changed, so other
 parts are darkened), the stored row stays what the review page shows and the run names
-the files it judged in `evidence.images_not_shown`. Crops are `audit.crops` rows keyed
+the files it judged in `evidence.judged.images_not_shown`. Crops are `audit.crops` rows keyed
 by the tile's pixel window: a tile the dataset evaluation already stored only gains the
-new sets.
+new sets. The row holds the sets of every run on the ortho, so each run records its own
+in `evidence.judged.crops` (crop id, sets, training weight): what a later rule version
+is recomputed from.
 
 ## Assessments per run
 
@@ -47,7 +50,8 @@ new sets.
 | `pq-rule/pq-rule-v1` | rule | dataset, one row per layer | `major` when 2 or more exclude-set crops are major, else `ok`; `unsure` when no crop could be judged |
 
 A crop counts as major when the judges' mean `major_likelihood` reaches the layer's cut
-(deadwood 52, forest 69). The cuts and the crop count are read from the version's
+(deadwood 52, forest 69). A judge that could not assess the crop does not count in the
+mean. The cuts and the crop count are read from the version's
 `config` (`rule_config`), so a registered version runs with the numbers it was
 registered with. The rule row's `details` hold the counts
 (`major_crops`, `judged_crops`) and the weighted major share of the training set, which
@@ -63,7 +67,8 @@ forest artifacts. Lying wood is never deadwood.
 `handle(ctx)` reads the tiles, the AOI and every polygon of the two predictions (large
 predictions hold a few hundred thousand polygons; `shared.pagination.iter_pages_by_creation`
 reads them through the label's index), asks each judge per crop
-with four calls in parallel, then stores the run (`store.write`): crops, then the image
+with four calls in parallel, renews the login (`ctx.refresh()`: the calls can take longer
+than it lasts), then stores the run (`store.write`): crops, then the image
 files and their rows, then all assessments in one insert, so an attempt that fails
 before that insert leaves nothing a retry would double. The worker finishes the run with the returned evidence
 (the layer verdicts, versions, failed calls), coverage (tiles, crops per set) and cost
@@ -80,5 +85,7 @@ usage-limit errors reach the worker, which pauses instead of failing the run.
 ## Benchmark runs without the worker
 
 `scripts/qa/prediction-quality/run_check.py` runs the same check read-only (analyst
-login, COG over HTTPS) and keeps the result in a local folder. It writes nothing to the
-database.
+login, COG over HTTPS, the AOI and the preferred predictions picked as the worker picks
+them) and keeps the result in a local folder. It writes nothing to the database. Its
+judges are called differently from the worker's: Luna through an API key, Haiku through
+the Read tool.

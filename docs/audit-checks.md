@@ -154,8 +154,11 @@ images travel inline in the request, so a model cannot read files of the account
 - A check plugs in with a handler module listed in `worker.HANDLERS`: `VERSION` and
   `CONFIG` (registered once as `review_all`, inactive), `handle(ctx)` (writes the run's
   crops, images and model and rule rows), optional `recompute(ctx)` for rule-only runs
-  (no judges), optional `ready(status)` and optional `inputs(client, dataset_id)` (the
-  evidence a run judges: ortho sha256, prediction label ids). `CONFIG['models']` names the judges, e.g.
+  (no judges), optional `ready(status)` (default: COG and predictions done) and optional
+  `inputs(client, dataset_id)` (the evidence a run judges: ortho sha256, prediction label
+  ids). The login a run starts with lasts 20 to 60 minutes: a handler whose model calls
+  can take that long calls `ctx.refresh()` before its writes, and the worker renews it
+  again before it writes the run's end state. `CONFIG['models']` names the judges, e.g.
   `{"haiku-5.5": {"transport": "claude", "model": "claude-haiku-5-5"},
   "luna-medium": {"transport": "codex", "model": "gpt-6-luna", "effort": "medium"}}`.
 - Queues: new uploads first, then manual runs, then the backfill. Benchmark runs only in a

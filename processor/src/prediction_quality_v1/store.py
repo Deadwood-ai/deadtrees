@@ -214,7 +214,9 @@ def write(
 	put_image(path, bytes, dataset_id) stores a file on the storage server. Images are kept per
 	crop and prediction: an image that is already stored is not uploaded again, and one that
 	differs from the stored row (the AOI changed, so other parts are darkened) is uploaded and
-	named in the answer, because the row the review page shows stays the first. The assessments
+	named in the answer, because the row the review page shows stays the first. The answer
+	also names each crop's sets and weight in this run: the crop row holds the sets of every
+	run on the ortho, so only the run can say which it judged as which. The assessments
 	go last and in one insert, so an attempt that fails before that insert leaves nothing a
 	retry would double. The run row itself (status, evidence, coverage, cost) is the worker's
 	to finish.
@@ -253,7 +255,13 @@ def write(
 	return {
 		'crops': len(crop_ids),
 		'assessments': len(assessments),
-		'images_not_shown': [
-			{k: row[k] for k in ('crop_id', 'label_id', 'kind', 'storage_path', 'sha256')} for row in not_shown
-		],
+		'judged': {
+			'crops': [
+				{'crop_id': crop_ids[r.tile.tile_id], 'sets': list(r.tile.sets), 'weight': r.tile.weight}
+				for r in result.crops
+			],
+			'images_not_shown': [
+				{k: row[k] for k in ('crop_id', 'label_id', 'kind', 'storage_path', 'sha256')} for row in not_shown
+			],
+		},
 	}

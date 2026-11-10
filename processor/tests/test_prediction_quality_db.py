@@ -7,7 +7,7 @@ The unit tests fake PostgREST; this one proves the tables take what store.write 
 from shapely.geometry import box, mapping
 
 from processor.src.audit_worker import runs
-from processor.src.audit_worker.__main__ import put_image_with
+from processor.src.audit_worker.__main__ import put_image_with, sign_in_again
 from processor.src.prediction_quality_v1 import judge, store, tiles
 from processor.src.prediction_quality_v1.check import CheckResult, CropResult
 from processor.src.prediction_quality_v1.render import render_crop
@@ -70,7 +70,8 @@ def test_the_audit_tables_take_a_run_and_a_second_run_on_the_same_ortho(
 					put_image=put_image_with(lambda: auth_token),
 				)
 			)
-		assert stored == [{'crops': 1, 'assessments': 5, 'images_not_shown': []}] * 2
+		assert [(s['crops'], s['assessments'], s['judged']['images_not_shown']) for s in stored] == [(1, 5, [])] * 2
+		assert [s['judged']['crops'][0]['sets'] for s in stored] == [['exclude'], ['exclude', 'training']]
 		crops = audit.table('crops').select('*').eq('dataset_id', dataset_id).execute().data
 		assert len(crops) == 1 and crops[0]['crop_sets'] == ['exclude', 'training']
 		assert set(crops[0]['selection']) == {'exclude', 'training'}
@@ -193,6 +194,7 @@ def test_the_handler_runs_on_stored_inputs(
 			client=client,
 			token=auth_token,
 			put_image=put_image_with(lambda: auth_token),
+			refresh=lambda: sign_in_again(client),
 			judges={'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major')},
 		)
 		out = handler.handle(ctx)

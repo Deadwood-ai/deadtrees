@@ -74,21 +74,23 @@ def run_prediction_quality(
 	workers: int = 4,
 	rule_config: dict = rule_mod.RULE_CONFIG,
 ) -> CheckResult:
-	"""predictions_4326: layer ('deadwood', 'forest') -> polygons. aoi_4326 None judges every
-	tile: a dataset without an AOI is predicted as a whole. `rule_config` is the version's."""
+	"""predictions_4326: layer ('deadwood', 'forest') -> polygons; the dict is emptied, so each
+	layer's WGS84 copy is gone once it is projected (large predictions hold a few hundred
+	thousand polygons). aoi_4326 None judges every tile: a dataset without an AOI is predicted
+	as a whole. `rule_config` is the version's."""
 	start = time.monotonic()
 	with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='60'), rasterio.open(cog) as src:
 		epsg = grid_epsg(src)
 		to_utm = Transformer.from_crs(4326, epsg, always_xy=True)
 		aoi = project(aoi_4326, to_utm).buffer(0) if aoi_4326 is not None else None
-		layers = {layer: utm_layer(predictions_4326[layer], to_utm) for layer in judge_mod.LAYERS}
+		layers = {layer: utm_layer(predictions_4326.pop(layer), to_utm) for layer in judge_mod.LAYERS}
 		attach_cover(tiles, to_utm, layers['deadwood'], layers['forest'])
-		# Only tiles whose square lies inside the AOI judge the prediction there.
-		inside = [
-			t
-			for t in tiles
-			if aoi is None or box(*t.square_utm).intersection(aoi).area >= 0.9 * box(*t.square_utm).area
-		]
+		# Only tiles whose square lies inside the AOI judge the prediction there. An AOI
+		# smaller than a tile is judged on the tiles it touches.
+		share = {
+			t.tile_id: 1.0 if aoi is None else box(*t.square_utm).intersection(aoi).area / TILE_M**2 for t in tiles
+		}
+		inside = [t for t in tiles if share[t.tile_id] >= 0.9] or [t for t in tiles if share[t.tile_id] > 0]
 		hectares = (aoi.area if aoi is not None else len(inside) * TILE_M**2) / 1e4
 		results = [CropResult(tile=t) for t in pick(inside, hectares, dataset_id)]
 		for r in results:

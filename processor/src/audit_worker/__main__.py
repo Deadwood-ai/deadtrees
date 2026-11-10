@@ -31,6 +31,15 @@ def connect():
 		return client, token
 
 
+def sign_in_again(client) -> None:
+	"""Renew the client's login in place: login() hands out a session until 20 minutes before
+	it ends, so a run that takes longer would be written with an expired one."""
+	from shared.db import login
+	from shared.settings import settings
+
+	client.postgrest.auth(token=login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD))
+
+
 def put_image_with(token_source):
 	"""Store an image on the storage server below its data directory, as the processor does for files."""
 	from processor.src.utils.ssh import push_file_to_storage_server
@@ -136,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
 		put_image=put_image_with(lambda: token_box['token']),
 		benchmark=args.benchmark,
 		once=args.once,
+		refresh=sign_in_again,
 	)
 	print(json.dumps(status))
 	return 0
