@@ -118,6 +118,9 @@ def evaluation(db):
 	dataset = create_dataset(db, owner)
 	add_ortho(db, dataset)
 	version = register_version(db, 'dataset_evaluation', 'v1-test')
+	# only an active version's run becomes the dataset's current run (the current-run guard)
+	db.execute("UPDATE audit.check_versions SET is_active=false WHERE check_key='dataset_evaluation'")
+	db.execute('UPDATE audit.check_versions SET is_active=true WHERE id=%s', (version,))
 	return owner, dataset, version
 
 
