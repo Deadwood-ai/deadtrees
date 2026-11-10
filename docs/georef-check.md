@@ -89,12 +89,14 @@ The stage writes everything through `store_georef_check`, in one transaction.
   - the keyless tile URL of each reference, for the audit viewer
   - provider errors
 - The audit check base (`docs/audit-checks.md`), check `georef`:
-  - a check version per rules and matcher version
-    (`georef-rules-v1_romav2.0.1`), registered on first use as `review_all`;
+  - a check version per rules and matcher version, registered on first use as
+    `review_all` and inactive. `georef-rules-v1_romav2.0.1` is the active one
+    (migration `20261110130000`); a later version counts once an operator activates
+    it with `audit.activate_version`;
   - a `done` run per check, every run kept, with the reference evidence and the
     judged ortho (`inputs.ortho_sha256`); queue `backfill` for a check-only task,
     else `upload`;
-  - `audit.current_runs` pointing at it;
+  - `audit.current_runs` pointing at it, for a run of the active version;
   - one dataset-level model assessment, layer `georef`: Good is `ok`, Poor is
     `major`, uncertain is `unsure`. Georef needs no dataset rule.
 - A Good or Poor call becomes the `is_georeferenced` row in

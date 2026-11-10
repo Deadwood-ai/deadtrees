@@ -1,6 +1,7 @@
 """Georeferencing checks: access, the decision invariant and the re-review of disagreeing audits."""
 
 import json
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -76,6 +77,37 @@ def test_each_check_is_an_audit_run_with_one_model_assessment(db):
 		"SELECT verdict::text, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='georef'",
 		(dataset,),
 	).fetchall() == [('unsure', True)]
+
+
+ACTIVATION = (
+	Path(__file__).resolve().parents[3] / 'supabase/migrations/20261110130000_activate_georef_check_version.sql'
+)
+
+
+def test_the_activation_migration_makes_the_existing_version_count(db):
+	dataset = create_dataset(db, create_user(db))
+	db.execute("UPDATE audit.check_versions SET is_active=false WHERE check_key='georef'")
+	write_check(db, dataset, 'poor', 'strong', 22.6)  # registers the version, inactive
+	sql = ACTIVATION.read_text()
+	update = sql[sql.index('update audit.check_versions') :]
+	version = "SELECT mode::text, is_active FROM audit.check_versions WHERE version='georef-rules-v1_romav2.0.1'"
+
+	db.execute(update)
+	assert db.execute(version).fetchall() == [('review_all', True)]
+	# from now on a check of that version is the dataset's current run and goes to review
+	write_check(db, dataset, 'poor', 'strong', 22.6)
+	assert db.execute(
+		"SELECT verdict::text, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='georef'",
+		(dataset,),
+	).fetchall() == [('major', True)]
+
+	# while another version is active it changes nothing
+	db.execute(
+		"UPDATE audit.check_versions SET is_active=false WHERE check_key='georef';"
+		" INSERT INTO audit.check_versions (check_key, version, is_active) VALUES ('georef', 'georef-rules-next_test', true)"
+	)
+	db.execute(update)
+	assert db.execute(version).fetchall() == [('review_all', False)]
 
 
 def audit_georeferencing(db, auditor, dataset, good):
