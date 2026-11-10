@@ -9,7 +9,7 @@ rule, layer `image`.
 Code: `processor/src/dataset_evaluation_v1/`; the audit worker runs it through
 `handler.py` (`worker.HANDLERS['dataset_evaluation']`, see the audit worker section of
 [audit-checks.md](audit-checks.md)). Migration:
-`supabase/migrations/20261110140000_dataset_evaluation_check.sql`.
+`supabase/migrations/20261110160000_dataset_evaluation_check.sql`.
 
 ## What it looks at
 

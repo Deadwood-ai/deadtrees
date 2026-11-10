@@ -25,7 +25,7 @@ grant select, insert on audit.image_hashes to authenticated;
 grant all on audit.image_hashes to service_role;
 grant select on audit.image_hashes to analyst;
 create policy "Auditors and the audit worker read" on audit.image_hashes
-	for select to authenticated using (internal.can_read_audit_checks());
+	for select to authenticated using ((select internal.can_read_audit_checks()));
 create policy analyst_select on audit.image_hashes for select to analyst using (true);
 create policy "Audit worker stores image hashes" on audit.image_hashes
 	for insert to authenticated with check (internal.is_audit_worker());
@@ -186,5 +186,7 @@ grant execute on function audit.store_dataset_evaluation(bigint, jsonb) to authe
 -- The evaluation crops are CLIP tiles. Tile rows are otherwise readable only for
 -- search-ready public datasets, so the worker could not place crops on private or
 -- unfinished ones. It already reads those datasets' COGs; now also their tile rows.
+-- The check runs once per statement (scalar subquery): this table holds every tile of
+-- every dataset, and a per-row call would slow each search down.
 create policy "Audit worker reads tile windows" on public.v2_tile_embeddings
-	for select to authenticated using (internal.is_audit_worker());
+	for select to authenticated using ((select internal.is_audit_worker()));
