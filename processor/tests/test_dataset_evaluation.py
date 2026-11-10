@@ -17,7 +17,7 @@ from processor.src.audit_worker.models import LoginExpired
 from processor.src.dataset_evaluation_v1 import check as check_module
 from processor.src.dataset_evaluation_v1 import handler
 from processor.src.dataset_evaluation_v1.check import evaluate, store_payload
-from processor.src.dataset_evaluation_v1.handler import aoi_key, tile_of
+from processor.src.dataset_evaluation_v1.handler import tile_of
 from processor.src.dataset_evaluation_v1.inputs import Tile, inside, padding, read_inputs
 from processor.src.dataset_evaluation_v1.prompt import AnswerError, build_prompt, parse_answer
 from processor.src.dataset_evaluation_v1.rules import (
@@ -28,6 +28,7 @@ from processor.src.dataset_evaluation_v1.rules import (
 	hamming,
 	phash,
 )
+from processor.src.utils.stored_inputs import aoi_key, read_geometry
 
 SHA = 'b' * 64
 # EPSG:3857 metres near Freiburg (48.0 N): 0.05 m map pixels are about 3.3 cm on the ground
@@ -259,7 +260,7 @@ def test_a_tile_row_reads_as_geojson_or_ewkb():
 	square = shapely_box(7.80, 48.00, 7.81, 48.01)
 	row = {'pixel_x0': 0, 'pixel_y0': 512, 'pixel_x1': 512, 'pixel_y1': 1024}
 	for geometry in ({'type': 'Polygon', 'coordinates': [list(square.exterior.coords)]}, square.wkb_hex):
-		tile = tile_of({**row, 'geometry': geometry})
+		tile = tile_of({**row, 'geometry': read_geometry(geometry)})
 		assert tile.window == (0, 512, 512, 1024)
 		assert tile.centre == pytest.approx((7.805, 48.005))
 

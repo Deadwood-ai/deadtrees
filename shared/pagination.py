@@ -24,3 +24,19 @@ def iter_pages(build_query: Callable[[], object], page_size: int = PAGE_SIZE) ->
 def fetch_all_rows(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> List[Dict]:
 	"""Read every row of a deterministically ordered PostgREST query."""
 	return [row for page in iter_pages(build_query, page_size) for row in page]
+
+
+def iter_pages_after_id(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> Iterator[List[Dict]]:
+	"""Yield every page of a PostgREST query in `id` order, continuing after the last id.
+
+	For reads of many thousand rows: an offset makes the database walk every row before it,
+	a keyset does not. `build_query` must return a fresh query that selects `id`.
+	"""
+	last = None
+	while True:
+		query = build_query() if last is None else build_query().gt('id', last)
+		page = query.order('id').limit(page_size).execute().data or []
+		if not page:
+			return
+		yield page
+		last = page[-1]['id']

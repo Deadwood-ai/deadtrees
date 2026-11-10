@@ -43,9 +43,7 @@ class Crop:
 		return float(self.masks[layer].mean())
 
 
-def render_crop(
-	src: rasterio.DatasetReader, epsg: int, square: tuple, layers: dict[str, Iterable], aoi=None
-) -> Crop:
+def render_crop(src: rasterio.DatasetReader, epsg: int, square: tuple, layers: dict[str, Iterable], aoi=None) -> Crop:
 	"""Warp the COG onto the square's 5 cm grid and rasterise the prediction polygons and AOI (in UTM)."""
 	dst = from_bounds(*square, CROP_PX, CROP_PX)
 	margin = 5.0
@@ -64,11 +62,21 @@ def render_crop(
 	valid = np.zeros((CROP_PX, CROP_PX), 'uint8')
 	for i in range(3):
 		reproject(
-			data[i], rgb[i], src_transform=src_t, src_crs=src.crs, dst_transform=dst, dst_crs=f'EPSG:{epsg}',
+			data[i],
+			rgb[i],
+			src_transform=src_t,
+			src_crs=src.crs,
+			dst_transform=dst,
+			dst_crs=f'EPSG:{epsg}',
 			resampling=Resampling.bilinear,
 		)
 	reproject(
-		valid_src, valid, src_transform=src_t, src_crs=src.crs, dst_transform=dst, dst_crs=f'EPSG:{epsg}',
+		valid_src,
+		valid,
+		src_transform=src_t,
+		src_crs=src.crs,
+		dst_transform=dst,
+		dst_crs=f'EPSG:{epsg}',
 		resampling=Resampling.nearest,
 	)
 	ok = valid > 0
@@ -78,9 +86,7 @@ def render_crop(
 		mask = rasterize(shapes, out_shape=(CROP_PX, CROP_PX), transform=dst) > 0 if shapes else np.zeros_like(ok)
 		masks[layer] = mask & ok
 	in_aoi = rasterize([(aoi, 1)], out_shape=(CROP_PX, CROP_PX), transform=dst) > 0 if aoi is not None else None
-	return Crop(
-		rgb=rgb.transpose(1, 2, 0), valid=ok, masks=masks, mpp=(square[2] - square[0]) / CROP_PX, in_aoi=in_aoi
-	)
+	return Crop(rgb=rgb.transpose(1, 2, 0), valid=ok, masks=masks, mpp=(square[2] - square[0]) / CROP_PX, in_aoi=in_aoi)
 
 
 def outline(mask: np.ndarray) -> np.ndarray:

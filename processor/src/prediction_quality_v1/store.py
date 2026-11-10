@@ -1,8 +1,8 @@
-"""Map a check result onto the audit schema tables (DT-1481, #793: audit.runs, audit.crops, ...).
+"""Map a check result onto the audit schema tables (audit.crops, audit.images, audit.assessments).
 
-Pure functions: they return the rows to insert; the worker owns the connection, the storage
-upload and the run lifecycle. Layer names follow the base tables ('forest_cover'), and every
-model answer becomes one append-only audit.assessments row per crop and layer.
+The row builders are pure; write() stores them for one run. The worker owns the connection, the
+storage upload and the run lifecycle. Layer names follow the base tables ('forest_cover'), and
+every model answer becomes one append-only audit.assessments row per crop and layer.
 """
 
 from __future__ import annotations
@@ -21,19 +21,12 @@ IMAGE_KINDS = (('raw', None), ('deadwood_overlay', 'deadwood'), ('forest_cover_o
 SELECTED_BY = 'pq-picker-v1'
 # Where each row kind goes: client.schema(SCHEMA).table(TABLES[kind]).
 SCHEMA = 'audit'
-TABLES = {'run': 'runs', 'crop': 'crops', 'image': 'images', 'assessment': 'assessments'}
+TABLES = {'crop': 'crops', 'image': 'images', 'assessment': 'assessments'}
 
 
-def run_row(result: CheckResult, ortho_sha256: str, label_ids: dict, judges: dict) -> dict:
+def summary(result: CheckResult) -> dict:
+	"""What the worker finishes the run with."""
 	return {
-		'check_key': CHECK_KEY,
-		'dataset_id': result.dataset_id,
-		'inputs': {
-			'ortho_sha256': ortho_sha256,
-			'label_ids': {LAYER_NAMES[k]: v for k, v in label_ids.items()},
-			'versions': result.versions,
-			'models': judges,
-		},
 		'coverage': {
 			'mode': 'sampled',
 			'tiles_total': result.tiles_total,
@@ -46,7 +39,10 @@ def run_row(result: CheckResult, ortho_sha256: str, label_ids: dict, judges: dic
 			'verdicts': {LAYER_NAMES[k]: v for k, v in result.verdicts.items()},
 			'epsg': result.epsg,
 			'seconds': result.seconds,
+			'versions': result.versions,
+			'failed_calls': sum(len(r.failures) for r in result.crops),
 		},
+		'cost': result.cost,
 	}
 
 
@@ -67,7 +63,6 @@ def crop_rows(result: CheckResult, ortho_sha256: str, footprint) -> list[dict]:
 				'dataset_id': result.dataset_id,
 				'ortho_sha256': ortho_sha256,
 				'crop_sets': list(r.tile.sets),
-				'selected_by': SELECTED_BY,
 				'pixel_x0': x0,
 				'pixel_y0': y0,
 				'pixel_x1': x1,
@@ -180,18 +175,23 @@ def rule_rows(result: CheckResult, label_ids: dict) -> list[dict]:
 	]
 
 
-def image_path(dataset_id: int, ortho_sha256: str, crop_id: int, kind: str, label_id: int | None) -> str:
-	"""Storage path relative to the storage server's data directory."""
+def image_path(dataset_id: int, ortho_sha256: str, crop_id: int, kind: str, label_id: int | None, sha256: str) -> str:
+	"""Storage path relative to the storage server's data directory. The name carries the
+	content, so a later run on the same ortho never overwrites a file an earlier row points at."""
 	label = f'-{label_id}' if label_id else ''
-	return f'audit/{dataset_id}/{ortho_sha256[:16]}/crop-{crop_id}/{kind}{label}.jpg'
+	return f'audit/{CHECK_KEY}/{dataset_id}/{ortho_sha256[:16]}/crop-{crop_id}/{kind}{label}-{sha256[:16]}.jpg'
 
 
-def write(client, run_id: int, result: CheckResult, *, ortho_sha256: str, label_ids: dict, footprint, put_image) -> dict:
-	"""Store one finished run's crops, images, model rows and rule rows.
+def write(
+	client, run_id: int, result: CheckResult, *, ortho_sha256: str, label_ids: dict, footprint, put_image
+) -> dict:
+	"""Store one run's crops, images, model rows and rule rows.
 
-	client: a Supabase client of the audit worker; put_image(path, bytes) stores a file on the
-	storage server. Crops are shared across runs of the same ortho: an existing window only
-	gains new sets. The run's status and the current-run pointer stay with the worker.
+	client: a Supabase client of the audit worker; put_image(path, bytes, dataset_id) stores a
+	file on the storage server. Crops are shared across runs of the same ortho: an existing
+	window only gains new sets, and an image that is already stored is kept. The assessments
+	go last and in one insert, so an attempt that fails before it leaves nothing a retry would
+	double. The run row itself (status, evidence, coverage, cost) is the worker's to finish.
 	"""
 	audit = client.schema(SCHEMA)
 	known = {
@@ -215,25 +215,29 @@ def write(client, run_id: int, result: CheckResult, *, ortho_sha256: str, label_
 		sets = sorted(set(old['crop_sets']) | set(row['crop_sets']))
 		selection = {**row['selection'], **old['selection']}  # sets and selection only grow
 		if sets != sorted(old['crop_sets']) or selection != old['selection']:
-			audit.table(TABLES['crop']).update({'crop_sets': sets, 'selection': selection}).eq('id', old['id']).execute()
-	for row in image_rows(result, label_ids):
+			audit.table(TABLES['crop']).update({'crop_sets': sets, 'selection': selection}).eq(
+				'id', old['id']
+			).execute()
+	images = image_rows(result, label_ids)
+	for row in images:
 		data, crop_id = row.pop('_data'), crop_ids[row.pop('_tile_id')]
 		row.update(
 			crop_id=crop_id,
 			ortho_sha256=ortho_sha256,
-			storage_path=image_path(result.dataset_id, ortho_sha256, crop_id, row['kind'], row['label_id']),
+			storage_path=image_path(
+				result.dataset_id, ortho_sha256, crop_id, row['kind'], row['label_id'], row['sha256']
+			),
 		)
-		put_image(row['storage_path'], data)
+		# Files first, rows second: a stored row always points at an uploaded image.
+		put_image(row['storage_path'], data, result.dataset_id)
+	if images:
 		audit.table(TABLES['image']).upsert(
-			row, on_conflict='dataset_id,ortho_sha256,crop_id,label_id,kind', ignore_duplicates=True
+			images, on_conflict='dataset_id,ortho_sha256,crop_id,label_id,kind', ignore_duplicates=True
 		).execute()
 	rows = []
 	for row in assessment_rows(result, label_ids):
 		row['crop_id'] = crop_ids[row.pop('_tile_id')]
 		rows.append({**row, 'run_id': run_id})
 	rows += [{**row, 'run_id': run_id} for row in rule_rows(result, label_ids)]
-	if rows:
-		audit.table(TABLES['assessment']).insert(rows).execute()
-	run = run_row(result, ortho_sha256, label_ids, {})
-	audit.table(TABLES['run']).update({'evidence': run['evidence'], 'coverage': run['coverage']}).eq('id', run_id).execute()
+	audit.table(TABLES['assessment']).insert(rows).execute()
 	return {'crops': len(crop_ids), 'assessments': len(rows)}

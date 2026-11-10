@@ -40,7 +40,7 @@ _MODE_JSON = {
 	for layer, modes in MODES.items()
 }
 
-PROMPT = f'''Aerial drone image crop, about 51 m by 51 m at about 5 cm per pixel. Image 1 is raw RGB,
+PROMPT = f"""Aerial drone image crop, about 51 m by 51 m at about 5 cm per pixel. Image 1 is raw RGB,
 Image 2 the DEADWOOD prediction (blue fill with outline), Image 3 the FOREST prediction (gold).
 Darkened areas are outside the area of interest; ignore them.
 
@@ -64,7 +64,7 @@ Also give major_likelihood, 0 to 100, that the layer has a major error.
 
 Return only JSON: {{"assessable": true|false,
  "deadwood": {{"errors": ["..."], "modes": {_MODE_JSON['deadwood']}, "verdict": "ok|minor|major", "major_likelihood": n}},
- "forest": {{"errors": ["..."], "modes": {_MODE_JSON['forest']}, "verdict": "ok|minor|major", "major_likelihood": n}}}}'''
+ "forest": {{"errors": ["..."], "modes": {_MODE_JSON['forest']}, "verdict": "ok|minor|major", "major_likelihood": n}}}}"""
 
 Backend = Callable[[str, Sequence[Image.Image]], str]
 

@@ -7,29 +7,21 @@ audit.store_dataset_evaluation. The worker finishes the run with the returned
 evidence, coverage and cost, and points the dataset at it when the version is active.
 """
 
-import hashlib
-import json
 import tempfile
 from pathlib import Path
-
-from shapely import wkb
-from shapely.geometry import shape
 
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
 from shared.models import Cog, Ortho
-from shared.pagination import fetch_all_rows
 from shared.settings import settings
 
 from ..utils.ssh import pull_file_from_storage_server
-from ..utils.stored_inputs import local_cog, select_aoi
+from ..utils.stored_inputs import NO_ORTHO_HASH, aoi_key, local_cog, ortho_sha256, stored_aoi, tile_rows
 from .check import CONFIG, evaluate, store_payload
 from .inputs import Tile, read_inputs
 from .rules import PHASH_METHOD, phash
 
 VERSION = 'v1'
-
-NO_ORTHO_HASH = 'dataset has no ortho with a sha256; run the ortho stage first'
 
 __all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
@@ -41,16 +33,13 @@ def ready(status: dict) -> bool:
 
 def inputs(client, dataset_id: int) -> dict:
 	"""What a run judges: a new ortho or AOI makes a new run (and reopens a review)."""
-	rows = client.table(settings.orthos_table).select('sha256').eq('dataset_id', dataset_id).execute().data
-	if not rows or not rows[0].get('sha256'):
-		raise ValueError(NO_ORTHO_HASH)
-	return identity(rows[0]['sha256'], _aoi(client, dataset_id))
+	return identity(ortho_sha256(client, dataset_id), stored_aoi(client, dataset_id))
 
 
-def identity(ortho_sha256: str, aoi: dict | None) -> dict:
+def identity(sha256: str, aoi: dict | None) -> dict:
 	"""The one shape of a run's inputs. The worker compares it with the stored run to tell
 	whether a dataset was already judged, so the queueing and the run must build it alike."""
-	return {'ortho_sha256': ortho_sha256, 'aoi': aoi_key(aoi)}
+	return {'ortho_sha256': sha256, 'aoi': aoi_key(aoi)}
 
 
 def handle(ctx) -> dict:
@@ -63,7 +52,7 @@ def handle(ctx) -> dict:
 	if not cogs:
 		raise ValueError('dataset has no COG; run the cog stage first')
 	ortho = _ortho(client, dataset_id)
-	aoi = _aoi(client, dataset_id)
+	aoi = stored_aoi(client, dataset_id)
 	with tempfile.TemporaryDirectory(prefix='dataset-evaluation-') as folder:
 		cog_file = local_cog(Cog(**cogs[0]), Path(folder), ctx.token, dataset_id, log)
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
@@ -132,34 +121,16 @@ def handle(ctx) -> dict:
 	}
 
 
-def aoi_key(aoi: dict | None) -> str | None:
-	"""A stable short id of the AOI the run judged."""
-	if not aoi:
-		return None
-	return hashlib.sha256(json.dumps(aoi, sort_keys=True).encode()).hexdigest()[:16]
-
-
 def tile_of(row: dict) -> Tile:
-	"""A v2_tile_embeddings row as a Tile; PostgREST returns the footprint as GeoJSON or EWKB hex."""
-	g = row['geometry']
-	footprint = shape(g) if isinstance(g, dict) else wkb.loads(bytes.fromhex(g))
-	minx, miny, maxx, maxy = footprint.bounds
+	"""A tile row (stored_inputs.tile_rows) as the window and centre the crop picker reads."""
+	minx, miny, maxx, maxy = row['geometry'].bounds
 	return Tile(
 		(row['pixel_x0'], row['pixel_y0'], row['pixel_x1'], row['pixel_y1']), ((minx + maxx) / 2, (miny + maxy) / 2)
 	)
 
 
 def tiles(client, dataset_id: int) -> list[Tile]:
-	"""The dataset's CLIP tiles (none before the embedding stage has run)."""
-	rows = fetch_all_rows(
-		lambda: (
-			client.table(settings.tile_embeddings_table)
-			.select('pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry')
-			.eq('dataset_id', dataset_id)
-			.order('id')
-		)
-	)
-	return [tile_of(r) for r in rows]
+	return [tile_of(r) for r in tile_rows(client, dataset_id)]
 
 
 def _ortho(client, dataset_id: int) -> Ortho:
@@ -167,17 +138,6 @@ def _ortho(client, dataset_id: int) -> Ortho:
 	if not rows or not rows[0].get('sha256'):
 		raise ValueError(NO_ORTHO_HASH)
 	return Ortho(**rows[0])
-
-
-def _aoi(client, dataset_id: int) -> dict | None:
-	aois = (
-		client.table(settings.aois_table)
-		.select('geometry,is_whole_image,source,created_at')
-		.eq('dataset_id', dataset_id)
-		.execute()
-		.data
-	)
-	return select_aoi(aois)
 
 
 def _thumbnail(client, dataset_id: int, folder: Path, token: str) -> bytes | None:

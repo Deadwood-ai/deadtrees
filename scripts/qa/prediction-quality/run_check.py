@@ -1,9 +1,10 @@
 """Run prediction_quality_v1 on given datasets, read-only, and keep every result locally.
 
-Until the audit check tables (DT-1481) and the subscription worker (DT-1482) exist, this is the
-way to run the check end to end: inputs from production through the analyst role (read-only
-transaction), the COG streamed over HTTPS, judges Luna (OpenAI Responses API key) and Haiku
-(Claude Code login). Writes <out>/<dataset>/result.json and the crop images the judges saw.
+The benchmark's way to run the check without the audit worker and without writing anything:
+inputs from production through the analyst role (read-only transaction), the COG streamed over
+HTTPS, judges Luna (OpenAI Responses API key) and Haiku (Claude Code login). Writes
+<out>/<dataset>/result.json and the crop images the judges saw. Production runs go through
+the audit worker (processor/src/prediction_quality_v1/handler.py).
 Run under a memory cap on the processing server (production ODM shares it):
 
   systemd-run --user --scope -p MemoryMax=4G -- python scripts/qa/prediction-quality/run_check.py ...
@@ -46,9 +47,7 @@ WITH pref AS (
 SELECT c.cog_path, (SELECT id FROM pref WHERE layer = 'deadwood') AS deadwood_label_id,
   (SELECT id FROM pref WHERE layer = 'forest_cover') AS forest_label_id,
   (SELECT ST_AsGeoJSON(ST_GeomFromGeoJSON(COALESCE(geometry->'geometry', geometry)))::jsonb FROM v2_aois
-   WHERE dataset_id = %(id)s ORDER BY created_at DESC, id DESC LIMIT 1) AS aoi,
-  (SELECT ST_Area(ST_GeomFromGeoJSON(COALESCE(geometry->'geometry', geometry))::geography) / 1e4 FROM v2_aois
-   WHERE dataset_id = %(id)s ORDER BY created_at DESC, id DESC LIMIT 1) AS hectares
+   WHERE dataset_id = %(id)s ORDER BY created_at DESC, id DESC LIMIT 1) AS aoi
 FROM v2_cogs c WHERE c.dataset_id = %(id)s
 """
 
@@ -78,13 +77,17 @@ def inputs(db, dataset_id):
 		('deadwood', 'v2_deadwood_geometries', 'deadwood_label_id'),
 		('forest', 'v2_forest_cover_geometries', 'forest_label_id'),
 	):
-		geoms[layer] = [
-			shape(r['g'])
-			for r in db.execute(
-				f'SELECT ST_AsGeoJSON(geometry)::jsonb AS g FROM {table} WHERE label_id = %s AND NOT is_deleted',
-				(row[key],),
-			).fetchall()
-		] if row[key] else []
+		geoms[layer] = (
+			[
+				shape(r['g'])
+				for r in db.execute(
+					f'SELECT ST_AsGeoJSON(geometry)::jsonb AS g FROM {table} WHERE label_id = %s AND NOT is_deleted',
+					(row[key],),
+				).fetchall()
+			]
+			if row[key]
+			else []
+		)
 	return row, tiles, geoms
 
 
@@ -104,17 +107,25 @@ def luna_backend(key, effort='medium'):
 			}
 			for im in images
 		]
-		payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'reasoning': {'effort': effort}}
+		payload = {
+			'model': 'gpt-6-luna',
+			'input': [{'role': 'user', 'content': content}],
+			'reasoning': {'effort': effort},
+		}
 		for attempt in range(4):
 			try:
 				req = Request(
-					'https://api.openai.com/v1/responses', data=json.dumps(payload).encode(), method='POST',
+					'https://api.openai.com/v1/responses',
+					data=json.dumps(payload).encode(),
+					method='POST',
 					headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key},
 				)
 				with urlopen(req, timeout=300) as r:
 					raw = json.loads(r.read(2_000_001))
 				return ''.join(
-					c.get('text', '') for item in raw.get('output', []) if item.get('type') == 'message'
+					c.get('text', '')
+					for item in raw.get('output', [])
+					if item.get('type') == 'message'
 					for c in item.get('content', [])
 				)
 			except HTTPError as e:
@@ -131,8 +142,20 @@ def haiku_backend(model='claude-haiku-5-5'):
 			for i, im in enumerate(images):
 				Path(d, f'image{i + 1}.jpg').write_bytes(jpeg_bytes(im))
 			cmd = [
-				'claude', '-p', '--model', model, '--output-format', 'json', '--tools', 'Read', '--allowedTools', 'Read',
-				'--setting-sources', '', '--strict-mcp-config', '--system-prompt',
+				'claude',
+				'-p',
+				'--model',
+				model,
+				'--output-format',
+				'json',
+				'--tools',
+				'Read',
+				'--allowedTools',
+				'Read',
+				'--setting-sources',
+				'',
+				'--strict-mcp-config',
+				'--system-prompt',
 				'You assess aerial image predictions. Use the Read tool only to view the three image files named in '
 				'the request, then answer with the requested JSON only.',
 				'Read image1.jpg, image2.jpg and image3.jpg in this folder; they are Image 1, Image 2 and Image 3.\n\n'
@@ -141,7 +164,7 @@ def haiku_backend(model='claude-haiku-5-5'):
 			done = subprocess.run(cmd, cwd=d, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
 			result = json.loads(done.stdout)  # stdout only: newer model names warn on stderr
 			if done.returncode or result.get('is_error'):
-				raise RuntimeError(f"Haiku failed: {str(result.get('result'))[:200]}")
+				raise RuntimeError(f'Haiku failed: {str(result.get("result"))[:200]}')
 			return result['result']
 
 	return call
@@ -175,7 +198,12 @@ def save(out, result, label_ids):
 						'judge': a.judge,
 						'assessable': a.assessable,
 						'layers': {
-							k: {'verdict': v.verdict, 'major_likelihood': v.major_likelihood, 'modes': v.modes, 'errors': v.errors}
+							k: {
+								'verdict': v.verdict,
+								'major_likelihood': v.major_likelihood,
+								'modes': v.modes,
+								'errors': v.errors,
+							}
 							for k, v in a.layers.items()
 						},
 					}
@@ -231,7 +259,6 @@ if __name__ == '__main__':
 			shape(row['aoi']),
 			geoms['deadwood'],
 			geoms['forest'],
-			row['hectares'],
 			backends,
 			workers=a.workers,
 		)

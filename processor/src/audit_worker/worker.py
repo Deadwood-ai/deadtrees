@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 # check key -> handler module; each check's PR adds its line
 HANDLERS: dict[str, str] = {
 	'dataset_evaluation': 'processor.src.dataset_evaluation_v1.handler',
+	'prediction_quality': 'processor.src.prediction_quality_v1.handler',
 }
 STATUS_FILE = Path(
 	os.environ.get('DEADTREES_AUDIT_WORKER_STATUS', Path.home() / '.local/state/deadtrees-audit-worker/status.json')

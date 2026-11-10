@@ -1,9 +1,9 @@
 """Run the prediction quality check on one dataset.
 
-Inputs are fetched by the caller (worker or benchmark): the COG path or URL, the dataset's CLIP
-tiles, the AOI and the prediction polygons (WGS84 shapely geometries), and the judges. The check
-picks the two crop sets, renders each crop once, asks every judge in parallel, and returns every
-answer plus the per-layer verdicts of the current rule. Nothing is written here.
+Inputs are fetched by the caller (worker handler or benchmark): the COG path or URL, the
+dataset's CLIP tiles, the AOI and the prediction polygons (WGS84 shapely geometries), and the
+judges. The check picks the two crop sets, renders each crop once, asks every judge in parallel,
+and returns every answer plus the per-layer verdicts of the current rule. Nothing is written here.
 """
 
 from __future__ import annotations
@@ -17,10 +17,11 @@ import rasterio
 from pyproj import Transformer
 from shapely.geometry import box
 
+from ..audit_worker.models import LimitReached, LoginExpired
 from . import judge as judge_mod
 from . import rule as rule_mod
 from .render import Crop, judge_images, render_crop
-from .tiles import Tile, attach_cover, crop_count, exclude_set, project, training_set, utm_epsg
+from .tiles import TILE_M, Tile, attach_cover, crop_count, exclude_set, project, training_set, utm_epsg
 
 CHECK_VERSION = 'prediction_quality_v1'
 
@@ -42,6 +43,7 @@ class CheckResult:
 	verdicts: dict  # layer -> rule.dataset_verdict(...)
 	tiles_total: int
 	seconds: float
+	cost: dict = field(default_factory=dict)  # judge -> {'seconds', 'calls', 'cost_usd'}
 	versions: dict = field(
 		default_factory=lambda: {
 			'check': CHECK_VERSION,
@@ -67,22 +69,25 @@ def run_prediction_quality(
 	aoi_4326,
 	deadwood_4326: Sequence,
 	forest_4326: Sequence,
-	hectares: float,
 	judges: dict,
 	workers: int = 4,
 ) -> CheckResult:
+	"""aoi_4326 None judges every tile: a dataset without an AOI is predicted as a whole."""
 	start = time.monotonic()
-	c = aoi_4326.centroid
+	c = aoi_4326.centroid if aoi_4326 is not None else box(*tiles[0].bbox_4326).centroid
 	epsg = utm_epsg(c.x, c.y)
 	to_utm = Transformer.from_crs(4326, epsg, always_xy=True)
-	aoi = project(aoi_4326, to_utm).buffer(0)
+	aoi = project(aoi_4326, to_utm).buffer(0) if aoi_4326 is not None else None
 	layers_utm = {
 		'deadwood': [project(g, to_utm) for g in deadwood_4326],
 		'forest': [project(g, to_utm) for g in forest_4326],
 	}
 	attach_cover(tiles, epsg, deadwood_4326, forest_4326)
 	# Only tiles whose square lies inside the AOI judge the prediction there.
-	inside = [t for t in tiles if box(*t.square_utm).intersection(aoi).area >= 0.9 * box(*t.square_utm).area]
+	inside = [
+		t for t in tiles if aoi is None or box(*t.square_utm).intersection(aoi).area >= 0.9 * box(*t.square_utm).area
+	]
+	hectares = (aoi.area if aoi is not None else len(inside) * TILE_M**2) / 1e4
 	results = [CropResult(tile=t) for t in pick(inside, hectares, dataset_id)]
 
 	with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='60'), rasterio.open(cog) as src:
@@ -92,18 +97,27 @@ def run_prediction_quality(
 
 	def one(task):
 		r, name, backend = task
+		asked = time.monotonic()
 		try:
-			return r, name, judge_mod.ask(name, backend, judge_images(r.crop)), None
+			answer, error = judge_mod.ask(name, backend, judge_images(r.crop)), None
+		except (LoginExpired, LimitReached):
+			raise  # the worker pauses and runs the dataset again later
 		except Exception as e:  # one judge failing on one crop does not stop the check
-			return r, name, None, f'{type(e).__name__}: {str(e)[:200]}'
+			answer, error = None, f'{type(e).__name__}: {str(e)[:200]}'
+		return r, name, answer, error, time.monotonic() - asked
 
 	tasks = [(r, name, backend) for r in results for name, backend in judges.items()]
+	cost = {name: {'seconds': 0.0, 'calls': 0, 'cost_usd': None} for name in judges}
 	with ThreadPoolExecutor(max(1, workers)) as pool:
-		for r, name, answer, error in pool.map(one, tasks):
+		for r, name, answer, error, seconds in pool.map(one, tasks):
+			cost[name]['seconds'] = round(cost[name]['seconds'] + seconds, 1)
+			cost[name]['calls'] += 1
 			if answer is not None:
 				r.answers.append(answer)
 			else:
 				r.failures[name] = error
+	if tasks and not any(r.answers for r in results):
+		raise RuntimeError(f'no judge answered: {next(iter(results[0].failures.values()))}')
 	for r in results:
 		r.combined = {layer: judge_mod.combined(r.answers, layer) for layer in judge_mod.LAYERS}
 
@@ -121,4 +135,5 @@ def run_prediction_quality(
 		verdicts=verdicts,
 		tiles_total=len(inside),
 		seconds=round(time.monotonic() - start, 1),
+		cost=cost,
 	)

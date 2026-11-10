@@ -358,8 +358,12 @@ def get_model_preferences(token: Optional[str] = None) -> Dict[LabelDataEnum, Di
 	Label data types with no preference row use the legacy model defaults.
 	"""
 	with use_client(token) as client:
-		response = client.table(settings.model_preferences_table).select('label_data,model_config').execute()
+		return read_model_preferences(client)
 
+
+def read_model_preferences(client) -> Dict[LabelDataEnum, Dict[str, Any]]:
+	"""get_model_preferences on a client the caller already holds."""
+	response = client.table(settings.model_preferences_table).select('label_data,model_config').execute()
 	preferences = {label_data: dict(config) for label_data, config in DEFAULT_MODEL_PREFERENCES.items()}
 	preferences.update({LabelDataEnum(row['label_data']): row['model_config'] for row in (response.data or [])})
 	return preferences
