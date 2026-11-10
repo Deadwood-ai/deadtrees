@@ -11,7 +11,10 @@ import type {
   IAuditAssessment,
   IAuditCheckEvidence,
   IAuditChecks,
+  IAuditCrop,
+  IAuditImage,
   IAuditQueueRow,
+  IAuditRun,
 } from "../types/auditChecks";
 import type { IGeorefCheck } from "../types/georefCheck";
 import { summarizeGeorefCheck } from "./georefCheck";
@@ -349,6 +352,41 @@ export function deriveDecision(values: Partial<AuditFormValues>, evaluation: Aud
   const open = missing.filter(([value]) => value === undefined || value === null).map(([, name]) => name);
   if (because.length) return { disposition: "fixable_issues", because, open };
   return { disposition: open.length ? null : "no_issues", because: [], open };
+}
+
+/** The crop sets each check picks (audit.crops.crop_sets). */
+const CHECK_CROP_SETS: Partial<Record<AuditCheckKey, string[]>> = {
+  dataset_evaluation: ["evaluation"],
+  prediction_quality: ["exclude", "training"],
+};
+
+/** What one current run judged, picked from the dataset's rows of every check and run.
+ * - Crops: those the run's rows name, and its own sets' crops of the ortho it judged (the
+ *   dataset evaluation judges its crops in one dataset-level answer).
+ * - Images: of those crops and that ortho. A crop keeps the overlays of earlier predictions,
+ *   so overlays are limited to the predictions the run judged. */
+export function runEvidence(
+  run: IAuditRun,
+  dataset: { automated: IAuditAssessment[]; queue: IAuditQueueRow[]; crops: IAuditCrop[]; images: IAuditImage[] },
+): IAuditCheckEvidence {
+  const automated = dataset.automated.filter((a) => a.check_key === run.check_key);
+  const ortho = run.inputs.ortho_sha256;
+  const named = new Set(automated.map((a) => a.crop_id).filter((id): id is number => id !== null));
+  const labels = new Set(automated.map((a) => a.label_id).filter((id): id is number => id !== null));
+  const sets = CHECK_CROP_SETS[run.check_key] ?? [];
+  const crops = dataset.crops.filter((c) => named.has(c.id) || (c.ortho_sha256 === ortho && c.crop_sets.some((set) => sets.includes(set))));
+  const cropIds = new Set(crops.map((c) => c.id));
+  return {
+    run,
+    automated,
+    queue: dataset.queue.filter((q) => q.check_key === run.check_key),
+    crops,
+    images: dataset.images.filter(
+      (i) =>
+        (i.crop_id === null ? i.ortho_sha256 === ortho : cropIds.has(i.crop_id)) &&
+        (i.label_id === null || labels.size === 0 || labels.has(i.label_id)),
+    ),
+  };
 }
 
 const CROP_SET_ORDER = ["exclude", "evaluation", "training", "benchmark"];

@@ -13,6 +13,7 @@ import {
   myAnswer,
   orderedCrops,
   othersAnswers,
+  runEvidence,
   sectionOfField,
   sectionStatus,
   stepCrop,
@@ -211,7 +212,48 @@ describe("deriveDecision", () => {
 });
 
 describe("crops", () => {
-  const crop = (id: number, sets: string[]) => ({ id, crop_sets: sets, geometry: { type: "Polygon" as const, coordinates: [] } });
+  const crop = (id: number, sets: string[], ortho = "a") => ({
+    id,
+    ortho_sha256: ortho,
+    crop_sets: sets,
+    geometry: { type: "Polygon" as const, coordinates: [] },
+  });
+  const image = (id: number, cropId: number | null, kind: "raw" | "deadwood_overlay" | "overview", labelId: number | null = null, ortho = "a") => ({
+    id,
+    ortho_sha256: ortho,
+    crop_id: cropId,
+    label_id: labelId,
+    kind,
+    storage_path: `audit/${id}.jpg`,
+    width: 1024,
+    height: 1024,
+  });
+
+  it("picks what a run judged from the dataset's rows", () => {
+    const run = { id: 20, check_key: "prediction_quality" as const, inputs: { ortho_sha256: "a" } };
+    const judged = runEvidence(run, {
+      automated: [
+        row({ check_key: "prediction_quality", run_id: 20, crop_id: 1, layer: "deadwood", label_id: 52 }),
+        row({ check_key: "georef", run_id: 10 }),
+      ],
+      queue: [queue({ check_key: "prediction_quality", layer: "deadwood", run_id: 20 }), queue({})],
+      // crop 1 is named by a row, crop 2 is in the check's set, crop 3 is another check's, crop 4 another ortho's
+      crops: [crop(1, ["benchmark"]), crop(2, ["exclude"]), crop(3, ["evaluation"]), crop(4, ["exclude"], "b")],
+      images: [
+        image(1, 1, "raw"),
+        image(2, 1, "deadwood_overlay", 52),
+        // the overlay of an earlier prediction of the same crop
+        image(3, 1, "deadwood_overlay", 41),
+        image(4, 3, "raw"),
+        image(5, null, "overview"),
+        image(6, null, "overview", null, "b"),
+      ],
+    });
+    expect(judged.automated).toHaveLength(1);
+    expect(judged.queue).toHaveLength(1);
+    expect(judged.crops.map((c) => c.id)).toEqual([1, 2]);
+    expect(judged.images.map((i) => i.id)).toEqual([1, 2, 5]);
+  });
 
   it("numbers the exclude set first", () => {
     const ordered = orderedCrops({ crops: [crop(5, ["training"]), crop(9, ["exclude"]), crop(2, ["training", "exclude"])] });

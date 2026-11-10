@@ -47,6 +47,8 @@ export interface IAuditRun {
 
 export interface IAuditCrop {
   id: number;
+  /** identifies the ortho version the crop was cut from */
+  ortho_sha256: string;
   crop_sets: string[];
   geometry: GeoJSON.Polygon;
 }
@@ -55,7 +57,10 @@ export type AuditImageKind = "raw" | "deadwood_overlay" | "forest_cover_overlay"
 
 export interface IAuditImage {
   id: number;
+  ortho_sha256: string;
   crop_id: number | null;
+  /** the prediction an overlay shows; null for raw crops, overviews and thumbnails */
+  label_id: number | null;
   kind: AuditImageKind;
   storage_path: string;
   width: number;

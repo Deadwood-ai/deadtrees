@@ -4,9 +4,8 @@ import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { fetchAuditImages } from "../api/auditImages";
 import { freshUntilExpiry, refreshBeforeExpiry } from "../utils/signedFilesGrant";
-import { mergeAnswers } from "../utils/auditChecks";
+import { mergeAnswers, runEvidence } from "../utils/auditChecks";
 import type {
-  AuditCheckKey,
   IAuditAnswerInput,
   IAuditAssessment,
   IAuditChecks,
@@ -25,12 +24,6 @@ export const SCHEMA_NOT_EXPOSED = "PGRST106";
 const ASSESSMENT_COLUMNS =
   "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, reason_code, reason_text, details";
 export const QUEUE_COLUMNS = "dataset_id, check_key, layer, run_id, verdict, reason";
-
-/** The crop sets each check picks (audit.crops.crop_sets). */
-const CHECK_CROP_SETS: Partial<Record<AuditCheckKey, string[]>> = {
-  dataset_evaluation: ["evaluation"],
-  prediction_quality: ["exclude", "training"],
-};
 
 export const auditChecksKey = (datasetId: number | undefined) => ["audit-checks", datasetId];
 
@@ -56,31 +49,16 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
       .eq("assessor_kind", "person")
       .is("imported_from", null),
     audit().from("crops").select("id, crop_sets, geometry, ortho_sha256").eq("dataset_id", datasetId),
-    audit().from("images").select("id, crop_id, kind, storage_path, width, height, ortho_sha256").eq("dataset_id", datasetId),
+    audit().from("images").select("id, crop_id, label_id, kind, storage_path, width, height, ortho_sha256").eq("dataset_id", datasetId),
   ]);
-  const automatedRows = unwrap(automated) as IAuditAssessment[];
-  const cropRows = unwrap(crops) as (IAuditCrop & { ortho_sha256: string })[];
-  const imageRows = unwrap(images) as (IAuditImage & { ortho_sha256: string })[];
-  const queueRows = unwrap(queue) as IAuditQueueRow[];
+  const dataset = {
+    automated: unwrap(automated) as IAuditAssessment[],
+    queue: unwrap(queue) as IAuditQueueRow[],
+    crops: unwrap(crops) as IAuditCrop[],
+    images: unwrap(images) as IAuditImage[],
+  };
   const checks: IAuditChecks["checks"] = {};
-  for (const run of unwrap(runs) as IAuditRun[]) {
-    const rows = automatedRows.filter((a) => a.check_key === run.check_key);
-    const ortho = run.inputs.ortho_sha256;
-    // the crops the run judged: those its rows name, and its own set's crops of the same ortho
-    // (the dataset evaluation judges its crops in one dataset-level answer)
-    const judged = new Set(rows.map((a) => a.crop_id).filter((id): id is number => id !== null));
-    const runCrops = cropRows.filter(
-      (c) => judged.has(c.id) || (c.ortho_sha256 === ortho && c.crop_sets.some((set) => CHECK_CROP_SETS[run.check_key]?.includes(set))),
-    );
-    const cropIds = new Set(runCrops.map((c) => c.id));
-    checks[run.check_key] = {
-      run,
-      automated: rows,
-      queue: queueRows.filter((q) => q.check_key === run.check_key),
-      crops: runCrops,
-      images: imageRows.filter((i) => (i.crop_id === null ? i.ortho_sha256 === ortho : cropIds.has(i.crop_id))),
-    };
-  }
+  for (const run of unwrap(runs) as IAuditRun[]) checks[run.check_key] = runEvidence(run, dataset);
   return { available: true, checks, people: await withEmails(unwrap(people) as IAuditAssessment[]) };
 }
 
