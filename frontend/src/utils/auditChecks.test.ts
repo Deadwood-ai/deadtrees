@@ -10,6 +10,7 @@ import {
   myAnswer,
   orderedCrops,
   othersAnswers,
+  sectionOfField,
   sectionStatus,
   wrongVerdict,
 } from "./auditChecks";
@@ -202,5 +203,19 @@ describe("independent reviews", () => {
   it("still needs you after another reviewer answered", () => {
     const answeredByOthers = evidence({ queue: [queue({ needs_review: false, reviewed: true })] });
     expect(sectionStatus(auditSection("georef"), answeredByOthers, false).needsYou).toBe(true);
+  });
+});
+
+describe("section definitions", () => {
+  it("lets a reviewer pick any verdict where a check has three", () => {
+    expect(auditSection("evaluation").verdicts).toEqual(["ok", "minor", "major"]);
+    expect(auditSection("georef").verdicts).toEqual(["ok", "major"]);
+  });
+
+  it("finds the section that holds a saved-audit field", () => {
+    expect(sectionOfField("has_cog_issue")).toBe("evaluation");
+    expect(sectionOfField("deadwood_quality")).toBe("prediction");
+    expect(sectionOfField("has_valid_phenology")).toBe("phenology");
+    expect(sectionOfField("final_assessment")).toBeNull();
   });
 });

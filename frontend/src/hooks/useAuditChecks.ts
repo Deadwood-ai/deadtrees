@@ -97,6 +97,8 @@ export function useAuditChecks(datasetId: number | undefined) {
     queryKey: auditChecksKey(datasetId),
     queryFn: () => loadAuditChecks(datasetId!),
     enabled: !!datasetId && !!user?.id && canAudit,
+    // the audit form waits for this before it prefills: fail fast and let the page offer a retry
+    retry: false,
   });
 }
 

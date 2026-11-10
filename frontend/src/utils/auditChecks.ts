@@ -28,6 +28,10 @@ export interface IAuditSectionDef {
   mapMode: AuditMapMode;
   /** the fixed "Check wrong" reasons; "other" always comes last */
   reasons: IAuditReason[];
+  /** the verdicts a reviewer can give. Two: "Check wrong" flips the call. Three: the reviewer picks. */
+  verdicts: AuditVerdict[];
+  /** the saved-audit fields the section holds; a failed save opens the section of the first one missing */
+  fields: (keyof AuditFormValues)[];
 }
 
 const OTHER: IAuditReason = { code: "other", label: "Other" };
@@ -45,8 +49,10 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
       { code: "image_facts_wrong", label: "Image facts wrong" },
       OTHER,
     ],
+    verdicts: ["ok", "minor", "major"],
+    fields: ["has_cog_issue", "has_thumbnail_issue"],
   },
-  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], mapMode: "default", reasons: [] },
+  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], mapMode: "default", reasons: [], verdicts: [], fields: [] },
   {
     id: "georef",
     title: "Georeferencing",
@@ -59,6 +65,8 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
       { code: "no_real_match", label: "No real match" },
       OTHER,
     ],
+    verdicts: ["ok", "major"],
+    fields: ["is_georeferenced"],
   },
   {
     id: "date",
@@ -71,8 +79,19 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
       { code: "reported_date_right", label: "Reported date is right" },
       OTHER,
     ],
+    verdicts: ["ok", "major"],
+    fields: ["has_valid_acquisition_date", "accept_suggested_acquisition_date"],
   },
-  { id: "phenology", title: "Phenology", checkKey: null, layers: [], mapMode: "default", reasons: [] },
+  {
+    id: "phenology",
+    title: "Phenology",
+    checkKey: null,
+    layers: [],
+    mapMode: "default",
+    reasons: [],
+    verdicts: [],
+    fields: ["has_valid_phenology"],
+  },
   {
     id: "prediction",
     title: "Prediction quality",
@@ -85,10 +104,16 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
       { code: "crops_not_representative", label: "Crops not representative" },
       OTHER,
     ],
+    verdicts: ["ok", "minor", "major"],
+    fields: ["deadwood_quality", "forest_cover_quality"],
   },
 ];
 
 export const auditSection = (id: AuditSectionId) => AUDIT_SECTIONS.find((s) => s.id === id)!;
+
+/** The section that holds a saved-audit field, if any (the final assessment sits above the sections). */
+export const sectionOfField = (field: string): AuditSectionId | null =>
+  AUDIT_SECTIONS.find((s) => (s.fields as string[]).includes(field))?.id ?? null;
 
 const VERDICT_LABELS: Record<AuditCheckKey, Record<AuditVerdict, string>> = {
   dataset_evaluation: { ok: "Keep", minor: "Keep, fix", major: "Exclude", unsure: "Unsure" },

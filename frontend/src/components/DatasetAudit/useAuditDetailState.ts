@@ -265,6 +265,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		const answered = Object.fromEntries(
 			Object.entries(answeredFormValues(auditChecks, user?.id)).filter(([field]) => saved[field] === null || saved[field] === undefined),
 		);
+		// a slow load must not overwrite what the auditor already set by hand
 		form.setFieldsValue({ ...suggested, ...answered });
 		setPrefilledFields(fields.filter((field) => !(field in answered)));
 	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, auditChecks, auditChecksQuery.isLoading, user?.id, form]);
@@ -479,6 +480,8 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		auditSuggestions,
 		auditReviewItems,
 		auditChecks,
+		auditChecksFailed: auditChecksQuery.isError,
+		retryAuditChecks: auditChecksQuery.refetch,
 		prefilledFields,
 
 		// Flags

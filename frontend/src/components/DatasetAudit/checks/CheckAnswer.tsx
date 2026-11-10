@@ -20,8 +20,6 @@ interface CheckAnswerProps {
 	layer: AuditLayer;
 	evidence: IAuditCheckEvidence;
 	people: IAuditAssessment[];
-	/** the verdicts a reviewer can give; two-way checks flip on "Check wrong" */
-	choices?: AuditVerdict[];
 	/** no audit lease on this page: answers cannot be stored */
 	disabled: boolean;
 }
@@ -31,7 +29,7 @@ const chip = (on: boolean) =>
 
 /** Agree with a check, or mark it wrong with a fixed reason and a note. Every answer is a
  * new person row on the current run; other reviewers' answers stay hidden until you answer. */
-export default function CheckAnswer({ datasetId, section, layer, evidence, people, choices = ["ok", "major"], disabled }: CheckAnswerProps) {
+export default function CheckAnswer({ datasetId, section, layer, evidence, people, disabled }: CheckAnswerProps) {
 	const form = Form.useFormInstance();
 	const { user } = useAuth();
 	const { mutateAsync: save, isPending } = useSaveAuditAnswer();
@@ -51,6 +49,7 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 	const others = othersAnswers(people, user?.id, runId, target);
 	const decided = verdict !== null && verdict !== "unsure";
 	const flipped = decided ? wrongVerdict(verdict) : null;
+	const choices = section.verdicts;
 	const twoWay = choices.length === 2;
 	const wrongTo = twoWay ? flipped : own;
 	const label = (v: AuditVerdict) => verdictLabel(checkKey, v);

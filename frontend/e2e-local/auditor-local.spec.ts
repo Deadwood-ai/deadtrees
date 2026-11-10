@@ -781,6 +781,31 @@ test.describe("auditor local e2e", () => {
     await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
   });
 
+  test("saving with a missing answer opens the section that holds it", async ({ page }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+    await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com|lgl-bw\.de/, (route) => route.fulfill({ status: 204 }));
+
+    await page.goto(`/dataset-audit/${completeDataset.id}`);
+    await dismissCookieBanner(page);
+    await expect(page.getByTestId("audit-decision")).toBeVisible({ timeout: 20_000 });
+
+    // "Ready" can only be saved with an AOI
+    await expect(page.locator('[data-testid="dataset-audit-map"] .ol-viewport')).toBeVisible({ timeout: 20_000 });
+    await drawAuditAoi(page);
+    await page.getByRole("button", { name: /^save Save AOI$/i }).click();
+    await expect(page.getByText("Unsaved AOI edits")).toBeHidden();
+
+    // the AOI section is open and the others closed; "Ready" needs the COG answer inside the first one
+    const evaluation = page.getByRole("button", { name: /^1\. Dataset evaluation/ });
+    await expect(evaluation).toHaveAttribute("aria-expanded", "false");
+    await page.getByTestId("audit-decision").locator("label").filter({ hasText: "Ready" }).click();
+    await page.getByRole("button", { name: /^save Save$/i }).click();
+
+    await expect(evaluation).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("audit-cog").getByText("Please assess COG quality")).toBeVisible();
+    expect(savedAuditPayloads).toHaveLength(0);
+  });
+
   test("direct audit detail links retain queue navigation context", async ({
     page,
   }) => {

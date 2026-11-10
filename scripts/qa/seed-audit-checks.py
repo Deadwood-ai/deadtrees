@@ -94,6 +94,11 @@ metadata = {'references': {
 	'esri': {'group': 'esri', 'zoom': 19, 'capture_date': None,
 	         'viewer': {'kind': 'xyz', 'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', 'max_zoom': 19, 'attribution': 'Esri'}},
 }}
+# The current-run pointer only follows an active version: register and activate it first.
+psql("""
+insert into audit.check_versions (check_key, version, config, is_active)
+values ('georef', 'georef-rules-v2_romav2.0.1', '{"rules_version": "georef-rules-v2", "model_version": "romav2.0.1"}', true)
+on conflict (check_key, version) do update set is_active = true""")
 psql(f"""
 insert into public.v2_georef_checks (dataset_id, model_version, rules_version, decision, evidence_level, reason, p90_m,
 	evidence_groups, support, edge_support, used_aoi, reference_evidence, reference_errors, metadata)

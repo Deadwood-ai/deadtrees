@@ -18,6 +18,7 @@ import { AcquisitionDateCard } from "../AcquisitionDateCard";
 import AuditAOICard from "../AuditAOICard";
 import { COGQualityCard, OrthoFilePanel, PhenologyCard, PredictionQualityCard, ThumbnailCard } from "../AuditStepCards";
 import { GeoreferencingCard } from "../GeoreferencingCard";
+import { InlineLoadError } from "../../SectionStates";
 import AuditSection from "./AuditSection";
 import CheckAnswer from "./CheckAnswer";
 import CheckSummary from "./CheckSummary";
@@ -28,6 +29,9 @@ import type { IAuditCheckView } from "./auditCheckView";
 interface AuditSectionsProps {
 	datasetId: number;
 	checks: IAuditChecks | undefined;
+	/** the check results failed to load: say so instead of showing "Not run yet" */
+	checksFailed: boolean;
+	onRetryChecks: () => void;
 	/** the existing evidence panels, each section's body */
 	panels: {
 		georef: ComponentProps<typeof GeoreferencingCard>;
@@ -50,7 +54,7 @@ const TONES = { success: "ok", error: "bad", warning: "warn" } as const;
 
 /** The audit sidebar: the derived decision, user reports and the six checks in order.
  * Opening a section puts the map into that check's mode. */
-export default function AuditSections({ datasetId, checks, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
+export default function AuditSections({ datasetId, checks, checksFailed, onRetryChecks, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
 	const { user } = useAuth();
 	const form = Form.useFormInstance<AuditFormValues>();
 	const phenology = Form.useWatch("has_valid_phenology", { form, preserve: true });
@@ -109,7 +113,6 @@ export default function AuditSections({ datasetId, checks, panels, hasAOI, userR
 							layer={layer}
 							evidence={evidence}
 							people={people}
-							choices={s.id === "prediction" ? ["ok", "minor", "major"] : undefined}
 							disabled={disabled}
 						/>
 					</div>
@@ -175,6 +178,11 @@ export default function AuditSections({ datasetId, checks, panels, hasAOI, userR
 				needsYou={Object.values(statuses).filter((s) => s.needsYou).length}
 			/>
 			{userReports}
+			{checksFailed && (
+				<div className="mb-2">
+					<InlineLoadError message="The automated check results couldn’t load." onRetry={onRetryChecks} />
+				</div>
+			)}
 			{checks && !checks.available && (
 				<div className="mb-2 rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-700">
 					The automated check results can’t be read here yet. Answer with the saved audit fields in each section.

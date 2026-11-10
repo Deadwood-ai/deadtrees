@@ -19,7 +19,7 @@ import { UserFlagsCard } from "./AuditStepCards";
 import { AuditReviewNotice } from "./AuditReviewNotice";
 import AuditSections from "./checks/AuditSections";
 import { INITIAL_CHECK_VIEW, type IAuditCheckView } from "./checks/auditCheckView";
-import { AUDIT_SECTIONS, auditSection, type AuditSectionId } from "../../utils/auditChecks";
+import { AUDIT_SECTIONS, auditSection, sectionOfField, type AuditSectionId } from "../../utils/auditChecks";
 import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 import { MAP_AUDIT_SIDEBAR_WIDTH_CLASS, MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
@@ -95,6 +95,8 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		auditSuggestions,
 		auditReviewItems,
 		auditChecks,
+		auditChecksFailed,
+		retryAuditChecks,
 		prefilledFields,
 		updateFlagStatus,
 		isUpdatingFlag,
@@ -327,6 +329,12 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						form={form}
 						layout="vertical"
 						onFinish={handleSubmit}
+						onFinishFailed={({ errorFields }) => {
+							// closed sections hide their fields: open the first one with a missing answer
+							const missing = errorFields.map((f) => sectionOfField(String(f.name[0]))).find((id) => id !== null);
+							if (missing) updateCheckView({ section: missing });
+							message.error(errorFields[0]?.errors[0] ?? "Some answers are missing");
+						}}
 						disabled={isLoading || !!auditLockLostMessage}
 						size="small"
 						validateTrigger={["onChange", "onBlur"]}
@@ -336,6 +344,8 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						<AuditSections
 							datasetId={dataset.id}
 							checks={auditChecks}
+							checksFailed={auditChecksFailed}
+							onRetryChecks={() => void retryAuditChecks()}
 							hasAOI={hasAOI}
 							view={checkView}
 							setView={updateCheckView}
