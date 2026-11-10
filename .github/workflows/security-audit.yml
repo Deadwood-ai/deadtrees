@@ -91,8 +91,24 @@ jobs:
       - name: Scan image OS packages
         if: ${{ github.event_name != 'pull_request' }}
         run: |
+          # The runtime-os stage runs apt-get against the Ubuntu mirrors, which
+          # sometimes fail at night (exit 100). Try the build twice and show the
+          # tail of the build log when it still fails.
+          build_os() {
+            local name="$1" log="$RUNNER_TEMP/build-$1.log"
+            for attempt in 1 2; do
+              if docker build --progress=plain --target runtime-os -t "audit-$name:os" \
+                -f "$name/Dockerfile" . > "$log" 2>&1; then
+                return 0
+              fi
+              echo "::warning::$name runtime-os build failed (attempt $attempt); last lines:"
+              tail -n 40 "$log"
+              [ "$attempt" = 1 ] && sleep 60
+            done
+            return 1
+          }
           for name in api processor; do
-            if docker build --quiet --target runtime-os -t "audit-$name:os" -f "$name/Dockerfile" . \
+            if build_os "$name" \
               && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$RESULTS:/out" \
                 "$TRIVY_IMAGE" image --quiet --scanners vuln --pkg-types os --severity HIGH,CRITICAL \
                 --format json --output "/out/trivy-$name-image.json" "audit-$name:os"; then
