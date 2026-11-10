@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import os
 import tempfile
 import time
@@ -27,6 +28,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import models, runs
+
+log = logging.getLogger(__name__)
 
 # check key -> handler module; each check's PR adds its line
 HANDLERS: dict[str, str] = {
@@ -188,6 +191,24 @@ def tick(*, client, handlers: dict, put_image, benchmark: bool = False, token=''
 	)
 
 
+def judged_inputs(handler, client, dataset_ids: list[int]) -> tuple[list[int], dict | None]:
+	"""What each dataset's run would judge (handler.inputs), and the datasets it could be read for.
+
+	A dataset whose inputs cannot be read yet (a ValueError: no ortho hash, say) is left out
+	and logged. One such dataset must not stop the worker or block the datasets after it.
+	"""
+	evidence = getattr(handler, 'inputs', None)
+	if not evidence:
+		return dataset_ids, None
+	inputs = {}
+	for dataset_id in dataset_ids:
+		try:
+			inputs[dataset_id] = evidence(client, dataset_id)
+		except ValueError as exc:
+			log.warning('Audit worker leaves dataset %s out: %s', dataset_id, exc)
+	return list(inputs), inputs
+
+
 def enqueue_ready(client, handlers: dict, since: str, until: str, done=lambda at: None) -> dict[str, int]:
 	"""Upload-queue runs of each active version for datasets that finished processing in [since, until).
 
@@ -201,8 +222,7 @@ def enqueue_ready(client, handlers: dict, since: str, until: str, done=lambda at
 			handler = handlers[check]
 			ready = getattr(handler, 'ready', default_ready)
 			ids = [s['dataset_id'] for s in statuses if ready(s)]
-			evidence = getattr(handler, 'inputs', None)
-			inputs = {i: evidence(client, i) for i in ids} if evidence else None
+			ids, inputs = judged_inputs(handler, client, ids)
 			added[check] += len(runs.enqueue(client, version_row, ids, 'upload', inputs=inputs))
 		done(statuses[-1]['updated_at'])
 	return added

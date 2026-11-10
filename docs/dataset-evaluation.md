@@ -36,34 +36,45 @@ other users still see only search-ready public tiles.
 | Assessor | Kind | Verdict |
 |---|---|---|
 | `luna-medium/v1`, `haiku-5.5/v1` | model | the model's call: keep `ok`, fix `minor`, exclude `major`, unsure `unsure`; `major_likelihood` = its exclude likelihood |
-| `band_check/v1` | rule | wrong bands from the upload's raster profile (`v2_orthos.ortho_info`) and the COG band statistics: one or two colour bands or identical bands `major`; red or purple dominance (near-infrared or mis-decoded multispectral) `unsure` |
-| `duplicates/v1` | rule | `unsure` when another dataset has the same file, a near-identical overview (64-bit DCT hash within 10 bits) or the same uploader and day, each with 50%+ footprint overlap; never excludes |
-| `dataset-evaluation-rule/v1` | rule | the dataset verdict (below) |
+| `dataset-evaluation-rule/v1` | rule | the dataset verdict (below): the one rule row of a run |
 | `empty_cog/v1` | rule | instead of all rows above when under 0.5% of the overview is valid data: `major`, flag `broken_ortho`; no model is asked and no duplicate lookup runs |
+
+The dataset rule folds in two rules that are not assessment rows. `audit.review_queue`
+reads every dataset-level rule row as a verdict, so a second rule row would look like a
+disagreement. Their results are in the run's `evidence.rules` and in the verdict's `why`:
+
+| Rule | Result |
+|---|---|
+| `band_check/v1` | wrong bands from the upload's raster profile (`v2_orthos.ortho_info`) and the COG band statistics: one or two colour bands or identical bands `major`; red or purple dominance (near-infrared or mis-decoded multispectral) is a guess capped below `major`, so it is `unsure` |
+| `duplicates/v1` | `unsure` when another dataset has the same file, a near-identical overview (64-bit DCT hash within 10 bits) or the same uploader and day, each with 50%+ footprint overlap; never excludes |
 
 Model `modes` carry a 0-100 likelihood for `blurry`, `not_rgb`, `no_trees`,
 `broken_ortho`, `too_dark`, `artifacts` (exclude reasons) and `cog_issue`,
 `thumbnail_issue`, `reprocess` (fix flags). `details` hold the reason, sharpness,
 lighting, leaf state (a hint only), image type, scene, land cover and a one-sentence
 summary, from the fixed lists in `vocabulary.py`; `raw` holds the reply, token usage and
-seconds. The run's `evidence` holds the resolution, valid share, footprint and the
-overview hash; `inputs` the ortho sha256, AOI key and crop settings.
+seconds. The run's `evidence` holds the resolution, valid share, footprint, crop
+settings, the two folded-in rules and the overview hash; `inputs` the ortho sha256 and
+AOI key the run judged, read again at run time.
 
 The dataset rule averages the two models' exclude likelihoods:
 
 1. a `major` band check excludes;
 2. a model `unsure`, or models 50+ points apart, goes to a person (`unsure`);
 3. a mean of 60+ excludes, with the reason of the surer model;
-4. a band or duplicate flag goes to a person;
-5. any model `fix`, or a fix flag averaging 50+, keeps the dataset but marks it `minor`;
-6. otherwise `ok`.
+4. a model that votes to exclude while the mean stays under 60 goes to a person;
+5. a band or duplicate flag goes to a person;
+6. any model `fix`, or a fix flag averaging 50+, keeps the dataset but marks it `minor`;
+7. otherwise `ok`.
 
-`audit.review_queue` reads the rule rows. The version starts in `review_all`. Nothing
+`audit.review_queue` reads the rule row. The version starts in `review_all`. Nothing
 is written to `dataset_audit` or `dataset_audit_suggestions` yet.
 
 ## Store and duplicates
 
-`handle(ctx)` uploads the judged images with the worker's `put_image`, then calls
+`handle(ctx)` uploads the judged images with the worker's `put_image`, named by their
+content inside the ortho's folder (a later run on the same ortho never overwrites a
+file an earlier run's rows point at), then calls
 `audit.store_dataset_evaluation(run_id, result)`, which writes the crops, images,
 assessments and overview hash (`audit.image_hashes`) in one transaction; a bad row rolls
 everything back. The worker then finishes the run with the returned evidence, coverage

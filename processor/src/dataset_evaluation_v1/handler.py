@@ -92,6 +92,8 @@ def handle(ctx) -> dict:
 		),
 	)
 	return {
+		# what was judged, read at run time: the ortho or AOI may have changed since the run was queued
+		'inputs': evaluation.inputs,
 		'evidence': evaluation.evidence,
 		'coverage': {'crops': len(seen.crops), 'crop_picker': seen.settings['crop_picker']},
 		'cost': evaluation.cost,

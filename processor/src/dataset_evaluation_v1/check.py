@@ -69,7 +69,7 @@ CONFIG = {
 @dataclass
 class ImageFile:
 	kind: str  # audit.images kind: overview, raw (a crop), thumbnail
-	name: str  # file name inside the run's storage folder
+	stem: str  # what the file shows: overview, crop, thumbnail
 	data: bytes
 	width: int
 	height: int
@@ -80,19 +80,42 @@ class ImageFile:
 	def sha256(self) -> str:
 		return hashlib.sha256(self.data).hexdigest()
 
+	@property
+	def name(self) -> str:
+		"""The file name inside the ortho's storage folder, named by content. A later run on
+		the same ortho (another AOI, other tiles) then never overwrites a file an earlier
+		run's rows point at, and the same picture is stored once."""
+		return f'{self.stem}-{self.sha256[:16]}.jpg'
+
 
 @dataclass
 class Evaluation:
 	images: list[ImageFile]
-	calls: list[Call]  # models first, then band, duplicates and the dataset rule
+	calls: list[Call]  # the stored assessments: the models, then the dataset verdict as the one rule row
+	rules: list[Call]  # the rules the verdict folds in (band check, duplicates); kept in the run's evidence
 	phash: int | None  # None when there was no image to hash
-	inputs: dict
+	inputs: dict  # what the run judged, in the shape of handler.inputs()
 	evidence: dict
 	cost: dict = field(default_factory=dict)
 
 	@property
 	def verdict(self) -> Call:
 		return self.calls[-1]
+
+
+def rule_evidence(rules: list[Call]) -> dict:
+	"""The folded-in rules by name, for audit.runs.evidence. They are not assessment rows:
+	audit.review_queue reads every dataset-level rule row as a verdict, and only the
+	dataset rule is one."""
+	return {
+		c.model: {
+			'version': c.prompt_version,
+			'verdict': c.verdict,
+			'likelihood': c.major_likelihood,
+			'details': c.details,
+		}
+		for c in rules
+	}
 
 
 def jpeg(rgb: np.ndarray) -> bytes:
@@ -115,14 +138,14 @@ def overview_image(inputs: Inputs) -> np.ndarray:
 
 def model_images(inputs: Inputs, thumbnail: bytes | None) -> list[ImageFile]:
 	h, w = inputs.overview.shape[:2]
-	files = [ImageFile('overview', 'overview.jpg', jpeg(overview_image(inputs)), w, h, inputs.overview_mpp)]
+	files = [ImageFile('overview', 'overview', jpeg(overview_image(inputs)), w, h, inputs.overview_mpp)]
 	for i, crop in enumerate(inputs.crops):
 		ch, cw = crop.image.shape[:2]
-		files.append(ImageFile('raw', f'crop-{i + 1}.jpg', jpeg(crop.image), cw, ch, crop.mpp, i))
+		files.append(ImageFile('raw', 'crop', jpeg(crop.image), cw, ch, crop.mpp, i))
 	if thumbnail:
 		with Image.open(io.BytesIO(thumbnail)) as im:
 			tw, th = im.size
-		files.append(ImageFile('thumbnail', 'thumbnail.jpg', thumbnail, tw, th, None))
+		files.append(ImageFile('thumbnail', 'thumbnail', thumbnail, tw, th, None))
 	return files
 
 
@@ -156,8 +179,9 @@ def evaluate(
 	"""Run the rules and the models on one dataset's inputs. `image_hash` is the
 	overview's phash, which the caller needs first to look up duplicate candidates."""
 	images = model_images(inputs, thumbnail)
-	identity = {'ortho_sha256': ortho_sha256, 'aoi': aoi_key, **inputs.settings}
+	identity = {'ortho_sha256': ortho_sha256, 'aoi': aoi_key}
 	evidence = {
+		'settings': inputs.settings,
 		'native_mpp': round(inputs.native_mpp, 4),
 		'overview_mpp': round(inputs.overview_mpp, 4),
 		'size_px': list(inputs.size),
@@ -169,10 +193,17 @@ def evaluate(
 	if inputs.empty:
 		# Nothing to look at: the rule decides, no model is asked.
 		return Evaluation(
-			images=images, calls=[empty_cog(inputs.valid_share)], phash=None, inputs=identity, evidence=evidence
+			images=images,
+			calls=[empty_cog(inputs.valid_share)],
+			rules=[],
+			phash=None,
+			inputs=identity,
+			evidence=evidence,
 		)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
-	prompt = build_prompt(inputs.overview_mpp, crop_mpp, inputs.aoi is not None, thumbnail is not None)
+	prompt = build_prompt(
+		inputs.overview_mpp, crop_mpp, inputs.aoi is not None, thumbnail is not None, crop_count=len(inputs.crops)
+	)
 	# Decoded here: the judges run in threads and must not share lazily loading files.
 	pictures = [Image.open(io.BytesIO(f.data)).convert('RGB') for f in images]
 	# Independent calls: the slower model sets the run time.
@@ -183,10 +214,15 @@ def evaluate(
 	verdict = dataset_rule(answers, band, duplicates)
 	return Evaluation(
 		images=images,
-		calls=[*answers, band, duplicates, verdict],
+		calls=[*answers, verdict],
+		rules=[band, duplicates],
 		phash=image_hash,
 		inputs=identity,
-		evidence={**evidence, 'phash': {'method': PHASH_METHOD, 'value': str(image_hash)}},
+		evidence={
+			**evidence,
+			'rules': rule_evidence([band, duplicates]),
+			'phash': {'method': PHASH_METHOD, 'value': str(image_hash)},
+		},
 		# Subscription calls report no tokens or dollars; time and calls are what is known.
 		cost={a.model: {'seconds': a.raw['seconds'], 'calls': a.raw['attempt'], 'cost_usd': None} for a in answers},
 	)
@@ -194,7 +230,7 @@ def evaluate(
 
 def storage_folder(dataset_id: int, ortho_sha256: str) -> str:
 	"""Where a run's images live, relative to the storage server's data directory.
-	Images are per ortho, so reruns on the same ortho reuse the stored files."""
+	Images are per ortho and named by content, so reruns on the same ortho reuse the stored files."""
 	return f'audit/{CHECK_KEY}/{dataset_id}/{ortho_sha256[:16]}'
 
 

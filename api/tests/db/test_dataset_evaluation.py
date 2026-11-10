@@ -72,7 +72,7 @@ def result(sha=SHA, phash=1234, crops=2):
 			{
 				'kind': 'overview',
 				'crop_index': None,
-				'storage_path': f'audit/dataset_evaluation/1/{sha[:16]}/overview.jpg',
+				'storage_path': f'audit/dataset_evaluation/1/{sha[:16]}/overview-{"d" * 16}.jpg',
 				'content_type': 'image/jpeg',
 				'width': 2048,
 				'height': 1500,
@@ -85,7 +85,7 @@ def result(sha=SHA, phash=1234, crops=2):
 			{
 				'kind': 'raw',
 				'crop_index': i + 1,
-				'storage_path': f'audit/dataset_evaluation/1/{sha[:16]}/crop-{i + 1}.jpg',
+				'storage_path': f'audit/dataset_evaluation/1/{sha[:16]}/crop-{i + 1:016d}.jpg',
 				'content_type': 'image/jpeg',
 				'width': 1024,
 				'height': 1024,
@@ -98,8 +98,7 @@ def result(sha=SHA, phash=1234, crops=2):
 		'assessments': [
 			call('luna-medium', 'major', 80),
 			call('haiku-5.5', 'major', 70),
-			call('band_check', 'ok', 0, 'rule'),
-			call('duplicates', 'ok', 0, 'rule'),
+			# the one rule row: band check and duplicates are folded in and kept as run evidence
 			call('dataset-evaluation-rule', 'major', 75, 'rule'),
 		],
 		'phash': {'method': 'phash-dct64-v1', 'value': phash},
@@ -146,13 +145,7 @@ def test_a_stored_run_lands_whole_and_leaves_the_lifecycle_to_the_worker(db, eva
 	rows = db.execute(
 		'SELECT assessor, verdict, layer, crop_id FROM audit.assessments WHERE run_id=%s ORDER BY id', (run,)
 	).fetchall()
-	assert [r[0] for r in rows] == [
-		'luna-medium/v1',
-		'haiku-5.5/v1',
-		'band_check/v1',
-		'duplicates/v1',
-		'dataset-evaluation-rule/v1',
-	]
+	assert [r[0] for r in rows] == ['luna-medium/v1', 'haiku-5.5/v1', 'dataset-evaluation-rule/v1']
 	assert {r[2] for r in rows} == {'image'} and all(r[3] is None for r in rows)
 	images = db.execute(
 		'SELECT kind, crop_id IS NULL FROM audit.images WHERE dataset_id=%s ORDER BY id', (dataset,)
@@ -182,7 +175,7 @@ def test_a_rerun_on_the_same_ortho_reuses_its_crops_and_images(db, evaluation):
 
 	assert db.execute('SELECT count(*) FROM audit.crops WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 2
 	assert db.execute('SELECT count(*) FROM audit.images WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 3
-	assert db.execute('SELECT count(*) FROM audit.assessments WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 10
+	assert db.execute('SELECT count(*) FROM audit.assessments WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 6
 
 
 def test_a_finished_run_or_another_check_is_refused_and_nothing_lands(db, evaluation):
@@ -339,6 +332,22 @@ def test_the_worker_reads_tile_windows_of_private_datasets_and_others_do_not(db,
 	act_as(db, stranger)
 	assert db.execute(query, (private,)).fetchone()[0] == 0
 	as_admin(db)
+
+
+def test_a_decided_verdict_is_one_rule_row_and_not_a_disagreement(db, evaluation):
+	"""The queue reads every dataset-level rule row as a verdict. With the band check and
+	the duplicates as rows of their own, every verdict but ok looked like a disagreement
+	and could never leave review."""
+	_, dataset, version = evaluation
+	run = queued_run(db, dataset, version)
+	store(db, run, result())
+	finish(db, run, dataset)
+	db.execute("UPDATE audit.check_versions SET mode='review_uncertain' WHERE id=%s", (version,))
+
+	assert db.execute(
+		"SELECT verdict::text, reason, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='dataset_evaluation'",
+		(dataset,),
+	).fetchall() == [('major', None, False)]
 
 
 def test_an_empty_cog_stores_one_rule_row_that_sends_the_exclusion_to_review(db, evaluation):

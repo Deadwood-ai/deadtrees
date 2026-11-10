@@ -18,8 +18,21 @@ def _choices(values) -> str:
 	return ' | '.join(values)
 
 
-def build_prompt(overview_mpp: float, crop_mpp: float, has_aoi: bool, has_thumbnail: bool) -> str:
-	thumbnail = 'Image 6 is the 256 px thumbnail the website shows for this dataset.\n' if has_thumbnail else ''
+def build_prompt(overview_mpp: float, crop_mpp: float, has_aoi: bool, has_thumbnail: bool, crop_count: int = 4) -> str:
+	"""The question for one dataset. The image numbers follow the images actually sent:
+	the overview, then `crop_count` samples (a small plot has fewer than four), then the thumbnail."""
+	if crop_count == 0:
+		samples = 'There are no full resolution samples of this orthophoto.'
+	elif crop_count == 1:
+		samples = f'Image 2 is one sample at full resolution, about {crop_mpp * 100:.1f} cm per pixel.'
+	else:
+		samples = (
+			f'Images 2 to {crop_count + 1} are {crop_count} samples at full resolution, '
+			f'about {crop_mpp * 100:.1f} cm per pixel.'
+		)
+	thumbnail = (
+		f'Image {crop_count + 2} is the 256 px thumbnail the website shows for this dataset.\n' if has_thumbnail else ''
+	)
 	aoi = (
 		'A magenta line on Image 1 marks the area of interest (AOI); judge the AOI, the rest is context.\n'
 		if has_aoi
@@ -28,7 +41,7 @@ def build_prompt(overview_mpp: float, crop_mpp: float, has_aoi: bool, has_thumbn
 	return f"""You check drone and aerial orthophotos for deadtrees.earth, a database that maps dead trees and
 forest cover from this imagery and uses it to train satellite products.
 Image 1 is the whole orthophoto at about {overview_mpp * 100:.0f} cm per pixel; black or empty areas are outside the
-flight. Images 2 to 5 are four samples at full resolution, about {crop_mpp * 100:.1f} cm per pixel.
+flight. {samples}
 {thumbnail}{aoi}
 Decide whether the imagery can be used to map dead trees and forest cover.
 - exclude: unusable as a whole. Only for these reasons:
@@ -68,17 +81,21 @@ def parse_answer(text: str, model: str, prompt_version: str = PROMPT_VERSION) ->
 		value = json.loads(match.group(0))
 	except json.JSONDecodeError as e:
 		raise AnswerError(f'Invalid JSON: {e}') from None
-	verdict = value.get('verdict')
-	if verdict not in VERDICTS:
-		raise AnswerError(f'Unknown verdict {verdict!r}')
-	reason = value.get('reason') or 'none'
-	if reason not in MODEL_REASONS + ('none',):
-		raise AnswerError(f'Unknown reason {reason!r}')
+	# Any shape the reply can take wrongly (a list for the object, a string for the flags,
+	# a list for the verdict) is an AnswerError, so the call is asked once more.
 	try:
+		verdict = value.get('verdict')
+		if verdict not in VERDICTS:
+			raise AnswerError(f'Unknown verdict {verdict!r}')
+		reason = value.get('reason') or 'none'
+		if reason not in MODEL_REASONS + ('none',):
+			raise AnswerError(f'Unknown reason {reason!r}')
 		likelihood = float(value['exclude_likelihood'])
 		flags = {k: float((value.get('flags') or {}).get(k, 0)) for k in FLAGS}
-	except (KeyError, TypeError, ValueError):
-		raise AnswerError('Missing or non-numeric likelihoods') from None
+	except AnswerError:
+		raise
+	except (AttributeError, KeyError, TypeError, ValueError):
+		raise AnswerError('The reply does not have the requested fields') from None
 	if not all(0 <= v <= 100 for v in (likelihood, *flags.values())):
 		raise AnswerError('Likelihoods must be 0-100')
 	details = {'reason': None if reason == 'none' else reason}

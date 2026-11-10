@@ -58,6 +58,11 @@ def band_stats(bands: np.ndarray, valid: np.ndarray) -> list[dict]:
 	return stats
 
 
+# A colour ratio is a guess (red soil and autumn foliage are red too): it sends the dataset
+# to a person and never reaches the likelihood that excludes by rule.
+COLOUR_GUESS_MAX = 85
+
+
 def band_check(source_profile: dict | None, bands: np.ndarray, valid: np.ndarray) -> Call:
 	"""Wrong bands, a single band, or multispectral data decoded wrongly.
 
@@ -88,13 +93,19 @@ def band_check(source_profile: dict | None, bands: np.ndarray, valid: np.ndarray
 			# True colour vegetation and soil have red at most a little above green and blue.
 			red = r / max(g, b, 1)
 			if red >= 1.35:
-				findings.append(('false_colour_red', min(95, 50 + (red - 1.35) * 150), f'red is {red:.2f}x green/blue'))
+				findings.append(
+					(
+						'false_colour_red',
+						min(COLOUR_GUESS_MAX, 50 + (red - 1.35) * 150),
+						f'red is {red:.2f}x green/blue',
+					)
+				)
 			purple = min(r, b) / max(g, 1)
 			if purple >= 1.35:
 				findings.append(
 					(
 						'false_colour_purple',
-						min(95, 50 + (purple - 1.35) * 150),
+						min(COLOUR_GUESS_MAX, 50 + (purple - 1.35) * 150),
 						f'red and blue are {purple:.2f}x green',
 					)
 				)
@@ -230,6 +241,10 @@ def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict 
 	elif mean >= config['major_at']:
 		verdict = 'major'
 		why.append('models_exclude')
+	elif any(m.verdict == 'major' for m in models):
+		# a model voted to exclude although the mean stays under the threshold: a person looks
+		verdict = 'unsure'
+		why.append('model_excludes_below_threshold')
 	elif band.verdict == 'unsure' or duplicates.verdict == 'unsure':
 		verdict = 'unsure'
 		why += [c.model for c in (band, duplicates) if c.verdict == 'unsure']

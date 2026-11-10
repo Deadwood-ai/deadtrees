@@ -200,7 +200,10 @@ function nextOpen() {
 }
 
 let noteTimer;
-$('#note').addEventListener('input', () => { clearTimeout(noteTimer); noteTimer = setTimeout(() => edit((l) => { l.note = $('#note').value; }), 300); });
+// The note reaches the draft after a pause in typing, and at once when the field is left, so a save right after typing has all of it.
+function flushNote() { if (!noteTimer) return; clearTimeout(noteTimer); noteTimer = null; edit((l) => { l.note = $('#note').value; }); }
+$('#note').addEventListener('input', () => { clearTimeout(noteTimer); noteTimer = setTimeout(flushNote, 300); });
+$('#note').addEventListener('blur', flushNote);
 $('#prev').onclick = () => move(-1); $('#next').onclick = () => move(1); $('#nextOpen').onclick = nextOpen; $('#save').onclick = save;
 $('#filter').onchange = () => { $('#filter').blur(); if (!FILTERS[$('#filter').value](cur())) move(1); else render(); };
 for (const id of ['showAudit', 'showModels']) {
@@ -210,6 +213,7 @@ for (const id of ['showAudit', 'showModels']) {
 $('#zoom').addEventListener('click', (e) => { if (e.target.id === 'zoom') closeZoom(); });
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // browser shortcuts (Ctrl+S, Ctrl+R) are not labels
   const key = e.key.toLowerCase();
   if (e.key === 'Escape') return closeZoom();
   if (/^[1-4]$/.test(key)) return setCall(CALLS[Number(key) - 1][0]);

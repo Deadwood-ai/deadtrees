@@ -21,6 +21,7 @@ from processor.src.dataset_evaluation_v1.handler import aoi_key, tile_of
 from processor.src.dataset_evaluation_v1.inputs import Tile, inside, padding, read_inputs
 from processor.src.dataset_evaluation_v1.prompt import AnswerError, build_prompt, parse_answer
 from processor.src.dataset_evaluation_v1.rules import (
+	Call,
 	band_check,
 	dataset_rule,
 	duplicate_check,
@@ -502,21 +503,33 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	assert len(luna.images[0]) == 6 and all(isinstance(i, Image.Image) for i in luna.images[0])
 	assert luna.images[0][0].size == (1024, 768)
 	assert 'magenta line' in luna.prompts[0] and 'Image 6 is the 256 px thumbnail' in luna.prompts[0]
-	assert [c.model for c in evaluation.calls] == [
-		'luna-medium',
-		'haiku-5.5',
-		'band_check',
-		'duplicates',
-		'dataset-evaluation-rule',
-	]
+	# the models and the dataset verdict are the stored rows; the rules it folds in are run evidence
+	assert [c.model for c in evaluation.calls] == ['luna-medium', 'haiku-5.5', 'dataset-evaluation-rule']
+	assert [c.model for c in evaluation.rules] == ['band_check', 'duplicates']
+	assert evaluation.evidence['rules']['band_check']['verdict'] == 'ok'
+	assert evaluation.evidence['rules']['duplicates'] == {
+		'version': 'v1',
+		'verdict': 'ok',
+		'likelihood': 0.0,
+		'details': {'candidates': []},
+	}
 	assert evaluation.verdict.verdict == 'minor'
 	assert evaluation.calls[1].raw['attempt'] == 1 and evaluation.cost['haiku-5.5']['cost_usd'] is None
-	assert evaluation.inputs['ortho_sha256'] == SHA and evaluation.inputs['aoi'] == 'abc'
+	# the run's identity has the shape of handler.inputs(); the crop settings are evidence
+	assert evaluation.inputs == {'ortho_sha256': SHA, 'aoi': 'abc'}
+	assert evaluation.evidence['settings'] == inputs.settings
 
 	payload = store_payload(evaluation, inputs, 42, SHA)
 	assert [i['kind'] for i in payload['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
 	assert [i['crop_index'] for i in payload['images']] == [None, 1, 2, 3, 4, None]
-	assert payload['images'][0]['storage_path'] == f'audit/dataset_evaluation/42/{SHA[:16]}/overview.jpg'
+	# files are named by content: another run on this ortho cannot overwrite them
+	overview = evaluation.images[0]
+	assert payload['images'][0]['storage_path'] == (
+		f'audit/dataset_evaluation/42/{SHA[:16]}/overview-{overview.sha256[:16]}.jpg'
+	)
+	assert payload['images'][0]['sha256'] == overview.sha256
+	assert len({i['storage_path'] for i in payload['images']}) == 6
+	assert [a['model'] for a in payload['assessments']] == ['luna-medium', 'haiku-5.5', 'dataset-evaluation-rule']
 	assert len(payload['crops']) == 4 and payload['crops'][0]['pixel_window'] is None
 	assert payload['crops'][0]['selection']['picker'] == 'kmeans-inside-v1'
 	assert payload['phash'] == {'method': 'phash-dct64-v1', 'value': image_hash}
@@ -556,6 +569,7 @@ def test_the_prompt_lists_only_the_reasons_the_models_decide():
 	prompt = build_prompt(0.4, 0.03, has_aoi=False, has_thumbnail=False)
 
 	assert 'about 40 cm per pixel' in prompt and 'about 3.0 cm per pixel' in prompt
+	assert 'Images 2 to 5 are 4 samples' in prompt
 	assert 'Image 6' not in prompt and 'judge the whole image' in prompt
 	assert '"reason": "blurry | no_trees | artifacts | not_rgb | broken_ortho | too_dark | other | none"' in prompt
 
@@ -661,14 +675,20 @@ def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path,
 	summary = handler.handle(ctx)
 
 	assert events[0] == 'duplicate_candidates' and events[-1] == 'store_dataset_evaluation'
-	assert len(events) == 8 and events[1].endswith('/overview.jpg') and events[6].endswith('/thumbnail.jpg')
+	assert len(events) == 8
+	assert events[1].rsplit('/', 1)[1].startswith('overview-') and events[6].rsplit('/', 1)[1].startswith('thumbnail-')
 	stored = dict(client.calls)['store_dataset_evaluation']
 	assert stored['p_run_id'] == 7
-	assert [a['model'] for a in stored['p_result']['assessments']][-1] == 'dataset-evaluation-rule'
+	assert [a['model'] for a in stored['p_result']['assessments']] == [
+		'luna-medium',
+		'haiku-5.5',
+		'dataset-evaluation-rule',
+	]
 	assert stored['p_result']['assessments'][-1]['verdict'] == 'major'
-	assert stored['p_result']['assessments'][3]['verdict'] == 'unsure'  # the same-day duplicate flag
+	assert summary['evidence']['rules']['duplicates']['verdict'] == 'unsure'  # the same-day duplicate flag
 	assert summary['coverage'] == {'crops': 4, 'crop_picker': 'kmeans-inside-v1'}
-	assert set(summary) == {'evidence', 'coverage', 'cost'}
+	assert set(summary) == {'inputs', 'evidence', 'coverage', 'cost'}
+	assert set(summary['inputs']) == {'ortho_sha256', 'aoi'}
 
 
 @pytest.mark.unit
@@ -744,5 +764,62 @@ def test_the_handler_skips_the_duplicate_lookup_for_an_empty_cog(tmp_path, monke
 	summary = handler.handle(ctx)
 
 	assert [name for name, _ in client.calls] == ['store_dataset_evaluation']
-	assert uploaded == [f'audit/dataset_evaluation/42/{SHA[:16]}/overview.jpg']
+	assert len(uploaded) == 1 and uploaded[0].startswith(f'audit/dataset_evaluation/42/{SHA[:16]}/overview-')
 	assert summary['coverage'] == {'crops': 0, 'crop_picker': None} and summary['cost'] == {}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+	('crops', 'samples', 'thumbnail'),
+	[
+		(0, 'no full resolution samples', 'Image 2 is'),
+		(1, 'Image 2 is one sample', 'Image 3 is'),
+		(2, 'Images 2 to 3 are 2 samples', 'Image 4 is'),
+	],
+)
+def test_the_prompt_numbers_the_images_that_are_sent(crops, samples, thumbnail):
+	prompt = build_prompt(0.4, 0.03, has_aoi=True, has_thumbnail=True, crop_count=crops)
+
+	assert samples in prompt and f'{thumbnail} the 256 px thumbnail' in prompt
+	assert 'Images 2 to 5' not in prompt
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+	'reply',
+	[
+		'[1, 2]',
+		'{"verdict": ["keep"], "exclude_likelihood": 5}',
+		'{"verdict": "keep", "exclude_likelihood": 5, "flags": "none"}',
+		'{"verdict": "keep", "exclude_likelihood": 5, "flags": [1]}',
+		'{"verdict": "keep", "exclude_likelihood": null}',
+	],
+)
+def test_a_reply_of_the_wrong_shape_is_asked_again_not_failed(reply):
+	with pytest.raises(AnswerError):
+		parse_answer(reply, 'haiku-5.5')
+
+
+@pytest.mark.unit
+def test_a_colour_ratio_guess_never_excludes_by_rule():
+	"""Red soil or autumn foliage is red too: the ratio flags for a person, the models decide."""
+	red = np.zeros((3, 64, 64), np.uint8)
+	red[0], red[1], red[2] = 220, 90, 80
+	red[:, ::2, ::2] += 9  # not three identical bands
+	band = band_check(RGB_PROFILE, red, np.ones((64, 64), bool))
+
+	assert band.details['findings'][0]['code'] == 'false_colour_red'
+	assert band.major_likelihood == 85 and band.verdict == 'unsure'
+
+
+@pytest.mark.unit
+def test_a_model_that_votes_to_exclude_below_the_threshold_sends_the_dataset_to_a_person():
+	ok = Call('rule', 'x', 'v1', 'ok', 0.0)
+	models = [
+		Call('model', 'luna-medium', 'v1', 'major', 55.0, details={'reason': 'blurry'}),
+		Call('model', 'haiku-5.5', 'v1', 'major', 55.0, details={'reason': 'blurry'}),
+	]
+	verdict = dataset_rule(models, ok, ok)
+
+	assert verdict.verdict == 'unsure' and verdict.details['why'] == ['model_excludes_below_threshold']
+	assert verdict.details['reason'] == 'blurry'

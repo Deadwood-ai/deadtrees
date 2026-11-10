@@ -99,7 +99,8 @@ def finish(client, run: dict, summary: dict, active: bool) -> None:
 	next sweep with the same rule.
 	"""
 	update = {'status': 'done', 'finished_at': now(), 'error': None}
-	for key in ('coverage', 'cost', 'evidence'):
+	# `inputs` only when the handler read them again: the run then records what it judged
+	for key in ('inputs', 'coverage', 'cost', 'evidence'):
 		if summary.get(key):
 			update[key] = summary[key]
 	audit(client).table('runs').update(update).eq('id', run['id']).execute()
