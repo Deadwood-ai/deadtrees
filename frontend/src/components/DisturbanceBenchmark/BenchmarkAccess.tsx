@@ -3,12 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "antd";
 import { Navigate } from "react-router-dom";
 import { fetchBenchmarkFiles } from "../../api/disturbanceBenchmark";
+import { refreshBeforeExpiry } from "../../utils/signedFilesGrant";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useCanAudit } from "../../hooks/useUserPrivileges";
 import StatusPage from "../StatusPage";
 import { PageSkeleton } from "../PageSkeletons";
 
-const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
 const BenchmarkFilesContext = createContext<string | null>(null);
 
 /** Absolute URL of a benchmark export file, e.g. `catalog.json` or `/data/<site>/site.json`. */
@@ -52,15 +52,7 @@ export default function BenchmarkAccess({
     enabled: privileges.canAudit,
     retry: false,
     staleTime: Infinity,
-    refetchInterval: (query) => {
-      const expiresAt = query.state.data?.expiresAt;
-      return expiresAt
-        ? Math.max(
-            60_000,
-            expiresAt * 1000 - Date.now() - REFRESH_BEFORE_EXPIRY_MS,
-          )
-        : false;
-    },
+    refetchInterval: refreshBeforeExpiry,
   });
 
   if (privileges.isLoading || (privileges.canAudit && grant.isPending))

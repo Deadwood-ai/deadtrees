@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, message, notification } from "antd";
 import confetti from "canvas-confetti";
@@ -25,6 +25,8 @@ import {
 	useAuditSuggestions,
 } from "../../hooks/useAcquisitionDateEstimate";
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
+import { answeredFormValues } from "../../utils/auditChecks";
+import { useAuditChecks } from "../../hooks/useAuditChecks";
 import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
@@ -150,6 +152,8 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
 	const { data: auditSuggestionsData } = useAuditSuggestions(dataset.id);
 	const { data: reviewItems } = useAuditReviewQueue(dataset.id);
+	const auditChecksQuery = useAuditChecks(dataset.id);
+	const auditChecks = auditChecksQuery.data;
 	const auditReviewItems = reviewItems ?? NO_REVIEW_ITEMS;
 	// stable fallback: a fresh [] per render would re-run the prefill effect and reset edits
 	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
@@ -239,6 +243,9 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		}
 	}, [auditData, form]);
 
+	// Where a check has run, the reviewer's answer decides its saved-audit field.
+	const answered = useMemo(() => answeredFormValues(auditChecks, user?.id), [auditChecks, user?.id]);
+
 	// Machine suggestions prefill the form once per page load, after the saved
 	// audit, the suggestions and the re-review items have all arrived: fields
 	// the saved audit leaves empty, and the fields of items listed for re-review
@@ -254,9 +261,16 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			auditSuggestionsData,
 			reviewItems.flatMap((r) => r.fields),
 		);
-		form.setFieldsValue(suggested);
+		form.setFieldsValue({ ...suggested, ...answered });
 		setPrefilledFields(fields);
-	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, form]);
+	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, answered, form]);
+
+	// The form follows the answers whenever they or the saved audit load or change,
+	// so an answer and its saved field cannot disagree. Declared after the two
+	// effects above: in one commit the answers are applied last.
+	useEffect(() => {
+		if (Object.keys(answered).length) form.setFieldsValue(answered);
+	}, [answered, auditData, form]);
 
 	// Track form changes
 	useEffect(() => {
@@ -467,7 +481,11 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		acquisitionDateDecisions,
 		auditSuggestions,
 		auditReviewItems,
-		prefilledFields,
+		auditChecks,
+		auditChecksFailed: auditChecksQuery.isError,
+		retryAuditChecks: auditChecksQuery.refetch,
+		// a field the reviewer's answer decides is no longer "suggested"
+		prefilledFields: prefilledFields.filter((field) => !(field in answered)),
 
 		// Flags
 		updateFlagStatus,

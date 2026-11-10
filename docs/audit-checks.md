@@ -210,6 +210,58 @@ To check it, request `/rest/v1/checks` with the header `Accept-Profile: audit` a
 auditor; it lists the four checks. To roll back, restore the backup and run the same
 `docker compose up -d rest`.
 
+The review page's images need one change to the host nginx on data2
+(`/apps/deadtrees/nginx/conf/storage-server.conf`, not this repository; see
+`docs/playbooks/dataset-access-rollout.md`): add `audit/images/files/` to the ticket
+location `^/api/v1/(datasets/[0-9]+/files/|exports/|disturbance-benchmark/files/)` so
+signed image links stay out of the access log, then `nginx -t` and reload. The images
+work without it through `/api/v1/`; only the log hygiene is missing.
+
+## Review page
+
+The audit page (`/dataset-audit/<id>`, `frontend/src/components/DatasetAudit/checks/`)
+shows the checks as sections in the sidebar: user reports, then 1 Dataset evaluation
+(COG and thumbnail folded in), 2 AOI, 3 Georeferencing, 4 Acquisition date, 5 Phenology
+(manual) and 6 Prediction quality. Opening a section puts the map into that check's
+mode: the reference and match lines for georeferencing, the judged crops for the
+dataset evaluation and prediction quality, and "Show what the model saw" loads the
+stored images.
+
+- A reviewer answers a check with Agree or Check wrong (the check's fixed reasons plus
+  a note). Each answer is a new person row on the current run (`run_id`), so it marks
+  the result reviewed in `audit.review_queue`; crop answers carry `crop_id`.
+- Each reviewer answers on their own: a section under review needs you until you
+  answered, whoever else did. Others' and the models' answers show after your answer
+  (or "Show now").
+- Once a reviewer has answered a check, the answer decides its `dataset_audit` field
+  (georeferencing, date valid, the two prediction ratings): the form follows the
+  answers and that field is read-only, so an answer and the saved audit cannot
+  disagree. Without an answer on the current run the field stays editable. The dataset
+  evaluation decides no field; its COG and thumbnail answers stay the reviewer's own.
+  The derived decision at the top adds the sections up (evaluation exclude, any fix
+  finding, else ready) and the reviewer confirms it or chooses another.
+  `dataset_audit` is still what Save stores.
+- The queue's To review tab lists every result under review that you have not
+  answered; Disagreements reads `audit.disagreements`. Both read one server response
+  (at most `max_rows`) and say so when the list is longer; the rows beyond it cannot
+  be reached from the tab yet. Before the full backfill
+  the "answered by me" filter and paging move into the database (DT-1486 follow-up),
+  together with the view's own "reviewed on the same evidence" rule: the page counts
+  an answer only on the current run, so a rule-only rerun asks again.
+- Images come from `POST /api/v1/audit/images/access`, a signed link prefix for
+  auditors (`can_audit`); files are served from the data directory's `audit/` folder
+  through nginx and never statically. The route shares
+  `api/src/access/core_team_files.py` with the disturbance benchmark files.
+- What a check shows is declared once per section in `AUDIT_SECTIONS`
+  (`frontend/src/utils/auditChecks.ts`): its layers, the verdicts a reviewer can give,
+  the "Check wrong" reasons, its map (georeferencing matches or crops with their
+  images) and whether reviewers answer per crop.
+
+Local QA: `scripts/qa/seed-audit-checks.py` seeds one dataset with all three checks
+(`docs/qa/playbooks/auditor-check-review.md`). Where the `audit` schema is not exposed
+(API exposure above), the page says the results can't be read and the sections fall
+back to the saved-audit fields.
+
 ## Importing earlier judgements
 
 `scripts/audit_import.py` (dry run by default; `--execute` writes and needs approval):

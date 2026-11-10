@@ -45,6 +45,7 @@ dataset IDs.
 | `auditor-access-guards` | anonymous/contributor/auditor | read-only | `qa-auth`, `qa-auditor` | `/dataset-audit`, `/dataset-audit/91001` |
 | `auditor-queue-triage` | auditor | local-write | `qa-auditor` | `/dataset-audit` |
 | `auditor-final-assessment` | auditor | local-write | `qa-auditor` | `/dataset-audit/91001` |
+| `auditor-check-review` | auditor | local-write | `qa-auditor` | `/dataset-audit/91090` |
 | `labels-corrections-map` | contributor/auditor | local-write | `qa-labels` | `/dataset/91001`, `/dataset-audit/91001` |
 | `priwa-field-workflow` | authenticated field user | local-write | `qa-priwa` | `/priwa-field` |
 | `negative-empty-error-states` | mixed | read-only | `qa-negative`, `qa-base` | `/dataset/999999`, `/dataset/91004`, `/dataset-audit` |

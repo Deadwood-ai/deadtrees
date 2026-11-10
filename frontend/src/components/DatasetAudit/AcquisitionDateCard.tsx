@@ -1,4 +1,4 @@
-import { Alert, Card, Form, Input, Radio, Space, Tag, Tooltip, Typography } from "antd";
+import { Alert, Form, Input, Radio, Space, Tag, Tooltip, Typography } from "antd";
 import { RobotOutlined } from "@ant-design/icons";
 import { createConditionalRule, formatAcquisitionDate } from "./auditConstants";
 import type { IDataset } from "../../types/dataset";
@@ -29,6 +29,8 @@ interface AcquisitionDateCardProps {
 	/** the dataset's date decisions, newest first */
 	decisions: IAcquisitionDateDecision[];
 	reviewItems: IAuditReviewItem[];
+	/** the reviewer answered the check above: that answer decides "Reported date valid?" */
+	answerOwned?: boolean;
 }
 
 const SOURCE_LABEL: Record<IAcquisitionDateDecision["source"], string> = {
@@ -88,7 +90,7 @@ function DecisionStatus({ decisions }: { decisions: IAcquisitionDateDecision[] }
 	);
 }
 
-export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, decisions, reviewItems }: AcquisitionDateCardProps) {
+export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, decisions, reviewItems, answerOwned }: AcquisitionDateCardProps) {
 	const current = estimate ? isEstimateCurrent(estimate, dataset) : false;
 	const suggestion = datasetDateSuggestion(estimate, dataset);
 	const applied = modelSuggestedDecision(decisions, dataset);
@@ -97,11 +99,8 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 		.join(", ");
 
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">2. Acquisition Date</Text>
-				<ReviewTag item="acquisition_date" items={reviewItems} />
-			</div>
+		<div>
+			<ReviewTag item="acquisition_date" items={reviewItems} />
 			<div className="mb-1 text-xs">
 				<Text type="secondary">{applied ? "Date: " : "Reported date: "}</Text>
 				<Text strong>{formatAcquisitionDate(dataset)}</Text>
@@ -154,11 +153,11 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 			)}
 
 			<div className="flex items-center text-xs">
-				<Text type="secondary">Reported date valid?</Text>
+				<Text type="secondary">{answerOwned ? "Reported date valid? (follows your answer above)" : "Reported date valid?"}</Text>
 				<SuggestedTag field="has_valid_acquisition_date" suggestions={suggestions} prefilledFields={prefilledFields} />
 			</div>
 			<Form.Item name="has_valid_acquisition_date" className="mb-2" rules={createConditionalRule("Please validate acquisition date")}>
-				<Radio.Group>
+				<Radio.Group disabled={answerOwned || undefined}>
 					<Space size="large">
 						<Radio value={true}>🟢 Valid</Radio>
 						<Radio value={false}>🔴 Invalid</Radio>
@@ -195,6 +194,6 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 			<Form.Item name="acquisition_date_notes" className="mb-0">
 				<TextArea rows={2} placeholder="Date notes..." className="text-xs" />
 			</Form.Item>
-		</Card>
+		</div>
 	);
 }

@@ -186,10 +186,7 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 	);
 }
 
-// Step 1 (georeferencing) lives in GeoreferencingCard.tsx
-// Step 2 (acquisition date) lives in AcquisitionDateCard.tsx
-
-// === Phenology Card (Step 3) ===
+// === Phenology (manual) ===
 interface PhenologyCardProps {
 	dataset: IDataset;
 	phenologyData: PhenologyMetadata | null | undefined;
@@ -199,12 +196,8 @@ interface PhenologyCardProps {
 
 export function PhenologyCard({ dataset, phenologyData, isPhenologyLoading, onCopySeasonPrompt }: PhenologyCardProps) {
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center justify-between">
-				<div className="flex items-center">
-					<Text strong className="text-xs">3. Phenology / Season</Text>
-				</div>
-			</div>
+		<div>
+			<div className="mb-1 text-xs text-gray-600">Manual for now: answer leaf-on or leaf-off by hand until the phenology check exists.</div>
 
 			{/* Phenology bar */}
 			{isPhenologyLoading ? (
@@ -252,19 +245,16 @@ export function PhenologyCard({ dataset, phenologyData, isPhenologyLoading, onCo
 			<Form.Item name="phenology_notes" className="mb-0">
 				<TextArea rows={2} placeholder="Seasonal observations..." className="text-xs" />
 			</Form.Item>
-		</Card>
+		</div>
 	);
 }
 
-// === Prediction Quality Card (Step 4) ===
-export function PredictionQualityCard() {
+// === Prediction quality: the saved per-layer ratings ===
+/** `answerOwned`: the reviewer answered that layer's check above, and the answer decides its rating. */
+export function PredictionQualityCard({ answerOwned }: { answerOwned?: { deadwood: boolean; forestCover: boolean } }) {
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">4. Prediction Quality</Text>
-			</div>
-
-				{/* Deadwood cover */}
+		<div>
+			{/* Deadwood cover */}
 			<div className="mb-3">
 				<div className="mb-1 flex items-center">
 					<Text className="text-xs font-medium">Deadwood cover segmentation</Text>
@@ -274,7 +264,7 @@ export function PredictionQualityCard() {
 					className="mb-1"
 					rules={createConditionalRule("Please rate deadwood quality")}
 				>
-					<Radio.Group>
+					<Radio.Group disabled={answerOwned?.deadwood || undefined}>
 						<Space size="large">
 							<Radio value="great">🟢 Great</Radio>
 							<Radio value="sentinel_ok">🟡 OK</Radio>
@@ -297,7 +287,7 @@ export function PredictionQualityCard() {
 					className="mb-1"
 					rules={[{ required: false, message: "Please rate tree cover quality" }]}
 				>
-					<Radio.Group>
+					<Radio.Group disabled={answerOwned?.forestCover || undefined}>
 						<Space size="large">
 							<Radio value="great">🟢 Great</Radio>
 							<Radio value="sentinel_ok">🟡 OK</Radio>
@@ -309,17 +299,15 @@ export function PredictionQualityCard() {
 					<TextArea rows={1} placeholder="Forest cover notes..." className="text-xs" />
 				</Form.Item>
 			</div>
-		</Card>
+		</div>
 	);
 }
 
-// === COG Quality Card (Step 5) ===
+// === COG and thumbnail (dataset evaluation) ===
 export function COGQualityCard() {
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">5. Cloud-Optimized GeoTIFF</Text>
-			</div>
+		<div className="mb-3" data-testid="audit-cog">
+			<Text className="text-xs font-medium">Cloud-Optimized GeoTIFF</Text>
 
 			<Form.Item
 				name="has_cog_issue"
@@ -341,21 +329,18 @@ export function COGQualityCard() {
 					className="text-xs"
 				/>
 			</Form.Item>
-		</Card>
+		</div>
 	);
 }
 
-// === Thumbnail Card (Step 6) ===
 interface ThumbnailCardProps {
 	thumbnailUrl: string | null;
 }
 
 export function ThumbnailCard({ thumbnailUrl }: ThumbnailCardProps) {
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">6. Thumbnail</Text>
-			</div>
+		<div className="mb-3" data-testid="audit-thumbnail">
+			<Text className="text-xs font-medium">Thumbnail</Text>
 
 			{thumbnailUrl && (
 				<div className="mb-3 flex justify-center">
@@ -391,12 +376,12 @@ export function ThumbnailCard({ thumbnailUrl }: ThumbnailCardProps) {
 					className="text-xs"
 				/>
 			</Form.Item>
-		</Card>
+		</div>
 	);
 }
 
-// === Final Assessment Card (Step 8) ===
-interface FinalAssessmentCardProps {
+// === Ortho file: technical metadata and download (dataset evaluation) ===
+interface OrthoFilePanelProps {
 	dataset: IDataset;
 	orthoMetadata: OrthoMetadata | null | undefined;
 	isOrthoLoading: boolean;
@@ -405,57 +390,34 @@ interface FinalAssessmentCardProps {
 	onStartDownload: (dataset: IDataset) => void;
 }
 
-export function FinalAssessmentCard({
+export function OrthoFilePanel({
 	dataset,
 	orthoMetadata,
 	isOrthoLoading,
 	isDownloading,
 	currentDownloadId,
 	onStartDownload,
-}: FinalAssessmentCardProps) {
+}: OrthoFilePanelProps) {
 	const isViewOnlyDataset = dataset.data_access === "viewonly";
 
 	return (
-		<Card size="small" className="mb-3 shadow-sm">
-			<div className="mb-2 flex items-center">
-				<Text strong className="text-xs">8. Final Assessment</Text>
-			</div>
-
-			<Form.Item
-				name="final_assessment"
-				className="mb-2"
-				rules={[{ required: true, message: "Please select final assessment" }]}
-			>
-				<Radio.Group>
-					<Space direction="horizontal" size="small">
-						<Radio value="no_issues">🟢 Ready</Radio>
-						<Radio value="fixable_issues">🟡 Fixable</Radio>
-						<Radio value="exclude_completely">🔴 Exclude</Radio>
-					</Space>
-				</Radio.Group>
-			</Form.Item>
-
-			{/* Technical Metadata */}
-			<div className="mb-3">
-				{isOrthoLoading ? (
-					<InlineSkeleton label="Loading technical metadata" className="h-8 w-full" />
-				) : orthoMetadata?.ortho_info ? (
-					<Collapse size="small">
-						<Panel header="📋 Technical Metadata" key="1">
-							<div className="max-h-32 overflow-y-auto">
-								<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
-									{JSON.stringify(orthoMetadata.ortho_info, null, 2)}
-								</pre>
-							</div>
-						</Panel>
-					</Collapse>
-				) : (
-					<div className="text-xs text-gray-500">No technical metadata available</div>
-				)}
-			</div>
-
-			{/* Download button */}
-			<div className="mb-3">
+		<div className="flex flex-col gap-2">
+			{isOrthoLoading ? (
+				<InlineSkeleton label="Loading technical metadata" className="h-8 w-full" />
+			) : orthoMetadata?.ortho_info ? (
+				<Collapse size="small">
+					<Panel header="Technical metadata" key="1">
+						<div className="max-h-32 overflow-y-auto">
+							<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
+								{JSON.stringify(orthoMetadata.ortho_info, null, 2)}
+							</pre>
+						</div>
+					</Panel>
+				</Collapse>
+			) : (
+				<div className="text-xs text-gray-500">No technical metadata available</div>
+			)}
+			<div>
 				<Tooltip
 					title={
 						isViewOnlyDataset
@@ -474,11 +436,6 @@ export function FinalAssessmentCard({
 					</Button>
 				</Tooltip>
 			</div>
-
-			{/* Notes */}
-			<Form.Item name="notes" className="mb-0">
-				<TextArea rows={3} placeholder="Additional observations..." className="text-xs" />
-			</Form.Item>
-		</Card>
+		</div>
 	);
 }

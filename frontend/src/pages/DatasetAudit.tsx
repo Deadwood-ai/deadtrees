@@ -45,15 +45,21 @@ import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../utils/bi
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { isDatasetReadyForAudit } from "../utils/processingSteps";
+import AuditCheckQueue from "../components/DatasetAudit/checks/AuditCheckQueue";
+import type { AuditCheckQueueKind } from "../components/DatasetAudit/checks/AuditCheckQueue";
 
 const { Title, Text } = Typography;
 
 // Tab structure including edits & flags
-type AuditTab = "pending" | "completed" | "reference" | "edits-flags" | "re-review";
-const AUDIT_TABS: readonly AuditTab[] = ["pending", "completed", "reference", "edits-flags", "re-review"];
+type AuditTab = "to-review" | "disagreements" | "pending" | "completed" | "reference" | "edits-flags" | "re-review";
+const AUDIT_TABS: readonly AuditTab[] = ["to-review", "disagreements", "pending", "completed", "reference", "edits-flags", "re-review"];
+// tabs that list automated check results rather than datasets
+const CHECK_TABS: readonly AuditTab[] = ["to-review", "disagreements"];
 
 // one line under the tabs saying what each list holds
 const TAB_DESCRIPTIONS: Record<AuditTab, string> = {
+	"to-review": "Automated check results waiting for a person. Answer each one: agree, or mark the check wrong with a reason.",
+	disagreements: "Reviewers disagree with each other or with the models. These go to adjudication and become benchmark cases.",
 	pending: "Datasets that finished processing and have not been audited yet.",
 	completed: "Datasets with a saved audit. Use the filters to find earlier decisions by status, auditor or outputs.",
 	"edits-flags": "Datasets with suggested corrections to predictions or issue reports from users that still need a decision.",
@@ -251,6 +257,13 @@ function DatasetAuditInner() {
 		for (const r of reviewQueue) map.set(r.dataset_id, [...(map.get(r.dataset_id) ?? []), r]);
 		return map;
 	}, [reviewQueue]);
+	const locationOf = useMemo(() => {
+		const byId = new Map((datasets ?? []).map((d) => [d.id, d]));
+		return (datasetId: number) => {
+			const dataset = byId.get(datasetId);
+			return dataset ? formatLocation(dataset) : "";
+		};
+	}, [datasets]);
 	const { data: referenceDatasetIds = new Set() } = useReferenceDatasetIds();
 	const { data: contributorMap = new Map() } = useDatasetContributors();
 	const { data: correctionsMap = new Map(), isLoading: isCorrectionsLoading } = usePendingCorrections();
@@ -1039,6 +1052,8 @@ function DatasetAuditInner() {
 							}}
 							className="w-full"
 							options={[
+								{ label: "To review", value: "to-review" },
+								{ label: "Disagreements", value: "disagreements" },
 								{ label: `Pending (${pendingCount})`, value: "pending" },
 								{ label: `Completed (${completedCount})`, value: "completed" },
 								{ label: `Edits & Flags (${editsFlagsCount})`, value: "edits-flags" },
@@ -1055,6 +1070,8 @@ function DatasetAuditInner() {
 							}}
 							className="shadow-sm border border-gray-200/50"
 							options={[
+							{ label: <span className="px-2 py-1">To review</span>, value: "to-review" },
+							{ label: <span className="px-2 py-1">Disagreements</span>, value: "disagreements" },
 							{
 								label: (
 									<Space size={6} className="py-1 px-2">
@@ -1109,6 +1126,11 @@ function DatasetAuditInner() {
 					</Text>
 				</div>
 
+				{CHECK_TABS.includes(activeTab) ? (
+				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
+					<AuditCheckQueue kind={activeTab as AuditCheckQueueKind} locationOf={locationOf} />
+				</div>
+				) : (
 				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
 					{/* Filters Panel */}
 					<Collapse
@@ -1316,6 +1338,7 @@ function DatasetAuditInner() {
 						scroll={{ x: isMobile ? 860 : 1000 }}
 					/>
 				</div>
+				)}
 			</div>
 		</div>
 	);

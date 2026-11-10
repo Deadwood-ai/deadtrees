@@ -1,4 +1,4 @@
-import { useRef, forwardRef, useImperativeHandle, useEffect, useCallback } from "react";
+import { useRef, forwardRef, useImperativeHandle, useEffect, useCallback, useState } from "react";
 import { message, Tag, Tooltip } from "antd";
 import { EditOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useQueryClient } from "@tanstack/react-query";
@@ -20,6 +20,7 @@ import { mapColors } from "../../theme/mapColors";
 import { MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
 import { trackAppEvent } from "../../utils/analytics";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
+import AuditCheckMap, { type IAuditCheckMapProps } from "./checks/AuditCheckMap";
 
 interface AuditMapWithControlsProps {
 	dataset: IDataset;
@@ -28,6 +29,8 @@ interface AuditMapWithControlsProps {
 	onEditingStateChange?: (isEditing: boolean, layerType: "deadwood" | "forest_cover" | null) => void;
 	/** This page's audit lease; null once another page holds it (then nothing here can be changed). */
 	auditLeaseId: string | null;
+	/** the open audit section's map mode */
+	checkMap: IAuditCheckMapProps;
 }
 
 export interface AuditMapWithControlsHandle {
@@ -56,7 +59,7 @@ export interface AuditMapWithControlsHandle {
  * Uses the dedicated DatasetAuditMap component
  */
 const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWithControlsProps>(
-	({ dataset, onAOIChange, onToolbarStateChange, onEditingStateChange, auditLeaseId }, ref) => {
+	({ dataset, onAOIChange, onToolbarStateChange, onEditingStateChange, auditLeaseId, checkMap }, ref) => {
 		const readOnly = auditLeaseId === null;
 		// Map ref - use the DatasetAuditMapHandle type
 		const mapRef = useRef<DatasetAuditMapHandle>(null);
@@ -209,13 +212,22 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 			});
 		};
 
+		// The OpenLayers map and drone layer for the check modes; the state only signals readiness.
+		const olMapRef = useRef<OLMap | null>(null);
+		const orthoLayerRef = useRef<TileLayerWebGL | null>(null);
+		const [checkLayersReady, setCheckLayersReady] = useState(0);
+
 		// Map ready callback - pass to editing hook
 		const handleMapReady = useCallback((map: OLMap) => {
+			olMapRef.current = map;
+			setCheckLayersReady((n) => n + 1);
 			editing.handleMapReady(map);
 		}, [editing]);
 
 		// Ortho layer ready callback - pass to editing hook
 		const handleOrthoLayerReady = useCallback((layer: TileLayerWebGL) => {
+			orthoLayerRef.current = layer;
+			setCheckLayersReady((n) => n + 1);
 			editing.handleOrthoLayerReady(layer);
 		}, [editing]);
 
@@ -328,6 +340,11 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 							isLoggedIn={true}
 						/>
 					</div>
+				)}
+
+				{/* The open section's check on the map */}
+				{!isEditing && checkLayersReady > 0 && (
+					<AuditCheckMap key={`${dataset.id}:${checkMap.section?.id ?? "none"}`} map={olMapRef.current} orthoLayer={orthoLayerRef.current} {...checkMap} />
 				)}
 
 				{/* Editor Toolbar */}

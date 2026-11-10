@@ -108,9 +108,9 @@ The stage writes everything through `store_georef_check`, in one transaction.
 - When a newer suggestion disagrees with a saved audit, `audit_review_queue`
   lists the dataset, and it appears in the Re-review tab. Saving the audit
   again takes it off.
-- The georeferencing card shows the measurement. *Show matching* opens a viewer
-  with the drone image over the matched reference, an opacity slider, and the
-  matched points coloured by offset.
+- The georeferencing section shows the measurement. Opening it puts the audit map
+  into georeferencing mode: the chosen reference under the drone image, a drone
+  opacity slider, and the matched points coloured by offset.
 
 ## Operations
 

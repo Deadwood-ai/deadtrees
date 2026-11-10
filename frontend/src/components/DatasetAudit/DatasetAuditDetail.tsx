@@ -1,4 +1,5 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useDatasetThumbnailUrl } from "../../hooks/useDatasetAccess";
 import { Form, message, Button, Drawer } from "antd";
 import { IDataset } from "../../types/dataset";
@@ -14,18 +15,11 @@ import { useAuth } from "../../hooks/useAuthProvider";
 import AuditHeader from "./AuditHeader";
 import { MapPageSkeleton } from "../PageSkeletons";
 import { AuditFooterFormItem } from "./AuditFooter";
-import {
-	UserFlagsCard,
-	PhenologyCard,
-	PredictionQualityCard,
-	COGQualityCard,
-	ThumbnailCard,
-	FinalAssessmentCard,
-} from "./AuditStepCards";
-import AuditAOICard from "./AuditAOICard";
-import { AcquisitionDateCard } from "./AcquisitionDateCard";
-import { GeoreferencingCard } from "./GeoreferencingCard";
+import { UserFlagsCard } from "./AuditStepCards";
 import { AuditReviewNotice } from "./AuditReviewNotice";
+import AuditSections from "./checks/AuditSections";
+import { INITIAL_CHECK_VIEW, type IAuditCheckView } from "./checks/auditCheckView";
+import { AUDIT_SECTIONS, auditSection, sectionOfField, type AuditSectionId } from "../../utils/auditChecks";
 import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 import { MAP_AUDIT_SIDEBAR_WIDTH_CLASS, MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
@@ -48,10 +42,9 @@ interface DownloadApiResponse {
 /**
  * DatasetAuditDetail - Main audit detail view
  * 
- * Refactored to use extracted components:
- * - AuditMapWithControls: Map + layer controls + correction review
- * - AuditStepCards: Individual audit form sections
- * - useAuditDetailState: All state management logic
+ * - AuditSections: the derived decision and the checks in order, in the sidebar
+ * - AuditMapWithControls: map, layer controls, correction review and the open check's map mode
+ * - useAuditDetailState: the saved audit, lease and navigation
  */
 export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps) {
 	const { session } = useAuth();
@@ -101,6 +94,9 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 		acquisitionDateDecisions,
 		auditSuggestions,
 		auditReviewItems,
+		auditChecks,
+		auditChecksFailed,
+		retryAuditChecks,
 		prefilledFields,
 		updateFlagStatus,
 		isUpdatingFlag,
@@ -124,6 +120,21 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 
 	// Generate thumbnail URL
 	const thumbnailUrl = useDatasetThumbnailUrl(dataset);
+
+	// The open section; ?section= opens one (links from the check queue)
+	const [searchParams] = useSearchParams();
+	const requestedSection = searchParams.get("section");
+	const initialView = useCallback(
+		(): IAuditCheckView => ({
+			...INITIAL_CHECK_VIEW,
+			section: AUDIT_SECTIONS.some((s) => s.id === requestedSection) ? (requestedSection as AuditSectionId) : null,
+		}),
+		[requestedSection],
+	);
+	const [checkView, setCheckView] = useState<IAuditCheckView>(initialView);
+	const updateCheckView = useCallback((patch: Partial<IAuditCheckView>) => setCheckView((v) => ({ ...v, ...patch })), []);
+	useEffect(() => setCheckView(initialView()), [dataset.id, initialView]);
+	const openSection = checkView.section ? auditSection(checkView.section) : null;
 
 	// Handle season prompt copy
 	const handleCopySeasonPrompt = () => {
@@ -318,66 +329,75 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						form={form}
 						layout="vertical"
 						onFinish={handleSubmit}
+						onFinishFailed={({ errorFields }) => {
+							// closed sections hide their fields: open the first one with a missing answer
+							const missing = errorFields.map((f) => sectionOfField(String(f.name[0]))).find((id) => id !== null);
+							if (missing) updateCheckView({ section: missing });
+							message.error(errorFields[0]?.errors[0] ?? "Some answers are missing");
+						}}
 						disabled={isLoading || !!auditLockLostMessage}
 						size="small"
 						validateTrigger={["onChange", "onBlur"]}
 					>
 						<AuditReviewNotice items={auditReviewItems} />
 
-						<UserFlagsCard
-							flags={flags}
-							isFlagsLoading={isFlagsLoading}
-							isUpdatingFlag={isUpdatingFlag}
+						<AuditSections
 							datasetId={dataset.id}
-							onUpdateFlag={updateFlagStatus}
-						/>
-
-						<GeoreferencingCard
-							check={georefCheck}
-							cogPath={dataset.cog_path}
-							suggestions={auditSuggestions}
-							prefilledFields={prefilledFields}
-							reviewItems={auditReviewItems}
-							saved={auditData as Record<string, unknown> | null | undefined}
-						/>
-
-						<AcquisitionDateCard
-							dataset={dataset}
-							estimate={acquisitionDateEstimate}
-							suggestions={auditSuggestions}
-							prefilledFields={prefilledFields}
-							decisions={acquisitionDateDecisions}
-							reviewItems={auditReviewItems}
-						/>
-
-						<PhenologyCard
-							dataset={dataset}
-							phenologyData={phenologyData}
-							isPhenologyLoading={isPhenologyLoading}
-							onCopySeasonPrompt={handleCopySeasonPrompt}
-						/>
-
-						<PredictionQualityCard />
-
-						<COGQualityCard />
-
-						<ThumbnailCard thumbnailUrl={thumbnailUrl} />
-
-						<AuditAOICard
-							aoiToolbarState={aoiToolbarState}
-							mapRef={mapRef}
-							isDirty={isAOIDirty}
-							isSaving={isSavingAOI}
-							onSaveAOI={handleSaveAOI}
-						/>
-
-						<FinalAssessmentCard
-							dataset={dataset}
-							orthoMetadata={orthoMetadata}
-							isOrthoLoading={isOrthoLoading}
-							isDownloading={isDownloading}
-							currentDownloadId={currentDownloadId}
-							onStartDownload={handleStartDownload}
+							checks={auditChecks}
+							checksFailed={auditChecksFailed}
+							onRetryChecks={() => void retryAuditChecks()}
+							hasAOI={hasAOI}
+							view={checkView}
+							setView={updateCheckView}
+							disabled={!auditLeaseId}
+							userReports={
+								<UserFlagsCard
+									flags={flags}
+									isFlagsLoading={isFlagsLoading}
+									isUpdatingFlag={isUpdatingFlag}
+									datasetId={dataset.id}
+									onUpdateFlag={updateFlagStatus}
+								/>
+							}
+							panels={{
+								georef: {
+									check: georefCheck,
+									suggestions: auditSuggestions,
+									prefilledFields,
+									reviewItems: auditReviewItems,
+									saved: auditData as Record<string, unknown> | null | undefined,
+								},
+								date: {
+									dataset,
+									estimate: acquisitionDateEstimate,
+									suggestions: auditSuggestions,
+									prefilledFields,
+									decisions: acquisitionDateDecisions,
+									reviewItems: auditReviewItems,
+								},
+								phenology: {
+									dataset,
+									phenologyData,
+									isPhenologyLoading,
+									onCopySeasonPrompt: handleCopySeasonPrompt,
+								},
+								aoi: {
+									aoiToolbarState,
+									mapRef,
+									isDirty: isAOIDirty,
+									isSaving: isSavingAOI,
+									onSaveAOI: handleSaveAOI,
+								},
+								file: {
+									dataset,
+									orthoMetadata,
+									isOrthoLoading,
+									isDownloading,
+									currentDownloadId,
+									onStartDownload: handleStartDownload,
+								},
+								thumbnailUrl,
+							}}
 						/>
 
 						{/* Footer Actions */}
@@ -432,6 +452,13 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						onToolbarStateChange={setAoiToolbarState}
 						onEditingStateChange={handleEditingStateChange}
 						auditLeaseId={auditLeaseId}
+						checkMap={{
+							section: openSection,
+							georefCheck: georefCheck ?? null,
+							evidence: openSection?.checkKey ? auditChecks?.checks[openSection.checkKey] : undefined,
+							cropId: checkView.cropId,
+							onSelectCrop: (cropId) => updateCheckView({ cropId }),
+						}}
 					/>
 				</div>
 			</DatasetDetailsMapProvider>
