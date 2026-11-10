@@ -136,6 +136,11 @@ read everything. Dataset owners and the public see nothing, so model results sta
 with auditors. Operators define benchmarks; the worker and operators record scores.
 The hash rule in `audit.benchmark_split` must never change.
 
+A policy that applies to reads calls its access function inside a scalar subquery,
+`using ((select internal.can_read_audit_checks()))`, so it runs once per statement.
+A bare call runs per row and took the views over the assessments past the statement
+timeout (DT-1532); a test keeps every read policy of the schema in that form.
+
 ## Audit worker
 
 `processor/src/audit_worker` runs the checks on the processing server, as one process
