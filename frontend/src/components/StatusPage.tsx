@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { brand } from "../seo/pageMeta";
+import { usePageMetaOverride } from "../seo/usePageMeta";
 import {
   CloudSyncOutlined,
   DisconnectOutlined,
@@ -50,6 +52,13 @@ export default function StatusPage({
   actions,
 }: StatusPageProps) {
   const { icon, tone } = KIND_ICON[kind];
+  // Transient states stay indexable: a crawler that hits a brief outage must not
+  // drop the page from search.
+  usePageMetaOverride(
+    kind === "not-found" || kind === "locked"
+      ? { title: brand(title), noindex: true }
+      : null,
+  );
   return (
     <div
       className={`${SHELL} min-h-[calc(100dvh-3rem)]`}
