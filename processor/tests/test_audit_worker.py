@@ -243,6 +243,33 @@ def test_an_expired_login_or_a_usage_limit_pauses_without_spending_an_attempt(er
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('error', [None, RuntimeError('boom'), models.LimitReached('codex', 'usage limit reached')])
+def test_the_login_is_renewed_before_a_run_is_written_to_its_end_state(error):
+	"""The login a run starts with lasts 20 to 60 minutes, and a run's model calls can take that long."""
+	client = Client()
+	run = queued(client, version(client), 1)
+	seen = []
+
+	def refresh(renewed):
+		seen.append((renewed is client, run_row(client, run['id'])['status']))
+
+	def handle(ctx):
+		ctx.refresh()  # a handler renews before its own writes
+		if error:
+			raise error
+		return {}
+
+	h = SimpleNamespace(VERSION='v1', CONFIG={'models': {}}, handle=handle)
+	try:
+		worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None, refresh=refresh)
+	except worker.Paused:
+		pass
+	# once from the handler, once by the worker after it, both while the run is still running
+	assert seen == [(True, 'running')] * 2
+	assert run_row(client, run['id'])['status'] in ('done', 'queued')
+
+
+@pytest.mark.unit
 def test_other_errors_are_retried_then_the_run_fails_with_its_error():
 	client = Client()
 	run = queued(client, version(client), 1)

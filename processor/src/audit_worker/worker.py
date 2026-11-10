@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 # check key -> handler module; each check's PR adds its line
 HANDLERS: dict[str, str] = {
 	'dataset_evaluation': 'processor.src.dataset_evaluation_v1.handler',
+	'prediction_quality': 'processor.src.prediction_quality_v1.handler',
 }
 STATUS_FILE = Path(
 	os.environ.get('DEADTREES_AUDIT_WORKER_STATUS', Path.home() / '.local/state/deadtrees-audit-worker/status.json')
@@ -60,6 +61,9 @@ class Context:
 	put_image: Callable[[str, bytes], None]
 	token: str = ''
 	extra: dict = field(default_factory=dict)
+	# Renews the client's login in place. The login a run starts with lasts 20 to 60 minutes;
+	# a handler whose model calls can take that long calls this before its writes.
+	refresh: Callable[[], None] = lambda: None
 
 
 def load_handlers(names: dict[str, str] = HANDLERS) -> tuple[dict, dict]:
@@ -145,17 +149,26 @@ def judged(ctx_run: dict, version_row: dict, handler) -> dict:
 	return models.judges(version_row['config'].get('models', {}))
 
 
-def process(run: dict, *, client, handler, version_row: dict, active_id: int | None, put_image, token='') -> str:
-	"""One claimed run to its end state; a pause puts it back and raises Paused."""
+def process(
+	run: dict, *, client, handler, version_row: dict, active_id: int | None, put_image, token='', refresh=None
+) -> str:
+	"""One claimed run to its end state; a pause puts it back and raises Paused.
+
+	refresh(client) renews the client's login in place (none in tests)."""
 	ctx = Context(run=run, version=version_row, client=client, judges={}, put_image=put_image, token=token)
+	if refresh:
+		ctx.refresh = lambda: refresh(client)
 	try:
-		ctx.judges = judged(run, version_row, handler)
-		if run.get('source_run_id'):
-			if not hasattr(handler, 'recompute'):
-				raise RuntimeError(f'{run["check_key"]} cannot recompute rule-only runs')
-			summary = handler.recompute(ctx) or {}
-		else:
-			summary = handler.handle(ctx) or {}
+		try:
+			ctx.judges = judged(run, version_row, handler)
+			if run.get('source_run_id'):
+				if not hasattr(handler, 'recompute'):
+					raise RuntimeError(f'{run["check_key"]} cannot recompute rule-only runs')
+				summary = handler.recompute(ctx) or {}
+			else:
+				summary = handler.handle(ctx) or {}
+		finally:
+			ctx.refresh()  # the run may have outlived its login; every outcome below is written with a valid one
 	except models.LoginExpired as exc:
 		runs.release(client, run)
 		raise Paused(str(exc), exc.transport, LOGIN_PROBE_SECONDS) from exc
@@ -168,7 +181,7 @@ def process(run: dict, *, client, handler, version_row: dict, active_id: int | N
 	return 'done'
 
 
-def tick(*, client, handlers: dict, put_image, benchmark: bool = False, token='') -> str | None:
+def tick(*, client, handlers: dict, put_image, benchmark: bool = False, token='', refresh=None) -> str | None:
 	"""Take and process one run; None when nothing is queued."""
 	active = runs.active_versions(client, handlers)
 	run = runs.claim_next(client, handlers, benchmark=benchmark)
@@ -188,6 +201,7 @@ def tick(*, client, handlers: dict, put_image, benchmark: bool = False, token=''
 		active_id=active_row['id'] if active_row else None,
 		put_image=put_image,
 		token=token,
+		refresh=refresh,
 	)
 
 
@@ -245,8 +259,11 @@ def register(client, handlers: dict) -> dict[str, dict]:
 	return {check: runs.register_version(client, check, h.VERSION, h.CONFIG) for check, h in handlers.items()}
 
 
-def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, once: bool = False, sleep=time.sleep):
-	"""connect() -> (client, token), called every tick so the processor login stays fresh.
+def run_forever(
+	*, connect, handlers: dict, put_image, benchmark: bool = False, once: bool = False, sleep=time.sleep, refresh=None
+):
+	"""connect() -> (client, token), called every tick so the processor login stays fresh;
+	refresh(client) renews it in place during and after a long run.
 
 	Finished datasets are queued from the persisted watermark on, so datasets that finished
 	while the worker was down are still found. The very first start looks back one hour:
@@ -272,7 +289,14 @@ def run_forever(*, connect, handlers: dict, put_image, benchmark: bool = False, 
 			sweep(client, handlers)
 			since, next_enqueue = started, time.monotonic() + ENQUEUE_SECONDS
 		try:
-			result = tick(client=client, handlers=handlers, put_image=put_image, benchmark=benchmark, token=token)
+			result = tick(
+				client=client,
+				handlers=handlers,
+				put_image=put_image,
+				benchmark=benchmark,
+				token=token,
+				refresh=refresh,
+			)
 		except Paused as pause:
 			status = write_status(
 				'paused', reason=pause.reason, transport=pause.transport, retry_at=time.time() + pause.retry_seconds

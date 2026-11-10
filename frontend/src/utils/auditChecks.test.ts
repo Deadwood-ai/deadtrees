@@ -54,7 +54,7 @@ const queue = (overrides: Partial<IAuditQueueRow>): IAuditQueueRow => ({
 });
 
 const evidence = (overrides: Partial<IAuditCheckEvidence> = {}): IAuditCheckEvidence => ({
-  run: { id: 10, check_key: "georef", inputs: {} },
+  run: { id: 10, check_key: "georef", inputs: {}, evidence: {} },
   automated: [row({})],
   queue: [queue({})],
   crops: [],
@@ -163,7 +163,7 @@ describe("verdicts and the saved audit", () => {
       available: true,
       checks: {
         georef: evidence(),
-        prediction_quality: evidence({ run: { id: 20, check_key: "prediction_quality", inputs: {} } }),
+        prediction_quality: evidence({ run: { id: 20, check_key: "prediction_quality", inputs: {}, evidence: {} } }),
       },
       people: [
         person("me", { verdict: "ok" }),
@@ -230,7 +230,7 @@ describe("crops", () => {
   });
 
   it("picks what a run judged from the dataset's rows", () => {
-    const run = { id: 20, check_key: "prediction_quality" as const, inputs: { ortho_sha256: "a" } };
+    const run = { id: 20, check_key: "prediction_quality" as const, inputs: { ortho_sha256: "a" }, evidence: {} };
     const judged = runEvidence(run, {
       automated: [
         row({ check_key: "prediction_quality", run_id: 20, crop_id: 1, layer: "deadwood", label_id: 52 }),
@@ -253,6 +253,24 @@ describe("crops", () => {
     expect(judged.queue).toHaveLength(1);
     expect(judged.crops.map((c) => c.id)).toEqual([1, 2]);
     expect(judged.images.map((i) => i.id)).toEqual([1, 2, 5]);
+  });
+
+  it("shows the crops a run names and its own image files", () => {
+    // crop 2 is in the check's set from an earlier run on the same ortho; this run judged crop 1 only,
+    // and with another AOI: its raw image differs from the stored row
+    const own = { crop_ids: [1], images: [{ crop_id: 1, label_id: null, kind: "raw", storage_path: "audit/own-raw.jpg" }] };
+    const run = { id: 21, check_key: "prediction_quality" as const, inputs: { ortho_sha256: "a" }, evidence: { judged: own } };
+    const judged = runEvidence(run, {
+      automated: [row({ check_key: "prediction_quality", run_id: 21, crop_id: 1, layer: "deadwood", label_id: 52 })],
+      queue: [],
+      crops: [crop(1, ["exclude"]), crop(2, ["exclude"])],
+      images: [image(1, 1, "raw"), image(2, 1, "deadwood_overlay", 52), image(3, 2, "raw")],
+    });
+    expect(judged.crops.map((c) => c.id)).toEqual([1]);
+    expect(judged.images.map((i) => [i.id, i.storage_path])).toEqual([
+      [1, "audit/own-raw.jpg"],
+      [2, image(2, 1, "deadwood_overlay", 52).storage_path],
+    ]);
   });
 
   it("numbers the exclude set first", () => {

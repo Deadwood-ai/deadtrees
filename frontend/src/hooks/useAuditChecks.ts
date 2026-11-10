@@ -39,7 +39,7 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
   // most datasets have no check yet: one request tells
   if (!runIds.length) return { available: true, checks: {}, people: [] };
   const [runs, automated, queue, people, crops, images] = await Promise.all([
-    audit().from("runs").select("id, check_key, inputs").in("id", runIds),
+    audit().from("runs").select("id, check_key, inputs, evidence").in("id", runIds),
     audit().from("current_assessments").select(ASSESSMENT_COLUMNS).eq("dataset_id", datasetId),
     audit().from("review_queue").select(QUEUE_COLUMNS).eq("dataset_id", datasetId),
     audit()

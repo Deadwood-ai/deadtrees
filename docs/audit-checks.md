@@ -5,7 +5,7 @@ Every check stores what it looked at and every answer, people's and models'.
 Dataset verdicts are derived from those rows by versioned rules, so thresholds
 and model combinations can change without new model calls. Everything lives in the
 `audit` schema: `supabase/migrations/20261029103000_audit_checks_base.sql`. Checks built
-on it: [dataset evaluation](dataset-evaluation.md).
+on it: [dataset evaluation](dataset-evaluation.md), [prediction quality](prediction-quality.md).
 
 ## Model
 
@@ -154,8 +154,11 @@ images travel inline in the request, so a model cannot read files of the account
 - A check plugs in with a handler module listed in `worker.HANDLERS`: `VERSION` and
   `CONFIG` (registered once as `review_all`, inactive), `handle(ctx)` (writes the run's
   crops, images and model and rule rows), optional `recompute(ctx)` for rule-only runs
-  (no judges), optional `ready(status)` and optional `inputs(client, dataset_id)` (the
-  evidence a run judges: ortho sha256, prediction label ids). `CONFIG['models']` names the judges, e.g.
+  (no judges), optional `ready(status)` (default: COG and predictions done) and optional
+  `inputs(client, dataset_id)` (the evidence a run judges: ortho sha256, prediction label
+  ids). The login a run starts with lasts 20 to 60 minutes: a handler whose model calls
+  can take that long calls `ctx.refresh()` before its writes, and the worker renews it
+  again before it writes the run's end state. `CONFIG['models']` names the judges, e.g.
   `{"haiku-5.5": {"transport": "claude", "model": "claude-haiku-5-5"},
   "luna-medium": {"transport": "codex", "model": "gpt-6-luna", "effort": "medium"}}`.
 - Queues: new uploads first, then manual runs, then the backfill. Benchmark runs only in a
@@ -231,7 +234,11 @@ shows the checks as sections in the sidebar: user reports, then 1 Dataset evalua
 (manual) and 6 Prediction quality. Opening a section puts the map into that check's
 mode: the reference and match lines for georeferencing, the judged crops for the
 dataset evaluation and prediction quality, and "Show what the model saw" loads the
-stored images.
+stored images. Crops and images are stored
+per ortho and shared by every run on it, so the page lists the crops the current run
+names in `evidence.judged.crop_ids` and shows the run's own image file where
+`evidence.judged.images` names one (a run of an earlier check version names none: the
+page then takes the crops its rows name and its sets' crops of the ortho).
 
 - A reviewer answers a check with Agree or Check wrong (the check's fixed reasons plus
   a note). Each answer is a new person row on the current run (`run_id`), so it marks

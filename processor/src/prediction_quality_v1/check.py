@@ -1,0 +1,146 @@
+"""Run the prediction quality check on one dataset.
+
+Inputs are fetched by the caller (worker handler or benchmark): the COG path or URL, the
+dataset's CLIP tiles, the AOI and the prediction polygons (WGS84 shapely geometries), and the
+judges. The check picks the two crop sets, renders each crop once, asks every judge in parallel,
+and returns every answer plus the per-layer verdicts of the current rule. Nothing is written here.
+"""
+
+from __future__ import annotations
+
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from typing import Sequence
+
+import rasterio
+from pyproj import CRS, Transformer
+from shapely.geometry import box
+
+from ..audit_worker.models import LimitReached, LoginExpired
+from ..utils.crs import get_utm_string_from_latlon
+from . import judge as judge_mod
+from . import rule as rule_mod
+from .render import Crop, judge_images, render_crop
+from .tiles import TILE_M, Tile, attach_cover, crop_count, exclude_set, project, training_set, utm_layer
+
+VERSIONS = {'check': 'prediction_quality_v1', 'prompt': judge_mod.PROMPT_VERSION, 'rule': rule_mod.RULE_VERSION}
+
+
+@dataclass
+class CropResult:
+	tile: Tile
+	crop: Crop | None = None
+	answers: list = field(default_factory=list)  # judge.Answer
+	failures: dict = field(default_factory=dict)  # judge -> error text
+	combined: dict = field(default_factory=dict)  # layer -> judge.combined(...)
+
+
+@dataclass
+class CheckResult:
+	dataset_id: int
+	epsg: int
+	crops: list  # CropResult
+	verdicts: dict  # layer -> rule.dataset_verdict(...)
+	tiles_total: int
+	seconds: float
+	cost: dict = field(default_factory=dict)  # judge -> {'seconds', 'calls', 'cost_usd'}
+
+
+def pick(tiles: Sequence[Tile], hectares: float, seed: int) -> list[Tile]:
+	"""Both crop sets; a tile in both is rendered and judged once."""
+	n = crop_count(hectares)
+	chosen = {t.tile_id: t for t in exclude_set(tiles)}
+	for t in training_set(tiles, n, seed):
+		chosen[t.tile_id] = t
+	return list(chosen.values())
+
+
+def grid_epsg(src) -> int:
+	"""The UTM zone of the CLIP tile grid: the zone of the ortho's centre, as the embedding stage picks it."""
+	lon, lat = Transformer.from_crs(src.crs, 4326, always_xy=True).transform(
+		*(src.transform @ (src.width / 2, src.height / 2))
+	)
+	return CRS.from_string(get_utm_string_from_latlon(lat, lon)).to_epsg()
+
+
+def run_prediction_quality(
+	dataset_id: int,
+	cog: str,
+	tiles: Sequence[Tile],
+	aoi_4326,
+	predictions_4326: dict,
+	judges: dict,
+	workers: int = 4,
+	rule_config: dict = rule_mod.RULE_CONFIG,
+) -> CheckResult:
+	"""predictions_4326: layer ('deadwood', 'forest') -> polygons; the dict is emptied, so each
+	layer's WGS84 copy is gone once it is projected (large predictions hold a few hundred
+	thousand polygons). aoi_4326 None judges every tile: a dataset without an AOI is predicted
+	as a whole. `rule_config` is the version's."""
+	start = time.monotonic()
+	with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='60'), rasterio.open(cog) as src:
+		epsg = grid_epsg(src)
+		to_utm = Transformer.from_crs(4326, epsg, always_xy=True)
+		aoi = project(aoi_4326, to_utm).buffer(0) if aoi_4326 is not None else None
+		layers = {layer: utm_layer(predictions_4326.pop(layer), to_utm) for layer in judge_mod.LAYERS}
+		attach_cover(tiles, to_utm, layers['deadwood'], layers['forest'])
+		# Only tiles whose square lies inside the AOI judge the prediction there. An AOI
+		# smaller than a tile is judged on the tiles it touches.
+		share = {
+			t.tile_id: 1.0 if aoi is None else box(*t.square_utm).intersection(aoi).area / TILE_M**2 for t in tiles
+		}
+		inside = [t for t in tiles if share[t.tile_id] >= 0.9] or [t for t in tiles if share[t.tile_id] > 0]
+		hectares = (aoi.area if aoi is not None else len(inside) * TILE_M**2) / 1e4
+		results = [CropResult(tile=t) for t in pick(inside, hectares, dataset_id)]
+		for r in results:
+			near = {name: layer.near(r.tile.square_utm) for name, layer in layers.items()}
+			r.crop = render_crop(src, epsg, r.tile.square_utm, near, aoi)
+	del layers  # up to a few hundred thousand polygons, not needed while the judges take their minutes
+
+	def one(task):
+		r, name, backend = task
+		asked = time.monotonic()
+		try:
+			answer, error = judge_mod.ask(name, backend, judge_images(r.crop)), None
+		except (LoginExpired, LimitReached):
+			raise  # the worker pauses and runs the dataset again later
+		except Exception as e:  # one judge failing on one crop does not stop the check
+			answer, error = None, f'{type(e).__name__}: {str(e)[:200]}'
+		return r, name, answer, error, time.monotonic() - asked
+
+	tasks = [(r, name, backend) for r in results for name, backend in judges.items()]
+	cost = {name: {'seconds': 0.0, 'calls': 0, 'cost_usd': None} for name in judges}
+	answered = dict.fromkeys(judges, 0)
+	with ThreadPoolExecutor(max(1, workers)) as pool:
+		for r, name, answer, error, seconds in pool.map(one, tasks):
+			cost[name]['seconds'] = round(cost[name]['seconds'] + seconds, 1)
+			cost[name]['calls'] += 1
+			if answer is not None:
+				r.answers.append(answer)
+				answered[name] += 1
+			else:
+				r.failures[name] = error
+	# The cuts are calibrated on the judges' mean, so a verdict never rests on fewer judges.
+	silent = [name for name, count in answered.items() if results and not count]
+	if silent:
+		raise RuntimeError(f'{", ".join(silent)} answered no crop: {results[0].failures[silent[0]]}')
+	for r in results:
+		r.combined = {layer: judge_mod.combined(r.answers, layer) for layer in judge_mod.LAYERS}
+
+	verdicts = {}
+	for layer in judge_mod.LAYERS:
+		exclude = [{'combined': r.combined[layer]} for r in results if 'exclude' in r.tile.sets]
+		training = [
+			{'combined': r.combined[layer], 'weight': r.tile.weight} for r in results if 'training' in r.tile.sets
+		]
+		verdicts[layer] = rule_mod.dataset_verdict(layer, exclude, training, rule_config)
+	return CheckResult(
+		dataset_id=dataset_id,
+		epsg=epsg,
+		crops=results,
+		verdicts=verdicts,
+		tiles_total=len(inside),
+		seconds=round(time.monotonic() - start, 1),
+		cost=cost,
+	)
