@@ -36,7 +36,7 @@ the check queue tabs.
    the drone image with match lines; the panel switches reference and opacity.
 3. Before answering, other reviewers' and the models' answers are hidden. Mark the
    check wrong with a reason and a note; the answer, the models and the other
-   reviewer's answer appear, and the saved audit field flips.
+   reviewer's answer appear, and the read-only saved audit field follows the answer.
 4. Open `1. Dataset evaluation`: agree; the four crops show on the map and
    "Show what the model saw" loads the overview, then a crop's image after a click.
 5. Open `6. Prediction quality`: step through crops with n / p, answer a crop, and
@@ -52,6 +52,8 @@ the check queue tabs.
   current `run_id` and, for "Check wrong", `reason_code` and `reason_text`.
 - Crop answers carry `crop_id` and the layer.
 - Images load through `/api/v1/audit/images/files/<ticket>/...`.
+- An answer sends one request and the page does not reload its checks.
+- After a reload without saving, the saved audit fields of answered checks still show the answers.
 - `dataset_audit` holds the confirmed final assessment and the fields the answers set.
 
 ## Failure Signals

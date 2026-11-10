@@ -8,16 +8,13 @@ signed link that is issued to, and rechecked for, users with ``can_audit``.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
 from shared.settings import settings
 
-from ..access.dataset_files import inside
-from ..access.delivery import protected_file_response
-from ..access.privileges import user_is_core_team
-from ..access.tickets import read_ticket, sign_ticket
+from ..access.core_team_files import core_team_file_response, sign_core_team_ticket
 from .dataset_access import require_user
 
 router = APIRouter()
@@ -37,19 +34,11 @@ class AuditImageAccess(BaseModel):
 def issue_audit_image_access(token: Annotated[str, Depends(oauth2_scheme)]):
 	"""A signed link prefix for the audit images, for auditors only."""
 	user = require_user(token)
-	if not user_is_core_team(user.id):
-		raise HTTPException(status_code=403, detail='Audit images are limited to auditors')
-	ticket, expires_at = sign_ticket(user.id, TICKET_RESOURCE)
+	ticket, expires_at = sign_core_team_ticket(user.id, TICKET_RESOURCE, 'Audit images are limited to auditors')
 	return AuditImageAccess(files_url=f'/audit/images/files/{ticket}', expires_at=expires_at)
 
 
 @router.api_route('/audit/images/files/{ticket}/{relative_path:path}', methods=['GET', 'HEAD'])
 def serve_audit_image(ticket: str, relative_path: str):
 	"""Hand one audit image to nginx; relative_path is the storage_path below audit/. Every failure is the same 404."""
-	signed = read_ticket(ticket, TICKET_RESOURCE)
-	if not signed or not user_is_core_team(signed.user_id):
-		raise HTTPException(status_code=404, detail='Not found')
-	path = inside(settings.base_path / AUDIT_IMAGE_DIR, relative_path)
-	if not path or not path.is_file():
-		raise HTTPException(status_code=404, detail='Not found')
-	return protected_file_response(path, cacheable=True)
+	return core_team_file_response(ticket, TICKET_RESOURCE, settings.base_path / AUDIT_IMAGE_DIR, relative_path)

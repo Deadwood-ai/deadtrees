@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, message, notification } from "antd";
 import confetti from "canvas-confetti";
@@ -243,32 +243,34 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		}
 	}, [auditData, form]);
 
+	// Where a check has run, the reviewer's answer decides its saved-audit field.
+	const answered = useMemo(() => answeredFormValues(auditChecks, user?.id), [auditChecks, user?.id]);
+
 	// Machine suggestions prefill the form once per page load, after the saved
-	// audit, the suggestions, the re-review items and the automated checks have all
-	// arrived: fields the saved audit leaves empty, and the fields of items listed for
-	// re-review (newer evidence disagrees with the saved value). Where the saved audit
-	// is empty, the reviewer's own answers to the checks come before a suggestion.
-	// Later refetches never touch what the auditor is editing; nothing is saved until
-	// the auditor saves.
+	// audit, the suggestions and the re-review items have all arrived: fields
+	// the saved audit leaves empty, and the fields of items listed for re-review
+	// (newer evidence disagrees with the saved value). Later refetches never
+	// touch what the auditor is editing; nothing is saved until the auditor saves.
 	const prefilledForRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (prefilledForRef.current === dataset.id) return;
 		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined) return;
-		if (auditChecksQuery.isLoading) return;
 		prefilledForRef.current = dataset.id;
 		const { values: suggested, fields } = suggestedAuditValues(
 			auditData as Record<string, unknown> | null,
 			auditSuggestionsData,
 			reviewItems.flatMap((r) => r.fields),
 		);
-		const saved = (auditData ?? {}) as Record<string, unknown>;
-		const answered = Object.fromEntries(
-			Object.entries(answeredFormValues(auditChecks, user?.id)).filter(([field]) => saved[field] === null || saved[field] === undefined),
-		);
-		// a slow load must not overwrite what the auditor already set by hand
 		form.setFieldsValue({ ...suggested, ...answered });
-		setPrefilledFields(fields.filter((field) => !(field in answered)));
-	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, auditChecks, auditChecksQuery.isLoading, user?.id, form]);
+		setPrefilledFields(fields);
+	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, answered, form]);
+
+	// The form follows the answers whenever they or the saved audit load or change,
+	// so an answer and its saved field cannot disagree. Declared after the two
+	// effects above: in one commit the answers are applied last.
+	useEffect(() => {
+		if (Object.keys(answered).length) form.setFieldsValue(answered);
+	}, [answered, auditData, form]);
 
 	// Track form changes
 	useEffect(() => {
@@ -482,7 +484,8 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		auditChecks,
 		auditChecksFailed: auditChecksQuery.isError,
 		retryAuditChecks: auditChecksQuery.refetch,
-		prefilledFields,
+		// a field the reviewer's answer decides is no longer "suggested"
+		prefilledFields: prefilledFields.filter((field) => !(field in answered)),
 
 		// Flags
 		updateFlagStatus,

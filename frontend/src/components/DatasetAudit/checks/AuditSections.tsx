@@ -5,15 +5,16 @@ import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
 import type { IAuditChecks } from "../../../types/auditChecks";
 import {
 	AUDIT_SECTIONS,
+	LAYER_LABELS,
 	auditSection,
 	automatedVerdict,
+	legacySectionStatus,
 	myAnswer,
 	sectionStatus,
 	type AuditSectionId,
 	type IAuditSectionDef,
 	type IAuditSectionStatus,
 } from "../../../utils/auditChecks";
-import { summarizeGeorefCheck } from "../../../utils/georefCheck";
 import { AcquisitionDateCard } from "../AcquisitionDateCard";
 import AuditAOICard from "../AuditAOICard";
 import { COGQualityCard, OrthoFilePanel, PhenologyCard, PredictionQualityCard, ThumbnailCard } from "../AuditStepCards";
@@ -50,8 +51,6 @@ interface AuditSectionsProps {
 	disabled: boolean;
 }
 
-const TONES = { success: "ok", error: "bad", warning: "warn" } as const;
-
 /** The audit sidebar: the derived decision, user reports and the six checks in order.
  * Opening a section puts the map into that check's mode. */
 export default function AuditSections({ datasetId, checks, checksFailed, onRetryChecks, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
@@ -65,38 +64,23 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		return !!evidence && s.layers.every((layer) => myAnswer(people, user?.id, evidence.run.id, { checkKey: s.checkKey!, layer }));
 	};
 
+	// a section whose check has run reads the audit tables; the others fall back to the saved audit and older tables
 	const status = (s: IAuditSectionDef): IAuditSectionStatus => {
-		if (evidenceOf(s)) return sectionStatus(s, evidenceOf(s), answeredAll(s));
-		const reviewItem = (item: string) => panels.georef.reviewItems.some((i) => i.item === item);
-		switch (s.id) {
-			case "aoi":
-				return hasAOI ? { label: "Set", tone: "ok", needsYou: false } : { label: "Missing", tone: "warn", needsYou: false };
-			case "phenology":
-				return phenology === undefined || phenology === null
-					? { label: "Manual", tone: "todo", needsYou: false }
-					: { label: phenology ? "In season" : "Out of season", tone: phenology ? "ok" : "warn", needsYou: false };
-			case "georef": {
-				const check = panels.georef.check;
-				if (!check) break;
-				if (reviewItem("is_georeferenced")) return { label: "Needs you", tone: "warn", needsYou: true };
-				const summary = summarizeGeorefCheck(check);
-				return { label: summary.verdict.split(",")[0], tone: TONES[summary.tone], needsYou: false };
-			}
-			case "date": {
-				const estimate = panels.date.estimate;
-				if (!estimate) break;
-				if (reviewItem("acquisition_date")) return { label: "Needs you", tone: "warn", needsYou: true };
-				return estimate.is_mismatch ? { label: "Mismatch", tone: "bad", needsYou: false } : { label: "Valid", tone: "ok", needsYou: false };
-			}
-		}
-		return { label: "Not run yet", tone: "todo", needsYou: false };
+		const evidence = evidenceOf(s);
+		if (evidence) return sectionStatus(s, evidence, answeredAll(s));
+		return legacySectionStatus(s.id, {
+			hasAOI,
+			phenology,
+			georefCheck: panels.georef.check,
+			dateEstimate: panels.date.estimate,
+			reviewItems: panels.georef.reviewItems,
+		});
 	};
 
 	const statuses = Object.fromEntries(AUDIT_SECTIONS.map((s) => [s.id, status(s)])) as Record<AuditSectionId, IAuditSectionStatus>;
 	const evaluation = checks?.checks.dataset_evaluation;
 	const myEvaluation = evaluation ? myAnswer(people, user?.id, evaluation.run.id, { checkKey: "dataset_evaluation", layer: "image" }) : null;
-	const open = (id: AuditSectionId) =>
-		setView({ section: view.section === id ? null : id, ...(view.section !== id ? { cropId: null, provider: undefined } : {}) });
+	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null });
 
 	const answers = (s: IAuditSectionDef) => {
 		const evidence = evidenceOf(s);
@@ -106,7 +90,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				<CheckSummary section={s} evidence={evidence} />
 				{s.layers.map((layer) => (
 					<div key={layer}>
-						{s.layers.length > 1 && <div className="mb-1 text-xs font-medium capitalize">{layer.replace("_", " ")}</div>}
+						{s.layers.length > 1 && <div className="mb-1 text-xs font-medium">{LAYER_LABELS[layer]}</div>}
 						<CheckAnswer
 							datasetId={datasetId}
 							section={s}
@@ -117,9 +101,23 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 						/>
 					</div>
 				))}
+				{s.cropAnswers && (
+					<CropAnswers
+						datasetId={datasetId}
+						section={s}
+						evidence={evidence}
+						people={people}
+						cropId={view.section === s.id ? view.cropId : null}
+						onSelectCrop={(cropId) => setView({ cropId })}
+						disabled={disabled}
+						active={view.section === s.id}
+					/>
+				)}
 			</div>
 		);
 	};
+	// where a check has run, the reviewer's answer decides its saved-audit field
+	const answerOwned = (id: AuditSectionId) => !!evidenceOf(auditSection(id));
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
 		evaluation: (
@@ -139,34 +137,21 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		georef: (
 			<>
 				{answers(auditSection("georef"))}
-				<GeoreferencingCard {...panels.georef} />
+				<GeoreferencingCard {...panels.georef} answerOwned={answerOwned("georef")} />
 			</>
 		),
 		date: (
 			<>
 				{answers(auditSection("date"))}
-				<AcquisitionDateCard {...panels.date} />
+				<AcquisitionDateCard {...panels.date} answerOwned={answerOwned("date")} />
 			</>
 		),
 		phenology: <PhenologyCard {...panels.phenology} />,
 		prediction: (
 			<>
 				{answers(auditSection("prediction"))}
-				{checks?.checks.prediction_quality && (
-					<div className="mb-3">
-						<CropAnswers
-							datasetId={datasetId}
-							evidence={checks.checks.prediction_quality}
-							people={people}
-							cropId={view.section === "prediction" ? view.cropId : null}
-							onSelectCrop={(cropId) => setView({ cropId })}
-							disabled={disabled}
-							active={view.section === "prediction"}
-						/>
-					</div>
-				)}
 				<div className="mb-1 text-xs font-medium">Saved audit ratings</div>
-				<PredictionQualityCard />
+				<PredictionQualityCard answerOwned={answerOwned("prediction")} />
 			</>
 		),
 	};

@@ -46,7 +46,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { isDatasetReadyForAudit } from "../utils/processingSteps";
 import AuditCheckQueue from "../components/DatasetAudit/checks/AuditCheckQueue";
-import type { AuditCheckQueueKind } from "../hooks/useAuditCheckQueue";
+import type { AuditCheckQueueKind } from "../components/DatasetAudit/checks/AuditCheckQueue";
 
 const { Title, Text } = Typography;
 

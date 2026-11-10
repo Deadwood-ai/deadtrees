@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { Button, Form, Input, message } from "antd";
+import { Button, Input, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
-import { useSaveAuditAnswer } from "../../../hooks/useAuditChecks";
+import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
 import {
 	automatedRows,
 	automatedVerdict,
-	formValuesForVerdict,
 	myAnswer,
 	othersAnswers,
 	verdictLabel,
@@ -30,9 +29,8 @@ const chip = (on: boolean) =>
 /** Agree with a check, or mark it wrong with a fixed reason and a note. Every answer is a
  * new person row on the current run; other reviewers' answers stay hidden until you answer. */
 export default function CheckAnswer({ datasetId, section, layer, evidence, people, disabled }: CheckAnswerProps) {
-	const form = Form.useFormInstance();
 	const { user } = useAuth();
-	const { mutateAsync: save, isPending } = useSaveAuditAnswer();
+	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
 	const [changing, setChanging] = useState(false);
 	const [wrongOpen, setWrongOpen] = useState(false);
 	const [reason, setReason] = useState<string | null>(null);
@@ -56,17 +54,18 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 
 	const store = async (answer: AuditVerdict, reasonCode: string | null = null, reasonText: string | null = null) => {
 		try {
-			await save({
-				check_key: checkKey,
-				dataset_id: datasetId,
-				run_id: runId,
-				layer,
-				label_id: rows[0]?.label_id ?? null,
-				verdict: answer,
-				reason_code: reasonCode,
-				reason_text: reasonText?.trim() || null,
-			});
-			form.setFieldsValue(formValuesForVerdict(checkKey, layer, answer, rows));
+			await save([
+				{
+					check_key: checkKey,
+					dataset_id: datasetId,
+					run_id: runId,
+					layer,
+					label_id: rows[0]?.label_id ?? null,
+					verdict: answer,
+					reason_code: reasonCode,
+					reason_text: reasonText?.trim() || null,
+				},
+			]);
 			setChanging(false);
 			setWrongOpen(false);
 			setReason(null);

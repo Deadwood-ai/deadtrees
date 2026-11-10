@@ -134,7 +134,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 	const [checkView, setCheckView] = useState<IAuditCheckView>(initialView);
 	const updateCheckView = useCallback((patch: Partial<IAuditCheckView>) => setCheckView((v) => ({ ...v, ...patch })), []);
 	useEffect(() => setCheckView(initialView()), [dataset.id, initialView]);
-	const mapMode = checkView.section ? auditSection(checkView.section).mapMode : "default";
+	const openSection = checkView.section ? auditSection(checkView.section) : null;
 
 	// Handle season prompt copy
 	const handleCopySeasonPrompt = () => {
@@ -453,16 +453,11 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						onEditingStateChange={handleEditingStateChange}
 						auditLeaseId={auditLeaseId}
 						checkMap={{
-							mode: mapMode,
+							section: openSection,
 							georefCheck: georefCheck ?? null,
-							evidence:
-								mapMode === "evaluation"
-									? auditChecks?.checks.dataset_evaluation
-									: mapMode === "prediction"
-										? auditChecks?.checks.prediction_quality
-										: undefined,
-							view: checkView,
-							setView: updateCheckView,
+							evidence: openSection?.checkKey ? auditChecks?.checks[openSection.checkKey] : undefined,
+							cropId: checkView.cropId,
+							onSelectCrop: (cropId) => updateCheckView({ cropId }),
 						}}
 					/>
 				</div>

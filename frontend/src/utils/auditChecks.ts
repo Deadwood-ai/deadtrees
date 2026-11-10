@@ -1,18 +1,34 @@
-/** How the audit page reads the automated checks: section order, verdict labels,
- * status, the answer a reviewer gives and the decision derived from the sections. */
+/** How the audit page reads the automated checks: section order, what the map shows,
+ * verdict labels, status, the answer a reviewer gives and the decision derived from the sections. */
 
 import type { AuditFormValues, DatasetDisposition, PredictionQuality } from "../hooks/useDatasetAudit";
+import type { IAcquisitionDateEstimate, IAuditReviewItem } from "../types/acquisitionDate";
 import type {
   AuditCheckKey,
+  AuditImageKind,
   AuditLayer,
   AuditVerdict,
   IAuditAssessment,
   IAuditCheckEvidence,
+  IAuditChecks,
+  IAuditQueueRow,
 } from "../types/auditChecks";
+import type { IGeorefCheck } from "../types/georefCheck";
+import { summarizeGeorefCheck } from "./georefCheck";
 
 export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "prediction";
-/** What the map shows while a section is open. */
-export type AuditMapMode = "default" | "evaluation" | "georef" | "prediction";
+export type CropImageKind = Extract<AuditImageKind, "raw" | "deadwood_overlay" | "forest_cover_overlay">;
+
+/** What the map shows while a section is open: the georeferencing matches, or the crops the check judged. */
+export type IAuditSectionMap =
+  | { kind: "georef" }
+  | {
+      kind: "crops";
+      /** the stored images of a crop the reviewer can switch between */
+      images: CropImageKind[];
+      /** layers whose model verdict can colour the squares */
+      colorLayers: AuditLayer[];
+    };
 
 export interface IAuditReason {
   code: string;
@@ -25,7 +41,9 @@ export interface IAuditSectionDef {
   checkKey: AuditCheckKey | null;
   /** dataset-level layers a person answers */
   layers: AuditLayer[];
-  mapMode: AuditMapMode;
+  map: IAuditSectionMap | null;
+  /** reviewers also answer per crop and layer */
+  cropAnswers?: boolean;
   /** the fixed "Check wrong" reasons; "other" always comes last */
   reasons: IAuditReason[];
   /** the verdicts a reviewer can give. Two: "Check wrong" flips the call. Three: the reviewer picks. */
@@ -42,7 +60,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Dataset evaluation",
     checkKey: "dataset_evaluation",
     layers: ["image"],
-    mapMode: "evaluation",
+    map: { kind: "crops", images: ["raw"], colorLayers: [] },
     reasons: [
       { code: "exclude_call_wrong", label: "Keep or exclude call wrong" },
       { code: "fix_call_wrong", label: "COG or thumbnail call wrong" },
@@ -52,13 +70,13 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     verdicts: ["ok", "minor", "major"],
     fields: ["has_cog_issue", "has_thumbnail_issue"],
   },
-  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], mapMode: "default", reasons: [], verdicts: [], fields: [] },
+  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], map: null, reasons: [], verdicts: [], fields: [] },
   {
     id: "georef",
     title: "Georeferencing",
     checkKey: "georef",
     layers: ["georef"],
-    mapMode: "georef",
+    map: { kind: "georef" },
     reasons: [
       { code: "offset_misjudged", label: "Offset misjudged" },
       { code: "reference_wrong_or_outdated", label: "Reference wrong or outdated" },
@@ -73,7 +91,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Acquisition date",
     checkKey: "acquisition_date",
     layers: ["acquisition_date"],
-    mapMode: "default",
+    map: null,
     reasons: [
       { code: "estimate_wrong", label: "Estimate wrong" },
       { code: "reported_date_right", label: "Reported date is right" },
@@ -87,7 +105,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Phenology",
     checkKey: null,
     layers: [],
-    mapMode: "default",
+    map: null,
     reasons: [],
     verdicts: [],
     fields: ["has_valid_phenology"],
@@ -97,7 +115,8 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Prediction quality",
     checkKey: "prediction_quality",
     layers: ["deadwood", "forest_cover"],
-    mapMode: "prediction",
+    map: { kind: "crops", images: ["raw", "deadwood_overlay", "forest_cover_overlay"], colorLayers: ["deadwood", "forest_cover"] },
+    cropAnswers: true,
     reasons: [
       { code: "errors_missed", label: "Model missed errors" },
       { code: "fine_prediction_flagged", label: "Model flagged a fine prediction" },
@@ -115,6 +134,11 @@ export const auditSection = (id: AuditSectionId) => AUDIT_SECTIONS.find((s) => s
 export const sectionOfField = (field: string): AuditSectionId | null =>
   AUDIT_SECTIONS.find((s) => (s.fields as string[]).includes(field))?.id ?? null;
 
+/** The audit page section that shows a check. */
+export function sectionOfCheck(checkKey: AuditCheckKey): AuditSectionId {
+  return AUDIT_SECTIONS.find((s) => s.checkKey === checkKey)!.id;
+}
+
 const VERDICT_LABELS: Record<AuditCheckKey, Record<AuditVerdict, string>> = {
   dataset_evaluation: { ok: "Keep", minor: "Keep, fix", major: "Exclude", unsure: "Unsure" },
   georef: { ok: "Good", minor: "Small offset", major: "Poor", unsure: "Uncertain" },
@@ -131,6 +155,14 @@ export function verdictLabel(checkKey: AuditCheckKey, verdict: AuditVerdict): st
   return VERDICT_LABELS[checkKey][verdict];
 }
 
+/** Why a result goes to a person (audit.review_queue.reason): a short label and a clause after "Here because". */
+export const QUEUE_REASONS: Record<NonNullable<IAuditQueueRow["reason"]>, { label: string; because: string }> = {
+  review_all: { label: "Review all: new check", because: "every result of this check goes to a person for now" },
+  unsure: { label: "Check unsure", because: "the check is unsure" },
+  models_disagree: { label: "Models disagree", because: "the models disagree" },
+  spot_check: { label: "Spot check", because: "it was picked as a spot check" },
+};
+
 export type AuditTone = "ok" | "warn" | "bad" | "todo";
 
 export const VERDICT_TONE: Record<AuditVerdict, AuditTone> = { ok: "ok", minor: "warn", major: "bad", unsure: "warn" };
@@ -139,15 +171,9 @@ const SEVERITY: AuditVerdict[] = ["ok", "minor", "unsure", "major"];
 const worst = (verdicts: AuditVerdict[]) =>
   verdicts.reduce<AuditVerdict | null>((w, v) => (w === null || SEVERITY.indexOf(v) > SEVERITY.indexOf(w) ? v : w), null);
 
-/** The check's dataset-level call on a layer: the review queue's verdict, else the worst
- * dataset-level rule row (or model row when the run has no rule), as the queue computes it. */
+/** The check's dataset-level call on a layer, as audit.review_queue derives it from the current run. */
 export function automatedVerdict(evidence: IAuditCheckEvidence | undefined, layer: AuditLayer): AuditVerdict | null {
-  if (!evidence) return null;
-  const queued = evidence.queue.find((q) => q.layer === layer);
-  if (queued) return queued.verdict;
-  const rows = evidence.automated.filter((a) => a.crop_id === null && a.layer === layer);
-  const rules = rows.filter((a) => a.assessor_kind === "rule");
-  return worst((rules.length ? rules : rows).map((a) => a.verdict));
+  return evidence?.queue.find((q) => q.layer === layer)?.verdict ?? null;
 }
 
 /** The dataset-level rows the call rests on: rule rows first, then each model. */
@@ -176,27 +202,66 @@ export function othersAnswers(people: IAuditAssessment[], userId: string | undef
   return people.filter((a) => onTarget(target)(a) && a.assessor_user_id !== userId && a.run_id === runId);
 }
 
+/** People's latest answers after new ones arrive: a newer row replaces the same person's earlier one on its target. */
+export function mergeAnswers(people: IAuditAssessment[], added: IAuditAssessment[]): IAuditAssessment[] {
+  const replaces = (a: IAuditAssessment, b: IAuditAssessment) =>
+    a.assessor_user_id === b.assessor_user_id && onTarget({ checkKey: b.check_key, layer: b.layer, cropId: b.crop_id })(a);
+  return [...people.filter((p) => !added.some((a) => replaces(p, a))), ...added];
+}
+
 export interface IAuditSectionStatus {
   label: string;
   tone: AuditTone;
   needsYou: boolean;
 }
 
-/** The badge of a section with a check: not run, needs you, answered, or the call itself. */
-export function sectionStatus(
-  section: IAuditSectionDef,
-  evidence: IAuditCheckEvidence | undefined,
-  answered: boolean,
-): IAuditSectionStatus {
-  if (!section.checkKey || !evidence) return { label: "Not run yet", tone: "todo", needsYou: false };
+const NOT_RUN: IAuditSectionStatus = { label: "Not run yet", tone: "todo", needsYou: false };
+
+/** The badge of a section whose check has run: needs you, answered, or the call itself. */
+export function sectionStatus(section: IAuditSectionDef, evidence: IAuditCheckEvidence, answered: boolean): IAuditSectionStatus {
   const verdict = worst(section.layers.map((l) => automatedVerdict(evidence, l)).filter((v): v is AuditVerdict => v !== null));
-  // each reviewer answers on their own: a result under review needs you until you answered,
-  // whoever else did (the queue's needs_review clears with the first answer)
-  const needsReview = evidence.queue.some((q) => q.reason !== null && section.layers.includes(q.layer));
-  if (needsReview && !answered) return { label: "Needs you", tone: verdict === "major" ? "bad" : "warn", needsYou: true };
+  // each reviewer answers on their own: a result under review needs you until you answered, whoever else did
+  const underReview = evidence.queue.some((q) => q.reason !== null && section.layers.includes(q.layer));
+  if (underReview && !answered) return { label: "Needs you", tone: verdict === "major" ? "bad" : "warn", needsYou: true };
   if (answered) return { label: "Answered", tone: "ok", needsYou: false };
   if (!verdict) return { label: "No call", tone: "todo", needsYou: false };
-  return { label: verdictLabel(section.checkKey, verdict), tone: VERDICT_TONE[verdict], needsYou: false };
+  return { label: verdictLabel(section.checkKey!, verdict), tone: VERDICT_TONE[verdict], needsYou: false };
+}
+
+export interface ILegacySectionInputs {
+  hasAOI: boolean;
+  phenology: boolean | null | undefined;
+  georefCheck: IGeorefCheck | null | undefined;
+  dateEstimate: IAcquisitionDateEstimate | null | undefined;
+  /** saved audit items newer evidence disagrees with (public.audit_review_queue) */
+  reviewItems: IAuditReviewItem[];
+}
+
+const GEOREF_TONES = { success: "ok", error: "bad", warning: "warn" } as const;
+
+/** The badge of a section without a run in the audit tables: from the saved audit and the older check tables. */
+export function legacySectionStatus(id: AuditSectionId, inputs: ILegacySectionInputs): IAuditSectionStatus {
+  const underReview = (item: string) => inputs.reviewItems.some((i) => i.item === item);
+  const needsYou: IAuditSectionStatus = { label: "Needs you", tone: "warn", needsYou: true };
+  switch (id) {
+    case "aoi":
+      return inputs.hasAOI ? { label: "Set", tone: "ok", needsYou: false } : { label: "Missing", tone: "warn", needsYou: false };
+    case "phenology":
+      if (inputs.phenology === undefined || inputs.phenology === null) return { label: "Manual", tone: "todo", needsYou: false };
+      return inputs.phenology ? { label: "In season", tone: "ok", needsYou: false } : { label: "Out of season", tone: "warn", needsYou: false };
+    case "georef": {
+      if (!inputs.georefCheck) return NOT_RUN;
+      if (underReview("is_georeferenced")) return needsYou;
+      const summary = summarizeGeorefCheck(inputs.georefCheck);
+      return { label: summary.verdict.split(",")[0], tone: GEOREF_TONES[summary.tone], needsYou: false };
+    }
+    case "date":
+      if (!inputs.dateEstimate) return NOT_RUN;
+      if (underReview("acquisition_date")) return needsYou;
+      return inputs.dateEstimate.is_mismatch ? { label: "Mismatch", tone: "bad", needsYou: false } : { label: "Valid", tone: "ok", needsYou: false };
+    default:
+      return NOT_RUN;
+  }
 }
 
 /** The verdict "Check wrong" stores for a two-way call; null where the reviewer must pick one. */
@@ -206,25 +271,15 @@ export function wrongVerdict(verdict: AuditVerdict): AuditVerdict | null {
   return null;
 }
 
-const QUALITY_VERDICT: Record<PredictionQuality, AuditVerdict> = { great: "ok", sentinel_ok: "minor", bad: "major" };
 const VERDICT_QUALITY: Partial<Record<AuditVerdict, PredictionQuality>> = { ok: "great", minor: "sentinel_ok", major: "bad" };
 const QUALITY_FIELD: Partial<Record<AuditLayer, "deadwood_quality" | "forest_cover_quality">> = {
   deadwood: "deadwood_quality",
   forest_cover: "forest_cover_quality",
 };
 
-const likely = (modes: Record<string, unknown> | undefined, key: string) => {
-  const mode = modes?.[key] as { likelihood?: number } | undefined;
-  return mode?.likelihood === undefined ? undefined : mode.likelihood >= 50;
-};
-
-/** The saved-audit fields an answer sets, so the form and the answer stay the same. */
-export function formValuesForVerdict(
-  checkKey: AuditCheckKey,
-  layer: AuditLayer,
-  verdict: AuditVerdict,
-  rows: IAuditAssessment[] = [],
-): Partial<AuditFormValues> {
+/** The saved-audit field an answer decides. The dataset evaluation decides none: its COG and
+ * thumbnail fields stay the reviewer's own, and its verdict feeds the derived decision. */
+export function formValuesForVerdict(checkKey: AuditCheckKey, layer: AuditLayer, verdict: AuditVerdict): Partial<AuditFormValues> {
   if (verdict === "unsure") return {};
   switch (checkKey) {
     case "georef":
@@ -235,38 +290,23 @@ export function formValuesForVerdict(
       const field = QUALITY_FIELD[layer];
       return field ? { [field]: VERDICT_QUALITY[verdict] } : {};
     }
-    case "dataset_evaluation": {
-      if (verdict === "major") return {};
-      const modes = rows.find((r) => r.assessor_kind === "rule")?.modes ?? rows[0]?.modes;
-      const cog = verdict === "ok" ? false : likely(modes, "cog_issue");
-      const thumbnail = verdict === "ok" ? false : likely(modes, "thumbnail_issue");
-      return {
-        ...(cog === undefined ? {} : { has_cog_issue: cog }),
-        ...(thumbnail === undefined ? {} : { has_thumbnail_issue: thumbnail }),
-      };
-    }
+    case "dataset_evaluation":
+      return {};
   }
 }
 
-/** The reviewer's own verdict as the saved-audit form holds it, where the form has one. */
-export function formVerdict(checkKey: AuditCheckKey, layer: AuditLayer, values: Partial<AuditFormValues>): AuditVerdict | null {
-  switch (checkKey) {
-    case "georef":
-      return values.is_georeferenced === undefined || values.is_georeferenced === null ? null : values.is_georeferenced ? "ok" : "major";
-    case "acquisition_date":
-      return values.has_valid_acquisition_date === undefined || values.has_valid_acquisition_date === null
-        ? null
-        : values.has_valid_acquisition_date
-          ? "ok"
-          : "major";
-    case "prediction_quality": {
-      const field = QUALITY_FIELD[layer];
-      const quality = field ? values[field] : undefined;
-      return quality ? QUALITY_VERDICT[quality] : null;
+/** The saved-audit fields the reviewer's own answers on the current runs decide. */
+export function answeredFormValues(checks: IAuditChecks | undefined, userId: string | undefined): Partial<AuditFormValues> {
+  if (!checks || !userId) return {};
+  return AUDIT_SECTIONS.reduce<Partial<AuditFormValues>>((values, section) => {
+    const evidence = section.checkKey ? checks.checks[section.checkKey] : undefined;
+    if (!evidence) return values;
+    for (const layer of section.layers) {
+      const mine = myAnswer(checks.people, userId, evidence.run.id, { checkKey: section.checkKey!, layer });
+      if (mine) Object.assign(values, formValuesForVerdict(section.checkKey!, layer, mine.verdict));
     }
-    case "dataset_evaluation":
-      return null;
-  }
+    return values;
+  }, {});
 }
 
 export const DISPOSITION_LABELS: Record<DatasetDisposition, string> = {
@@ -315,32 +355,21 @@ const CROP_SET_ORDER = ["exclude", "evaluation", "training", "benchmark"];
 const firstSet = (sets: string[]) => Math.min(...sets.map((s) => (CROP_SET_ORDER.indexOf(s) + 1 || 9)));
 
 /** The crops a check judged, in the order the page numbers them: the exclude set first. */
-export function orderedCrops(evidence: IAuditCheckEvidence | undefined): IAuditCheckEvidence["crops"] {
+export function orderedCrops(evidence: Pick<IAuditCheckEvidence, "crops"> | undefined): IAuditCheckEvidence["crops"] {
   return [...(evidence?.crops ?? [])].sort((a, b) => firstSet(a.crop_sets) - firstSet(b.crop_sets) || a.id - b.id);
 }
 
 /** The models' worst call on one crop and layer (or on any of the given layers). */
-export function cropModelVerdict(evidence: IAuditCheckEvidence | undefined, cropId: number, layers: AuditLayer[]): AuditVerdict | null {
+export function cropModelVerdict(evidence: Pick<IAuditCheckEvidence, "automated"> | undefined, cropId: number, layers: AuditLayer[]): AuditVerdict | null {
   return worst(
     (evidence?.automated ?? []).filter((a) => a.crop_id === cropId && layers.includes(a.layer)).map((a) => a.verdict),
   );
 }
 
-/** The audit page section that shows a check. */
-export function sectionOfCheck(checkKey: AuditCheckKey): AuditSectionId {
-  return AUDIT_SECTIONS.find((s) => s.checkKey === checkKey)!.id;
-}
-
-/** The saved-audit fields the reviewer's own answers on the current runs imply. */
-export function answeredFormValues(checks: { checks: Partial<Record<AuditCheckKey, IAuditCheckEvidence>>; people: IAuditAssessment[] } | undefined, userId: string | undefined): Partial<AuditFormValues> {
-  if (!checks || !userId) return {};
-  return AUDIT_SECTIONS.reduce<Partial<AuditFormValues>>((values, section) => {
-    const evidence = section.checkKey ? checks.checks[section.checkKey] : undefined;
-    if (!evidence) return values;
-    for (const layer of section.layers) {
-      const mine = myAnswer(checks.people, userId, evidence.run.id, { checkKey: section.checkKey!, layer });
-      if (mine) Object.assign(values, formValuesForVerdict(section.checkKey!, layer, mine.verdict, automatedRows(evidence, layer)));
-    }
-    return values;
-  }, {});
+/** The crop before or after the selected one, wrapping around; the first (or last) when none is selected. */
+export function stepCrop(crops: { id: number }[], cropId: number | null, by: 1 | -1): number | null {
+  if (!crops.length) return null;
+  const index = crops.findIndex((c) => c.id === cropId);
+  const from = index >= 0 ? index : by > 0 ? -1 : 0;
+  return crops[(from + by + crops.length) % crops.length].id;
 }

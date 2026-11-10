@@ -20,8 +20,7 @@ import { mapColors } from "../../theme/mapColors";
 import { MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
 import { trackAppEvent } from "../../utils/analytics";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
-import AuditCheckMap from "./checks/AuditCheckMap";
-import type { IAuditCheckMapProps } from "./checks/auditCheckView";
+import AuditCheckMap, { type IAuditCheckMapProps } from "./checks/AuditCheckMap";
 
 interface AuditMapWithControlsProps {
 	dataset: IDataset;
@@ -345,7 +344,7 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 
 				{/* The open section's check on the map */}
 				{!isEditing && checkLayersReady > 0 && (
-					<AuditCheckMap map={olMapRef.current} orthoLayer={orthoLayerRef.current} {...checkMap} />
+					<AuditCheckMap key={checkMap.section?.id ?? "none"} map={olMapRef.current} orthoLayer={orthoLayerRef.current} {...checkMap} />
 				)}
 
 				{/* Editor Toolbar */}

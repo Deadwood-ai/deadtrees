@@ -29,6 +29,8 @@ interface AcquisitionDateCardProps {
 	/** the dataset's date decisions, newest first */
 	decisions: IAcquisitionDateDecision[];
 	reviewItems: IAuditReviewItem[];
+	/** the check has run: the reviewer's answer above decides "Reported date valid?" */
+	answerOwned?: boolean;
 }
 
 const SOURCE_LABEL: Record<IAcquisitionDateDecision["source"], string> = {
@@ -88,7 +90,7 @@ function DecisionStatus({ decisions }: { decisions: IAcquisitionDateDecision[] }
 	);
 }
 
-export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, decisions, reviewItems }: AcquisitionDateCardProps) {
+export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledFields, decisions, reviewItems, answerOwned }: AcquisitionDateCardProps) {
 	const current = estimate ? isEstimateCurrent(estimate, dataset) : false;
 	const suggestion = datasetDateSuggestion(estimate, dataset);
 	const applied = modelSuggestedDecision(decisions, dataset);
@@ -151,11 +153,11 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 			)}
 
 			<div className="flex items-center text-xs">
-				<Text type="secondary">Reported date valid?</Text>
+				<Text type="secondary">{answerOwned ? "Reported date valid? (follows your answer above)" : "Reported date valid?"}</Text>
 				<SuggestedTag field="has_valid_acquisition_date" suggestions={suggestions} prefilledFields={prefilledFields} />
 			</div>
 			<Form.Item name="has_valid_acquisition_date" className="mb-2" rules={createConditionalRule("Please validate acquisition date")}>
-				<Radio.Group>
+				<Radio.Group disabled={answerOwned || undefined}>
 					<Space size="large">
 						<Radio value={true}>🟢 Valid</Radio>
 						<Radio value={false}>🔴 Invalid</Radio>

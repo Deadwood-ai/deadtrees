@@ -1,4 +1,4 @@
-/** Rows of the automated audit checks (audit schema, docs/audit-checks.md). */
+/** Rows of the automated audit checks (audit schema, docs/audit-checks.md), with the columns the audit page reads. */
 
 export type AuditVerdict = "ok" | "minor" | "major" | "unsure";
 export type AuditCheckKey = "dataset_evaluation" | "georef" | "acquisition_date" | "prediction_quality";
@@ -20,49 +20,35 @@ export interface IAuditAssessment {
   /** user id, or model/prompt_version */
   assessor: string;
   verdict: AuditVerdict;
-  major_likelihood: number | null;
-  modes: Record<string, unknown>;
   reason_code: string | null;
   reason_text: string | null;
   details: Record<string, unknown>;
-  imported_from: string | null;
-  created_at: string;
   /** a person's email, added by the page for auditors */
   assessor_email?: string | null;
 }
 
-/** One row of audit.review_queue: a dataset, check and layer, and whether a person must look. */
+/** One row of audit.review_queue: a dataset, check and layer with a dataset-level call. */
 export interface IAuditQueueRow {
   dataset_id: number;
   check_key: AuditCheckKey;
   layer: AuditLayer;
   run_id: number;
-  version: string;
-  mode: "review_all" | "review_uncertain" | "auto_apply";
   verdict: AuditVerdict;
-  verdicts: Record<string, AuditVerdict>;
-  needs_review: boolean;
+  /** why the result goes to a person; null when the version's mode applies it without review */
   reason: "review_all" | "unsure" | "models_disagree" | "spot_check" | null;
-  reviewed: boolean;
 }
 
 export interface IAuditRun {
   id: number;
   check_key: AuditCheckKey;
-  status: "queued" | "running" | "done" | "failed";
+  /** what the run judged, e.g. ortho_sha256 */
   inputs: Record<string, unknown>;
-  evidence: Record<string, unknown>;
-  coverage: Record<string, unknown>;
-  finished_at: string | null;
 }
 
 export interface IAuditCrop {
   id: number;
   crop_sets: string[];
   geometry: GeoJSON.Polygon;
-  mpp: number;
-  size_px: number;
-  selection: Record<string, unknown>;
 }
 
 export type AuditImageKind = "raw" | "deadwood_overlay" | "forest_cover_overlay" | "overview" | "thumbnail";
@@ -70,7 +56,6 @@ export type AuditImageKind = "raw" | "deadwood_overlay" | "forest_cover_overlay"
 export interface IAuditImage {
   id: number;
   crop_id: number | null;
-  label_id: number | null;
   kind: AuditImageKind;
   storage_path: string;
   width: number;
@@ -88,7 +73,7 @@ export interface IAuditCheckEvidence {
 }
 
 export interface IAuditChecks {
-  /** false while the audit schema cannot be read (not exposed, or not an auditor) */
+  /** false while the audit schema cannot be read (not exposed on this server) */
   available: boolean;
   checks: Partial<Record<AuditCheckKey, IAuditCheckEvidence>>;
   /** native person rows on the dataset, latest per target, layer and person */

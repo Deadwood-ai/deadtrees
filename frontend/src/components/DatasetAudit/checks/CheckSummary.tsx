@@ -1,12 +1,5 @@
-import type { IAuditCheckEvidence, IAuditQueueRow } from "../../../types/auditChecks";
-import { LAYER_LABELS, automatedRows, automatedVerdict, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
-
-const WHY_HERE: Record<NonNullable<IAuditQueueRow["reason"]>, string> = {
-	review_all: "every result of this check goes to a person for now",
-	unsure: "the check is unsure",
-	models_disagree: "the models disagree",
-	spot_check: "spot check",
-};
+import type { IAuditCheckEvidence } from "../../../types/auditChecks";
+import { LAYER_LABELS, QUEUE_REASONS, automatedRows, automatedVerdict, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
 
 const words = (value: unknown) => (typeof value === "string" ? value.replace(/_/g, " ") : null);
 
@@ -30,7 +23,7 @@ export default function CheckSummary({ section, evidence }: { section: IAuditSec
 						{section.layers.length > 1 && <span>{LAYER_LABELS[layer]}: </span>}
 						<b>{verdict ? verdictLabel(checkKey, verdict) : "No call"}</b>
 						{because && <span>. {because.charAt(0).toUpperCase() + because.slice(1)}</span>}
-						{queued?.reason && <span className="text-gray-500"> · Here because {WHY_HERE[queued.reason]}.</span>}
+						{queued?.reason && <span className="text-gray-500"> · Here because {QUEUE_REASONS[queued.reason].because}.</span>}
 					</div>
 				);
 			})}

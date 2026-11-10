@@ -8,16 +8,13 @@ short-lived signed link that is issued to, and rechecked for, core-team users.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
 from shared.settings import settings
 
-from ..access.dataset_files import inside
-from ..access.delivery import protected_file_response
-from ..access.privileges import user_is_core_team
-from ..access.tickets import read_ticket, sign_ticket
+from ..access.core_team_files import core_team_file_response, sign_core_team_ticket
 from .dataset_access import require_user
 
 router = APIRouter()
@@ -35,19 +32,13 @@ class BenchmarkAccess(BaseModel):
 def issue_benchmark_access(token: Annotated[str, Depends(oauth2_scheme)]):
 	"""A signed link prefix for the benchmark files, for core-team users only."""
 	user = require_user(token)
-	if not user_is_core_team(user.id):
-		raise HTTPException(status_code=403, detail='The benchmark is limited to the core team')
-	ticket, expires_at = sign_ticket(user.id, TICKET_RESOURCE)
+	ticket, expires_at = sign_core_team_ticket(user.id, TICKET_RESOURCE, 'The benchmark is limited to the core team')
 	return BenchmarkAccess(files_url=f'/disturbance-benchmark/files/{ticket}', expires_at=expires_at)
 
 
 @router.api_route('/disturbance-benchmark/files/{ticket}/{relative_path:path}', methods=['GET', 'HEAD'])
 def serve_benchmark_file(ticket: str, relative_path: str):
 	"""Hand one benchmark file to nginx. Every failure is the same 404."""
-	signed = read_ticket(ticket, TICKET_RESOURCE)
-	if not signed or not user_is_core_team(signed.user_id):
-		raise HTTPException(status_code=404, detail='Not found')
-	path = inside(settings.base_path / settings.DISTURBANCE_BENCHMARK_DIR, relative_path)
-	if not path or not path.is_file():
-		raise HTTPException(status_code=404, detail='Not found')
-	return protected_file_response(path, cacheable=True)
+	return core_team_file_response(
+		ticket, TICKET_RESOURCE, settings.base_path / settings.DISTURBANCE_BENCHMARK_DIR, relative_path
+	)
