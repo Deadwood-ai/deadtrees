@@ -35,7 +35,8 @@ create policy "Audit worker stores image hashes" on audit.image_hashes
 --   same_image       overview hash within p_max_hamming bits, footprints overlapping
 --   same_flight_day  same uploader and acquisition day, footprints overlapping
 -- overlap is the shared bounding-box area over the smaller box. Flags only: nothing
--- is hidden or excluded because of a match.
+-- is hidden or excluded because of a match. Archived datasets are not candidates:
+-- archiving the older copy is how a duplicate is resolved (as in find_duplicate_upload).
 create function audit.duplicate_candidates(
 	p_dataset_id bigint,
 	p_hash bigint,
@@ -63,7 +64,7 @@ as $$
 		from me
 		join public.v2_orthos o on o.dataset_id <> p_dataset_id
 			and (o.sha256 = me.sha256 or o.bbox::public.geometry operator(public.&&) me.g)
-		join public.v2_datasets d on d.id = o.dataset_id
+		join public.v2_datasets d on d.id = o.dataset_id and not d.archived
 		left join audit.image_hashes h on h.dataset_id = o.dataset_id and h.ortho_sha256 = o.sha256
 			and h.method = p_method
 	), matched as (
@@ -101,7 +102,7 @@ grant execute on function audit.duplicate_candidates(bigint, bigint, text, integ
 -- The audit worker then finishes the run row (status, evidence, coverage, cost) and
 -- points the dataset at it when the version is active (docs/audit-checks.md).
 create function audit.store_dataset_evaluation(p_run_id bigint, p_result jsonb)
-returns void
+returns bigint[]
 language plpgsql set search_path = ''
 as $$
 declare
@@ -164,7 +165,9 @@ begin
 		i ->> 'content_type', (i ->> 'width')::integer, (i ->> 'height')::integer, (i ->> 'mpp')::real,
 		(i ->> 'bytes')::integer, i ->> 'sha256'
 	from jsonb_array_elements(coalesce(p_result -> 'images', '[]'::jsonb)) i
-	on conflict do nothing;
+	-- one image per ortho, crop and kind: a rerun keeps the stored row (and the first
+	-- overview); the run's evidence names the files it judged
+	on conflict (dataset_id, ortho_sha256, crop_id, label_id, kind) do nothing;
 
 	insert into audit.assessments (check_key, dataset_id, run_id, layer, assessor_kind, model, prompt_version,
 		verdict, major_likelihood, modes, details, raw)
@@ -176,17 +179,11 @@ begin
 	if p_result ? 'phash' then
 		insert into audit.image_hashes (dataset_id, ortho_sha256, method, hash, run_id)
 		values (v_run.dataset_id, v_sha, p_result -> 'phash' ->> 'method', (p_result -> 'phash' ->> 'value')::bigint, p_run_id)
-		on conflict do nothing;
+		on conflict (dataset_id, ortho_sha256, method) do nothing;
 	end if;
+	-- the crops this run judged, in the order of p_result.crops
+	return v_crop_ids;
 end;
 $$;
 revoke all on function audit.store_dataset_evaluation(bigint, jsonb) from public, anon;
 grant execute on function audit.store_dataset_evaluation(bigint, jsonb) to authenticated, service_role;
-
--- The evaluation crops are CLIP tiles. Tile rows are otherwise readable only for
--- search-ready public datasets, so the worker could not place crops on private or
--- unfinished ones. It already reads those datasets' COGs; now also their tile rows.
--- The check runs once per statement (scalar subquery): this table holds every tile of
--- every dataset, and a per-row call would slow each search down.
-create policy "Audit worker reads tile windows" on public.v2_tile_embeddings
-	for select to authenticated using ((select internal.is_audit_worker()));

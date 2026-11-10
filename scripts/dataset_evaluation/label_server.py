@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Privately host the dataset evaluation labeling page with a durable SQLite store.
 
-Per dataset the page shows what the check's models see (the overview, four native
+Per dataset the page shows what the check's models see (the overview, up to four
 crops and the thumbnail, from render_gold.py) and takes one call: keep, keep but fix,
 exclude or unsure, with reasons and fix flags from the check's fixed lists. Every
 save is kept (append-only history); the latest label per dataset is the gold label.

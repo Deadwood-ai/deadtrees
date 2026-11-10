@@ -492,12 +492,10 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	evaluation = evaluate(
 		inputs,
 		{'luna-medium': luna, 'haiku-5.5': haiku},
-		ortho_sha256=SHA,
 		source_profile=RGB_PROFILE,
 		image_hash=image_hash,
 		duplicate_candidates=[],
 		thumbnail=thumbnail_bytes(),
-		aoi_key='abc',
 	)
 
 	assert len(luna.images[0]) == 6 and all(isinstance(i, Image.Image) for i in luna.images[0])
@@ -505,7 +503,7 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	assert 'magenta line' in luna.prompts[0] and 'Image 6 is the 256 px thumbnail' in luna.prompts[0]
 	# the models and the dataset verdict are the stored rows; the rules it folds in are run evidence
 	assert [c.model for c in evaluation.calls] == ['luna-medium', 'haiku-5.5', 'dataset-evaluation-rule']
-	assert [c.model for c in evaluation.rules] == ['band_check', 'duplicates']
+	assert list(evaluation.evidence['rules']) == ['band_check', 'duplicates']
 	assert evaluation.evidence['rules']['band_check']['verdict'] == 'ok'
 	assert evaluation.evidence['rules']['duplicates'] == {
 		'version': 'v1',
@@ -515,9 +513,9 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	}
 	assert evaluation.verdict.verdict == 'minor'
 	assert evaluation.calls[1].raw['attempt'] == 1 and evaluation.cost['haiku-5.5']['cost_usd'] is None
-	# the run's identity has the shape of handler.inputs(); the crop settings are evidence
-	assert evaluation.inputs == {'ortho_sha256': SHA, 'aoi': 'abc'}
-	assert evaluation.evidence['settings'] == inputs.settings
+	assert evaluation.evidence['settings'] == inputs.settings  # the crop settings are evidence
+	# the rule row says why in words: the fix flag, then what the surer model saw
+	assert evaluation.verdict.details['summary'] == evaluation.calls[1].details['summary']
 
 	payload = store_payload(evaluation, inputs, 42, SHA)
 	assert [i['kind'] for i in payload['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
@@ -548,7 +546,7 @@ def test_the_overview_shows_the_aoi_edge_and_hides_no_data(cog):
 @pytest.mark.unit
 def test_a_malformed_reply_is_asked_again_once_and_login_errors_reach_the_worker(cog):
 	inputs = read_inputs(str(cog), overview_px=512, crop_px=256)
-	common = dict(ortho_sha256=SHA, source_profile=RGB_PROFILE, image_hash=0, duplicate_candidates=[])
+	common = dict(source_profile=RGB_PROFILE, image_hash=0, duplicate_candidates=[])
 
 	luna = Fake('not json', answer())
 	assert evaluate(inputs, {'luna-medium': luna, 'haiku-5.5': Fake(answer())}, **common).verdict.verdict == 'ok'
@@ -629,7 +627,7 @@ class FakeClient:
 		data = (
 			[{'dataset_id': 9, 'kind': 'same_flight_day', 'hamming': 30, 'overlap': 0.9}]
 			if name == 'duplicate_candidates'
-			else None
+			else [11, 12, 13, 14]  # store_dataset_evaluation answers the ids of the crops the run judged
 		)
 		return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
 
@@ -664,6 +662,8 @@ def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path,
 	client.rpc = (lambda rpc: lambda name, args: (events.append(name), rpc(name, args))[1])(client.rpc)
 	ctx = SimpleNamespace(
 		run={'id': 7, 'dataset_id': 42},
+		# a version registered with its own duplicate threshold
+		version={'config': {'duplicates': {'max_hamming': 4, 'min_overlap': 0.5}}},
 		client=client,
 		token='t',
 		judges={
@@ -688,7 +688,14 @@ def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path,
 	assert summary['evidence']['rules']['duplicates']['verdict'] == 'unsure'  # the same-day duplicate flag
 	assert summary['coverage'] == {'crops': 4, 'crop_picker': 'kmeans-inside-v1'}
 	assert set(summary) == {'inputs', 'evidence', 'coverage', 'cost'}
-	assert set(summary['inputs']) == {'ortho_sha256', 'aoi'}
+	# the run's inputs have the one shape the queueing compares, and the run names what it judged
+	assert summary['inputs'] == handler.identity(SHA, None) == {'ortho_sha256': SHA, 'aoi': None}
+	judged = summary['evidence']['judged']
+	assert judged['crop_ids'] == [11, 12, 13, 14]
+	assert [i['kind'] for i in judged['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
+	assert judged['images'][0]['storage_path'] == events[1]
+	# the duplicate lookup runs with the registered version's thresholds
+	assert dict(client.calls)['duplicate_candidates']['p_max_hamming'] == 4
 
 
 @pytest.mark.unit
@@ -724,7 +731,6 @@ def test_a_cog_without_a_usable_image_is_excluded_by_rule_without_a_model(tmp_pa
 	evaluation = evaluate(
 		inputs,
 		{'luna-medium': never, 'haiku-5.5': never},
-		ortho_sha256=SHA,
 		source_profile=RGB_PROFILE,
 		image_hash=None,
 		duplicate_candidates=[],
@@ -823,3 +829,34 @@ def test_a_model_that_votes_to_exclude_below_the_threshold_sends_the_dataset_to_
 
 	assert verdict.verdict == 'unsure' and verdict.details['why'] == ['model_excludes_below_threshold']
 	assert verdict.details['reason'] == 'blurry'
+
+
+@pytest.mark.unit
+def test_the_verdict_says_its_cause_in_words():
+	ok = Call('rule', 'x', 'v1', 'ok', 0.0)
+	models = [
+		Call('model', 'luna-medium', 'v1', 'ok', 5.0, details={'reason': None, 'summary': 'Sharp forest scene.'}),
+		Call('model', 'haiku-5.5', 'v1', 'ok', 10.0, details={'reason': None, 'summary': 'Usable forest image.'}),
+	]
+	duplicate = duplicate_check([{'dataset_id': 123, 'kind': 'same_file', 'hamming': None, 'overlap': 1.0}])
+	flagged = dataset_rule(models, ok, duplicate)
+	assert flagged.verdict == 'unsure' and flagged.details['reason'] == 'duplicate'
+	assert flagged.details['summary'] == 'Possible duplicate of dataset 123 (same file). Usable forest image.'
+
+	apart = [
+		models[0],
+		Call('model', 'haiku-5.5', 'v1', 'major', 80.0, details={'reason': 'blurry', 'summary': 'Blurry.'}),
+	]
+	disagree = dataset_rule(apart, ok, ok)
+	assert disagree.details['summary'].startswith('The models disagree on excluding it (luna-medium 5, haiku-5.5 80).')
+	# without a rule cause the sentence is the surer model's own
+	assert dataset_rule(models, ok, ok).details['summary'] == 'Usable forest image.'
+
+
+@pytest.mark.unit
+def test_the_rule_runs_with_the_thresholds_of_its_version():
+	ok = Call('rule', 'x', 'v1', 'ok', 0.0)
+	models = [Call('model', n, 'v1', 'ok', 45.0, details={'reason': 'blurry'}) for n in ('luna-medium', 'haiku-5.5')]
+
+	assert dataset_rule(models, ok, ok).verdict == 'ok'
+	assert dataset_rule(models, ok, ok, {'major_at': 40, 'disagree_at': 50, 'fix_at': 50}).verdict == 'major'

@@ -2,7 +2,7 @@
 """Render what the dataset evaluation models see, for every gold-set dataset.
 
 Uses the check's own input code (processor/src/dataset_evaluation_v1): the overview
-with the AOI edge, four native crops and the website thumbnail, written under
+with the AOI edge, up to four crops and the website thumbnail, written under
 <root>/datasets/<id>/ for the labeling page. Public and view-only COGs are read from
 data2 over HTTPS; private ones only from a local copy (--cog-dir <dir>/<cog_path>),
 otherwise they are skipped and listed. Paths and AOIs come from the analyst login
@@ -74,12 +74,21 @@ def render(dataset_id: int, source: dict, folder: Path, cog_dir: Path | None) ->
 	inputs = read_inputs(cog, select_aoi(source['aois']), seed=dataset_id, tiles=source['tiles'])
 	folder.mkdir(parents=True, exist_ok=True)
 	images = model_images(inputs, thumbnail)
-	for image in images:
-		(folder / image.name).write_bytes(image.data)
+	# The labeling page reads fixed names; the check's own content-based names are for the storage server.
+	names = [
+		'overview.jpg'
+		if image.kind == 'overview'
+		else 'thumbnail.jpg'
+		if image.kind == 'thumbnail'
+		else f'crop-{image.crop_index + 1}.jpg'
+		for image in images
+	]
+	for name, image in zip(names, images):
+		(folder / name).write_bytes(image.data)
 	(folder / 'inputs.json').write_text(
 		json.dumps(
 			{
-				'images': [i.name for i in images],
+				'images': names,
 				'mpp': {'overview': inputs.overview_mpp, 'crop': inputs.crops[0].mpp if inputs.crops else None},
 				'crops': [
 					{'grid_window': c.grid_window, 'cog_window': c.cog_window, 'picker': c.picker} for c in inputs.crops

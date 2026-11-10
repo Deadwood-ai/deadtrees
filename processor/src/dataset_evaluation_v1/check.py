@@ -54,6 +54,8 @@ CONFIG = {
 		'empty_cog': '/'.join(EMPTY_COG_RULE),
 	},
 	'rule_config': RULE_CONFIG,
+	# audit.duplicate_candidates: overview hashes within this many bits, footprints overlapping this much
+	'duplicates': {'max_hamming': 10, 'min_overlap': 0.5},
 	'min_valid_share': MIN_VALID_SHARE,
 	'phash': PHASH_METHOD,
 	'inputs': {
@@ -92,10 +94,8 @@ class ImageFile:
 class Evaluation:
 	images: list[ImageFile]
 	calls: list[Call]  # the stored assessments: the models, then the dataset verdict as the one rule row
-	rules: list[Call]  # the rules the verdict folds in (band check, duplicates); kept in the run's evidence
 	phash: int | None  # None when there was no image to hash
-	inputs: dict  # what the run judged, in the shape of handler.inputs()
-	evidence: dict
+	evidence: dict  # includes `rules`: the band check and the duplicates the verdict folds in
 	cost: dict = field(default_factory=dict)
 
 	@property
@@ -169,17 +169,17 @@ def evaluate(
 	inputs: Inputs,
 	judges: dict[str, Judge],
 	*,
-	ortho_sha256: str,
 	source_profile: dict | None,
 	image_hash: int | None,
 	duplicate_candidates: list[dict],
 	thumbnail: bytes | None = None,
-	aoi_key: str | None = None,
+	rule_config: dict = RULE_CONFIG,
 ) -> Evaluation:
 	"""Run the rules and the models on one dataset's inputs. `image_hash` is the
-	overview's phash, which the caller needs first to look up duplicate candidates."""
+	overview's phash, which the caller needs first to look up duplicate candidates.
+	`rule_config` is the version's (`CONFIG['rule_config']`), so a registered version
+	runs with the thresholds it was registered with."""
 	images = model_images(inputs, thumbnail)
-	identity = {'ortho_sha256': ortho_sha256, 'aoi': aoi_key}
 	evidence = {
 		'settings': inputs.settings,
 		'native_mpp': round(inputs.native_mpp, 4),
@@ -192,14 +192,7 @@ def evaluate(
 	}
 	if inputs.empty:
 		# Nothing to look at: the rule decides, no model is asked.
-		return Evaluation(
-			images=images,
-			calls=[empty_cog(inputs.valid_share)],
-			rules=[],
-			phash=None,
-			inputs=identity,
-			evidence=evidence,
-		)
+		return Evaluation(images=images, calls=[empty_cog(inputs.valid_share)], phash=None, evidence=evidence)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
 	prompt = build_prompt(
 		inputs.overview_mpp, crop_mpp, inputs.aoi is not None, thumbnail is not None, crop_count=len(inputs.crops)
@@ -211,13 +204,11 @@ def evaluate(
 		answers = list(pool.map(lambda item: ask(*item, prompt, pictures), judges.items()))
 	band = band_check(source_profile, inputs.bands, inputs.valid)
 	duplicates = duplicate_check(duplicate_candidates)
-	verdict = dataset_rule(answers, band, duplicates)
+	verdict = dataset_rule(answers, band, duplicates, rule_config)
 	return Evaluation(
 		images=images,
 		calls=[*answers, verdict],
-		rules=[band, duplicates],
 		phash=image_hash,
-		inputs=identity,
 		evidence={
 			**evidence,
 			'rules': rule_evidence([band, duplicates]),

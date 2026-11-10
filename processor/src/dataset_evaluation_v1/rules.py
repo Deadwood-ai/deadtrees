@@ -218,6 +218,32 @@ RULE_CONFIG = {
 }
 
 
+def verdict_summary(why: list[str], models: list[Call], band: Call, duplicates: Call, mean: float) -> str:
+	"""One sentence a reviewer reads next to the verdict: the cause in words, else what the surer model saw."""
+	surest = max(models, key=lambda m: m.major_likelihood)
+	said = str(surest.details.get('summary') or '').strip()
+	votes = ', '.join(f'{m.model} {m.major_likelihood:.0f}' for m in models)
+	parts = []
+	for cause in why:
+		if cause == 'band_check':
+			finding = max(band.details.get('findings') or [{}], key=lambda f: f.get('likelihood', 0))
+			parts.append(f'Not a true colour photo by the band check: {finding.get("why", "wrong bands")}')
+		elif cause == 'models_disagree':
+			parts.append(f'The models disagree on excluding it ({votes})')
+		elif cause == 'model_unsure':
+			parts.append('A model could not tell from the images')
+		elif cause == 'model_excludes_below_threshold':
+			parts.append(f'A model votes to exclude, but the average likelihood is only {mean:.0f} ({votes})')
+		elif cause == 'duplicates':
+			first = (duplicates.details.get('candidates') or [{}])[0]
+			parts.append(
+				f'Possible duplicate of dataset {first.get("dataset_id")} ({str(first.get("kind")).replace("_", " ")})'
+			)
+	if not parts:
+		return said
+	return '. '.join(parts) + ('. ' + said if said else '.')
+
+
 def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict = RULE_CONFIG) -> Call:
 	"""The dataset verdict: the models averaged, overruled by a clear band failure,
 	sent to a person when the models disagree or a rule flags."""
@@ -253,9 +279,14 @@ def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict 
 		why.append('fix_flagged')
 	else:
 		verdict = 'ok'
-	# The reason of the model that is surest the dataset should go.
+	# The reason of the model that is surest the dataset should go, unless a rule is the cause.
 	surest = max(models, key=lambda m: m.major_likelihood)
-	reason = 'not_rgb' if 'band_check' in why else surest.details.get('reason')
+	if 'band_check' in why:
+		reason = 'not_rgb'
+	elif why == ['duplicates']:
+		reason = 'duplicate'
+	else:
+		reason = surest.details.get('reason')
 	return Call(
 		assessor_kind='rule',
 		model=DATASET_RULE[0],
@@ -266,6 +297,7 @@ def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict 
 		details={
 			'reason': reason if verdict in ('major', 'unsure') else None,
 			'why': why,
+			'summary': verdict_summary(why, models, band, duplicates, mean),
 			'model_mean': round(mean, 1),
 			'model_spread': round(spread, 1),
 			'models': {m.model: m.verdict for m in models},

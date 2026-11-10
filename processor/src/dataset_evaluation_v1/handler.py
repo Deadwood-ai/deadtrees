@@ -18,6 +18,7 @@ from shapely.geometry import shape
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
 from shared.models import Cog, Ortho
+from shared.pagination import fetch_all_rows
 from shared.settings import settings
 
 from ..utils.ssh import pull_file_from_storage_server
@@ -27,7 +28,8 @@ from .inputs import Tile, read_inputs
 from .rules import PHASH_METHOD, phash
 
 VERSION = 'v1'
-TILE_PAGE = 1000
+
+NO_ORTHO_HASH = 'dataset has no ortho with a sha256; run the ortho stage first'
 
 __all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
@@ -39,7 +41,16 @@ def ready(status: dict) -> bool:
 
 def inputs(client, dataset_id: int) -> dict:
 	"""What a run judges: a new ortho or AOI makes a new run (and reopens a review)."""
-	return {'ortho_sha256': _ortho(client, dataset_id).sha256, 'aoi': aoi_key(_aoi(client, dataset_id))}
+	rows = client.table(settings.orthos_table).select('sha256').eq('dataset_id', dataset_id).execute().data
+	if not rows or not rows[0].get('sha256'):
+		raise ValueError(NO_ORTHO_HASH)
+	return identity(rows[0]['sha256'], _aoi(client, dataset_id))
+
+
+def identity(ortho_sha256: str, aoi: dict | None) -> dict:
+	"""The one shape of a run's inputs. The worker compares it with the stored run to tell
+	whether a dataset was already judged, so the queueing and the run must build it alike."""
+	return {'ortho_sha256': ortho_sha256, 'aoi': aoi_key(aoi)}
 
 
 def handle(ctx) -> dict:
@@ -57,30 +68,51 @@ def handle(ctx) -> dict:
 		cog_file = local_cog(Cog(**cogs[0]), Path(folder), ctx.token, dataset_id, log)
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
 		seen = read_inputs(str(cog_file), aoi, seed=dataset_id, tiles=tiles(client, dataset_id))
+	# The thresholds the version was registered with (a version before they were recorded runs with today's).
+	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
 	image_hash, candidates = None, []
 	if not seen.empty:  # an empty COG is excluded by rule; there is nothing to compare
 		image_hash = phash(seen.overview, seen.valid)
 		candidates = (
 			client.schema('audit')
-			.rpc('duplicate_candidates', {'p_dataset_id': dataset_id, 'p_hash': image_hash, 'p_method': PHASH_METHOD})
+			.rpc(
+				'duplicate_candidates',
+				{
+					'p_dataset_id': dataset_id,
+					'p_hash': image_hash,
+					'p_method': PHASH_METHOD,
+					'p_max_hamming': config['duplicates']['max_hamming'],
+					'p_min_overlap': config['duplicates']['min_overlap'],
+				},
+			)
 			.execute()
 			.data
 		)
 	evaluation = evaluate(
 		seen,
 		ctx.judges,
-		ortho_sha256=ortho.sha256,
 		source_profile=(ortho.ortho_info or {}).get('Profile'),
 		image_hash=image_hash,
 		duplicate_candidates=candidates or [],
 		thumbnail=thumbnail,
-		aoi_key=aoi_key(aoi),
+		rule_config=config['rule_config'],
 	)
 	payload = store_payload(evaluation, seen, dataset_id, ortho.sha256)
 	# Files first, rows second: a stored row always points at an uploaded image.
 	for image, row in zip(evaluation.images, payload['images']):
 		ctx.put_image(row['storage_path'], image.data, dataset_id)
-	client.schema('audit').rpc('store_dataset_evaluation', {'p_run_id': ctx.run['id'], 'p_result': payload}).execute()
+	crop_ids = (
+		client.schema('audit')
+		.rpc('store_dataset_evaluation', {'p_run_id': ctx.run['id'], 'p_result': payload})
+		.execute()
+		.data
+	)
+	# The run names what it judged. Crops and images are stored per ortho, so after a run
+	# with another AOI the ortho holds more crops than this run saw and keeps the first overview.
+	judged = {
+		'crop_ids': crop_ids or [],
+		'images': [{k: row[k] for k in ('kind', 'crop_index', 'storage_path', 'sha256')} for row in payload['images']],
+	}
 	verdict = evaluation.verdict
 	logger.info(
 		'Dataset evaluation stored',
@@ -93,8 +125,8 @@ def handle(ctx) -> dict:
 	)
 	return {
 		# what was judged, read at run time: the ortho or AOI may have changed since the run was queued
-		'inputs': evaluation.inputs,
-		'evidence': evaluation.evidence,
+		'inputs': identity(ortho.sha256, aoi),
+		'evidence': {**evaluation.evidence, 'judged': judged},
 		'coverage': {'crops': len(seen.crops), 'crop_picker': seen.settings['crop_picker']},
 		'cost': evaluation.cost,
 	}
@@ -119,27 +151,21 @@ def tile_of(row: dict) -> Tile:
 
 def tiles(client, dataset_id: int) -> list[Tile]:
 	"""The dataset's CLIP tiles (none before the embedding stage has run)."""
-	out, start = [], 0
-	while True:
-		rows = (
+	rows = fetch_all_rows(
+		lambda: (
 			client.table(settings.tile_embeddings_table)
 			.select('pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry')
 			.eq('dataset_id', dataset_id)
 			.order('id')
-			.range(start, start + TILE_PAGE - 1)
-			.execute()
-			.data
 		)
-		out += [tile_of(r) for r in rows]
-		if len(rows) < TILE_PAGE:
-			return out
-		start += TILE_PAGE
+	)
+	return [tile_of(r) for r in rows]
 
 
 def _ortho(client, dataset_id: int) -> Ortho:
 	rows = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute().data
 	if not rows or not rows[0].get('sha256'):
-		raise ValueError('dataset has no ortho with a sha256; run the ortho stage first')
+		raise ValueError(NO_ORTHO_HASH)
 	return Ortho(**rows[0])
 
 

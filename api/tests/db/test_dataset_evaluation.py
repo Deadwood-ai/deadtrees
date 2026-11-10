@@ -106,9 +106,11 @@ def result(sha=SHA, phash=1234, crops=2):
 
 
 def store(db, run, payload):
+	"""Store a run's result as the worker; returns the ids of the crops it judged."""
 	as_worker(db)
-	db.execute('SELECT audit.store_dataset_evaluation(%s,%s)', (run, json.dumps(payload)))
+	crop_ids = db.execute('SELECT audit.store_dataset_evaluation(%s,%s)', (run, json.dumps(payload))).fetchone()[0]
 	as_admin(db)
+	return crop_ids
 
 
 @pytest.fixture
@@ -171,7 +173,11 @@ def test_a_rerun_on_the_same_ortho_reuses_its_crops_and_images(db, evaluation):
 	store(db, first, result())
 	finish(db, first, dataset)
 	second = queued_run(db, dataset, version)
-	store(db, second, result())
+	# the run is told which crops it judged, in the order it sent them: here the stored ones again
+	stored = [
+		r[0] for r in db.execute('SELECT id FROM audit.crops WHERE dataset_id=%s ORDER BY id', (dataset,)).fetchall()
+	]
+	assert store(db, second, result()) == stored
 
 	assert db.execute('SELECT count(*) FROM audit.crops WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 2
 	assert db.execute('SELECT count(*) FROM audit.images WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 3
@@ -245,7 +251,11 @@ def test_duplicate_candidates_find_copies_re_exports_and_same_day_flights(db, ev
 	add_ortho(db, elsewhere, sha='3' * 64, box='BOX(9.0 50.0,9.01 50.01)')
 	far_hash = create_dataset(db, other_user)
 	add_ortho(db, far_hash, sha='4' * 64, box='BOX(7.80 48.00,7.81 48.01)')
+	# an archived copy is a resolved duplicate, not a candidate
+	archived = create_dataset(db, other_user)
+	add_ortho(db, archived, sha=SHA)
 	as_admin(db)
+	db.execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (archived,))
 	for d, sha, value in ((reexport, '1' * 64, 0b1011), (far_hash, '4' * 64, -1)):
 		db.execute(
 			"INSERT INTO audit.image_hashes(dataset_id,ortho_sha256,method,hash) VALUES (%s,%s,'phash-dct64-v1',%s)",
@@ -312,26 +322,6 @@ def test_a_crop_on_the_clip_grid_joins_the_crop_another_check_stored(db, evaluat
 	assert (
 		db.execute("SELECT count(*) FROM audit.images WHERE crop_id=%s AND kind='raw'", (existing,)).fetchone()[0] == 1
 	)
-
-
-def test_the_worker_reads_tile_windows_of_private_datasets_and_others_do_not(db, evaluation):
-	owner, _, _ = evaluation
-	private = create_dataset(db, owner, access='private')
-	dims = db.execute(
-		"SELECT atttypmod FROM pg_attribute WHERE attrelid='public.v2_tile_embeddings'::regclass AND attname='embedding'"
-	).fetchone()[0]
-	db.execute(
-		'INSERT INTO public.v2_tile_embeddings(dataset_id,geometry,embedding,pixel_x0,pixel_y0,pixel_x1,pixel_y1,nodata_fraction) '
-		"VALUES (%s,'SRID=4326;POLYGON((7.8 48,7.8007 48,7.8007 48.0005,7.8 48.0005,7.8 48))',%s,0,0,512,512,0)",
-		(private, '[' + ','.join(['0'] * dims) + ']'),
-	)
-	query = 'SELECT count(*) FROM public.v2_tile_embeddings WHERE dataset_id=%s'
-	stranger = create_user(db)
-	as_worker(db)
-	assert db.execute(query, (private,)).fetchone()[0] == 1
-	act_as(db, stranger)
-	assert db.execute(query, (private,)).fetchone()[0] == 0
-	as_admin(db)
 
 
 def test_a_decided_verdict_is_one_rule_row_and_not_a_disagreement(db, evaluation):

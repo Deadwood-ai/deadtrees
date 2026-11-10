@@ -28,8 +28,12 @@ server under `audit/dataset_evaluation/<dataset>/<ortho sha256[:16]>/` and recor
 `audit.images` (kinds `overview`, `raw` for crops, `thumbnail`); crops are `audit.crops`
 rows in the `evaluation` set, keyed by their grid window, so a tile another check
 already stored only joins the set (native fallback crops are off the grid). The worker
-reads tile windows of every dataset through its own policy on `v2_tile_embeddings`;
-other users still see only search-ready public tiles.
+reads the tile windows as the processor account, which already sees the tiles of every
+dataset whose embeddings are done; a run is ready only then.
+
+Crops and images are stored per ortho. A later run on the same ortho with another AOI
+adds its crops to the set and keeps the first overview row, so the run records what it
+judged: `evidence.judged` holds its crop ids and image files.
 
 ## Assessments per run
 
@@ -81,8 +85,11 @@ everything back. The worker then finishes the run with the returned evidence, co
 and cost and points the dataset at it when the version is active. A run is ready once
 the COG, thumbnail and CLIP tiles exist (`ready`); its `inputs` are the ortho sha256 and
 the AOI. `audit.duplicate_candidates(dataset_id, hash)` lists possible duplicates for
-the duplicate rule. Both functions run with the caller's rights, so only the audit
-worker writes.
+the duplicate rule; archived datasets are not candidates, because archiving the older
+copy is how a duplicate is resolved. Both functions run with the caller's rights, so
+only the audit worker writes. The rule thresholds and the duplicate thresholds are read
+from the version's `config` (`rule_config`, `duplicates`), so a registered version runs
+with the numbers it was registered with.
 
 ## Models
 
