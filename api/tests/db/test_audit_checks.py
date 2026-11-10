@@ -771,6 +771,16 @@ def test_a_check_owned_definer_function_can_store_a_run_in_one_call(db):
 	).fetchone() == (run,)
 
 
+def test_read_policies_evaluate_access_once_per_statement(db):
+	"""A bare function call in USING runs per row; over the assessments that hit the statement timeout (DT-1532)."""
+	policies = db.execute(
+		"SELECT tablename, policyname, qual FROM pg_policies WHERE schemaname='audit' AND cmd IN ('SELECT','ALL') AND qual <> 'true'"
+	).fetchall()
+	assert len(policies) >= 13
+	per_row = [(table, name) for table, name, qual in policies if not qual.startswith('( SELECT ')]
+	assert per_row == []
+
+
 def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 	dataset = create_dataset(db, create_user(db), access='private')
 	run = create_run(db, dataset, register_version(db))
