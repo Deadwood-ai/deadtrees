@@ -16,7 +16,7 @@ import { ReleasePreviewStrip } from "../components/Releases/ReleasePreviewStrip"
 import EmptyStatePanel from "../components/EmptyStatePanel";
 import { SectionLoadError, SectionSkeleton } from "../components/SectionStates";
 import { usePrepackagedDatasets } from "../hooks/usePrepackagedDatasets";
-import { SITE_NAME } from "../seo/pageMeta";
+import { brand } from "../seo/pageMeta";
 import { usePageMetaOverride } from "../seo/usePageMeta";
 import { getPrepackagedDatasetPreviewTiles } from "../utils/prepackagedDatasetPreviews";
 import {
@@ -54,7 +54,7 @@ export default function PrepackagedDatasetRelease() {
   usePageMetaOverride(
     datasetPackage
       ? {
-          title: `${datasetPackage.title} | ${SITE_NAME}`,
+          title: brand(datasetPackage.title),
           description: datasetPackage.summary ?? undefined,
         }
       : !isLoading && !error

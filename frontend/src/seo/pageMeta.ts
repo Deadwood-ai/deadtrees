@@ -23,7 +23,8 @@ export interface PageMeta {
   jsonLd?: JsonLd;
 }
 
-const brand = (title: string) => `${title} | ${SITE_NAME}`;
+/** "<page> | deadtrees.earth", the title format for every page but home. */
+export const brand = (title: string) => `${title} | ${SITE_NAME}`;
 
 const HOME_DESCRIPTION =
   "Open-access database of centimeter-scale drone and aerial imagery with AI-mapped standing deadwood and tree cover. Explore, download or contribute forest data.";

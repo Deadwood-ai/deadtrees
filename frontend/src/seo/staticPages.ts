@@ -63,11 +63,11 @@ const renderBody = (path: string, meta: PageMeta) => {
 
 /**
  * Fills the shell. The shell also answers `/` and every URL without a static
- * page, so it must not claim a canonical URL or a robots rule: the app sets
- * those once it knows the route.
+ * page, so it must not claim a canonical URL, a robots rule or the home page's
+ * structured data: the app sets those once it knows the route.
  */
 export const renderShell = (indexHtml: string): string => {
-  const meta = getPageMeta("/");
+  const meta = { ...getPageMeta("/"), jsonLd: undefined };
   return indexHtml
     .replace(HEAD_BLOCK, () => renderHead(meta, null))
     .replace(BODY_BLOCK, () => renderBody("/", meta));

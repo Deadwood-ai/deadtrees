@@ -23,7 +23,11 @@ export const seoPagesPlugin = (): Plugin => {
     },
     transformIndexHtml: renderShell,
     async closeBundle() {
-      const shell = await readFile(join(outDir, "index.html"), "utf8");
+      // Rollup also calls this after a failed build; keep its error in front.
+      const shell = await readFile(join(outDir, "index.html"), "utf8").catch(
+        () => null,
+      );
+      if (!shell) return;
 
       await writeFile(join(outDir, "sitemap.xml"), renderSitemap());
       await Promise.all(

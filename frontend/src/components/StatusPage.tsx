@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SITE_NAME } from "../seo/pageMeta";
+import { brand } from "../seo/pageMeta";
 import { usePageMetaOverride } from "../seo/usePageMeta";
 import {
   CloudSyncOutlined,
@@ -56,7 +56,7 @@ export default function StatusPage({
   // drop the page from search.
   usePageMetaOverride(
     kind === "not-found" || kind === "locked"
-      ? { title: `${title} | ${SITE_NAME}`, noindex: true }
+      ? { title: brand(title), noindex: true }
       : null,
   );
   return (

@@ -22,6 +22,7 @@ describe("renderShell", () => {
     expect(shell).not.toContain('rel="canonical"');
     expect(shell).not.toContain('property="og:url"');
     expect(shell).not.toContain('name="robots"');
+    expect(shell).not.toContain("application/ld+json");
   });
 });
 
