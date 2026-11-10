@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dataset evaluation labels</title>
+<link rel="stylesheet" href="/datasets.css">
+</head>
+<body>
+<header>
+  <button id="prev" title="Previous dataset (←)">←</button><span id="pos"></span><button id="next" title="Next dataset (→)">→</button>
+  <button id="nextOpen" title="Next dataset without a label (Tab)">Next open <kbd>Tab</kbd></button>
+  <a id="site" target="_blank" rel="noopener">Open dataset ↗</a>
+  <span id="meta" class="muted"></span>
+  <select id="filter" title="Which datasets ←/→ step through">
+    <option value="all">all datasets</option>
+    <option value="open">not labeled</option>
+    <option value="dev">dev split</option>
+    <option value="holdout">holdout split</option>
+    <option value="disagree">you and the models disagree</option>
+  </select>
+  <label class="muted"><input type="checkbox" id="showAudit"> old audit</label>
+  <label class="muted"><input type="checkbox" id="showModels"> model answers</label>
+  <span id="progress" class="muted"></span>
+</header>
+<main>
+  <section id="views">
+    <figure class="view overview" data-name="overview"><figcaption>Overview</figcaption><div class="inner"></div></figure>
+    <figure class="view" data-name="crop-1"><figcaption>Crop 1</figcaption><div class="inner"></div></figure>
+    <figure class="view" data-name="crop-2"><figcaption>Crop 2</figcaption><div class="inner"></div></figure>
+    <figure class="view" data-name="crop-3"><figcaption>Crop 3</figcaption><div class="inner"></div></figure>
+    <figure class="view" data-name="crop-4"><figcaption>Crop 4</figcaption><div class="inner"></div></figure>
+  </section>
+  <aside>
+    <div id="calls" class="row"></div>
+    <div id="reasons" class="row"></div>
+    <div id="fixes" class="row"></div>
+    <textarea id="note" rows="2" placeholder="Optional note"></textarea>
+    <div class="row"><button class="big" id="save" title="Save this label and go to the next open dataset">Save → next <kbd>Enter</kbd></button></div>
+    <p id="status"></p>
+    <div id="audit" class="panel-info" hidden></div>
+    <div id="models" class="panel-info" hidden></div>
+    <div id="thumb"><figcaption class="muted">Thumbnail (website)</figcaption><img alt="thumbnail"></div>
+    <details><summary>Rules and keys</summary>
+      <p><b>Keep</b>: usable as it is. <b>Keep, fix</b>: usable, but the COG display, the thumbnail or the ortho needs fixing or reprocessing. <b>Exclude</b>: unusable as a whole for mapping dead trees and forest cover; pick every reason that applies. <b>Unsure</b>: you cannot tell from these images.</p>
+      <p>Season, georeferencing and duplicates have their own checks, but tag them as reasons when they are why you would exclude.</p>
+      <p><kbd>1</kbd> keep · <kbd>2</kbd> keep, fix · <kbd>3</kbd> exclude · <kbd>4</kbd> unsure · reasons <kbd>q</kbd>–<kbd>p</kbd> · fixes <kbd>a</kbd> <kbd>s</kbd> <kbd>d</kbd> · <kbd>Enter</kbd> save and next · <kbd>Tab</kbd> next open · <kbd>←</kbd>/<kbd>→</kbd> step · <kbd>z</kbd> enlarge the view under the mouse, <kbd>Esc</kbd> back. Wheel zooms, drag pans, double-click resets.</p>
+    </details>
+  </aside>
+</main>
+<div id="zoom" hidden><div class="inner"></div><span class="muted">Esc or click outside to close</span></div>
+<script src="/datasets.js"></script>
+</body>
+</html>

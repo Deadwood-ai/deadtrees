@@ -809,7 +809,16 @@ def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 		db.execute('DELETE FROM audit.assessments WHERE dataset_id=%s', (dataset,))
 
 
-DOWN = """
+# Later check migrations build on the base and come down first.
+LATER_CHECKS_DOWN = """
+DROP FUNCTION audit.store_dataset_evaluation(bigint, jsonb);
+DROP FUNCTION audit.duplicate_candidates(bigint, bigint, text, integer, real);
+DROP TABLE audit.image_hashes;
+"""
+
+DOWN = (
+	LATER_CHECKS_DOWN
+	+ """
 DROP VIEW audit.review_queue;
 DROP VIEW audit.disagreements;
 DROP VIEW audit.current_assessments;
@@ -826,6 +835,7 @@ DROP FUNCTION audit.benchmark_split(bigint), internal.can_read_audit_checks(), i
 DROP TYPE audit.check_mode, audit.run_status, audit.assessor_kind, audit.verdict;
 DROP SCHEMA audit;
 """
+)
 
 
 def test_the_migration_can_be_reverted_without_touching_other_objects(db):

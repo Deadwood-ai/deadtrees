@@ -622,3 +622,31 @@ def test_judges_come_from_the_version_config():
 		}
 	)
 	assert sorted(built) == ['haiku-5.5', 'luna-medium'] and all(callable(b) for b in built.values())
+
+
+@pytest.mark.unit
+def test_a_run_records_the_inputs_its_handler_read_again():
+	"""The AOI can change between queueing and running: the run then says what it judged."""
+	client = Client()
+	run = queued(client, version(client), 1)
+	judged = {'ortho_sha256': 'a' * 64, 'aoi': 'new-aoi'}
+	h = handler(result={'inputs': judged, 'coverage': {'crops': 4}})
+	assert worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None) == 'done'
+	assert run_row(client, run['id'])['inputs'] == judged
+
+
+@pytest.mark.unit
+def test_a_dataset_whose_inputs_cannot_be_read_is_left_out_without_stopping_the_worker(caplog):
+	"""One dataset without an ortho hash must not end the loop or block the ones after it."""
+
+	def inputs(client, dataset_id):
+		if dataset_id == 2:
+			raise ValueError('dataset has no ortho with a sha256')
+		return {'ortho_sha256': f'sha-{dataset_id}'}
+
+	ids, read = worker.judged_inputs(SimpleNamespace(inputs=inputs), None, [1, 2, 3])
+
+	assert ids == [1, 3] and read == {1: {'ortho_sha256': 'sha-1'}, 3: {'ortho_sha256': 'sha-3'}}
+	assert 'leaves dataset 2 out' in caplog.text
+	# a check without inputs keeps every dataset
+	assert worker.judged_inputs(SimpleNamespace(), None, [1, 2]) == ([1, 2], None)

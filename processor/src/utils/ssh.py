@@ -119,11 +119,15 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 	with _storage_sftp(token, dataset_id) as sftp:
 		temp_remote_path = f'{remote_file_path}.{uuid.uuid4().hex}.tmp'
 		try:
-			# Create parent directory if it doesn't exist (needed for UUID-prefixed paths)
-			remote_dir = str(PurePosixPath(remote_file_path).parent)
-			try:
-				sftp.stat(remote_dir)
-			except IOError:
+			# Create missing parent directories (UUID-prefixed paths, nested audit image folders)
+			missing = []
+			for parent in PurePosixPath(remote_file_path).parents:
+				try:
+					sftp.stat(str(parent))
+					break
+				except IOError:
+					missing.append(str(parent))
+			for remote_dir in reversed(missing):
 				logger.info(
 					'Creating remote directory',
 					LogContext(

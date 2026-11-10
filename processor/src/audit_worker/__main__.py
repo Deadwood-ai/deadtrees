@@ -110,8 +110,7 @@ def main(argv: list[str] | None = None) -> int:
 		if active is None:
 			parser.error(f'{args.check} has no active version; an operator activates one first')
 		ids = read_ids(args)
-		evidence = getattr(handlers[args.check], 'inputs', None)
-		inputs = {i: evidence(client, i) for i in ids} if evidence else None
+		ids, inputs = worker.judged_inputs(handlers[args.check], client, ids)
 		added = runs.enqueue(client, active, ids, args.queue, inputs=inputs, force=args.force)
 		print(json.dumps({'check': args.check, 'version': active['version'], 'queue': args.queue, 'added': len(added)}))
 		return 0
