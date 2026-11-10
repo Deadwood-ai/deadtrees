@@ -7,9 +7,8 @@ errors or unsure. It plugs into the audit framework like every check
 crop and layer, one dataset-level rule row per layer.
 
 Code: `processor/src/prediction_quality_v1/`; the audit worker runs it through
-`handler.py` (`worker.HANDLERS['prediction_quality']`). It writes the base tables as the
-audit worker. Its one migration grants signed-in users the read of `v2_model_preferences`
-that production already had, so the worker can tell which prediction to judge.
+`handler.py` (`worker.HANDLERS['prediction_quality']`). It needs no migration: it writes
+the base tables as the audit worker.
 
 ## What it looks at
 

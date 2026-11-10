@@ -893,20 +893,3 @@ def test_pointers_set_before_the_guard_survive_activation_and_can_be_deleted(db)
 	assert db.execute(
 		"SELECT count(*) FROM audit.current_runs WHERE check_key='georef' AND dataset_id=%s", (dataset,)
 	).fetchone() == (1,)
-
-
-def test_the_worker_reads_the_preferred_prediction_models(db):
-	"""The prediction quality check judges the prediction of the preferred model; a database
-	built from the migrations must grant that read to signed-in users, as production does."""
-	as_admin(db)
-	db.execute(
-		"INSERT INTO public.v2_model_preferences (label_data, model_config) VALUES ('deadwood', %s) "
-		'ON CONFLICT (label_data) DO UPDATE SET model_config = EXCLUDED.model_config',
-		(json.dumps({'module': 'preferred'}),),
-	)
-	as_worker(db)
-	assert db.execute(
-		"SELECT model_config FROM public.v2_model_preferences WHERE label_data = 'deadwood'"
-	).fetchone() == ({'module': 'preferred'},)
-	with pytest.raises(psycopg.errors.InsufficientPrivilege):
-		db.execute("UPDATE public.v2_model_preferences SET model_config = '{}'")

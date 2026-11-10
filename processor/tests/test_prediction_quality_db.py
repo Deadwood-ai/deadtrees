@@ -120,7 +120,9 @@ def test_the_handler_runs_on_stored_inputs(
 ):
 	"""The whole run on real tables and the storage server. Faked: the judges. The tiles are
 	read with the service key, because only the embedding stage's own completion call (bound
-	to a queue claim) makes a dataset's tiles readable."""
+	to a queue claim) makes a dataset's tiles readable. The model preferences are the
+	defaults, because the isolated local stack lacks the table grant on v2_model_preferences
+	that production and the CI database give signed-in users (DT-1497)."""
 	from types import SimpleNamespace
 
 	from processor.src.prediction_quality_v1 import handler
@@ -156,6 +158,7 @@ def test_the_handler_runs_on_stored_inputs(
 		).execute()
 		stored_tiles = tile_rows(service, dataset_id)
 	monkeypatch.setattr(handler, 'tile_rows', lambda client, dataset_id: stored_tiles)
+	monkeypatch.setattr(handler, 'read_model_preferences', lambda client: DEFAULT_MODEL_PREFERENCES)
 	with use_client(auth_token) as client:
 		client.table('v2_orthos').update({'sha256': SHA}).eq('dataset_id', dataset_id).execute()
 		client.table('v2_cogs').insert(
