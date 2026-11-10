@@ -14,7 +14,6 @@ Binds 127.0.0.1 only; reach it through an SSH tunnel:
 
 import argparse
 import json
-import mimetypes
 import re
 import sqlite3
 import sys
@@ -30,6 +29,13 @@ from processor.src.dataset_evaluation_v1.vocabulary import FIX_FLAGS, REASONS
 UI = Path(__file__).parent / 'label_ui'
 CALLS = ('keep', 'fix', 'exclude', 'unsure')
 IMAGE_NAMES = re.compile(r'(overview|crop-[1-4]|thumbnail)\.jpg')
+# The only files the page serves; the type never comes from the request.
+CONTENT_TYPES = {
+	'.html': 'text/html; charset=utf-8',
+	'.js': 'text/javascript; charset=utf-8',
+	'.css': 'text/css; charset=utf-8',
+	'.jpg': 'image/jpeg',
+}
 
 
 def is_loopback(authority):
@@ -161,7 +167,7 @@ def make_handler(gold: GoldSet):
 
 		def send_file(self, path: Path):
 			body = path.read_bytes()
-			self.headers_for(200, mimetypes.guess_type(str(path))[0] or 'application/octet-stream', len(body))
+			self.headers_for(200, CONTENT_TYPES[path.suffix], len(body))
 			self.wfile.write(body)
 
 		def do_GET(self):
