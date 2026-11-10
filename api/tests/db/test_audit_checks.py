@@ -816,7 +816,9 @@ DROP FUNCTION audit.duplicate_candidates(bigint, bigint, text, integer, real);
 DROP TABLE audit.image_hashes;
 """
 
-DOWN = LATER_CHECKS_DOWN + """
+DOWN = (
+	LATER_CHECKS_DOWN
+	+ """
 DROP VIEW audit.review_queue;
 DROP VIEW audit.disagreements;
 DROP VIEW audit.current_assessments;
@@ -833,6 +835,7 @@ DROP FUNCTION audit.benchmark_split(bigint), internal.can_read_audit_checks(), i
 DROP TYPE audit.check_mode, audit.run_status, audit.assessor_kind, audit.verdict;
 DROP SCHEMA audit;
 """
+)
 
 
 def test_the_migration_can_be_reverted_without_touching_other_objects(db):
