@@ -350,7 +350,7 @@ def test_write_stores_crops_once_and_links_every_row():
 	)
 	out = store.write(client, 5, result, **kw)
 	assert (out['crops'], out['assessments']) == (1, 5)  # gate + 2 layers + 2 rule rows
-	assert out['judged'] == {'crops': [{'crop_id': 1, 'sets': ['exclude'], 'weight': None}], 'images_not_shown': []}
+	assert out['judged'] == {'crop_ids': [1], 'exclude': [1], 'training': {}, 'images': []}
 	assert len(stored) == 3 and all(p.startswith(f'audit/prediction_quality/42/{sha[:16]}/crop-1/') for p in stored)
 	# a file is named by its content, so another image of the crop never replaces it
 	assert all(row['sha256'][:16] in row['storage_path'] for row in client.db['images'])
@@ -362,9 +362,9 @@ def test_write_stores_crops_once_and_links_every_row():
 	again = store.write(client, 6, result, **kw)
 	assert len(client.db['crops']) == 1
 	# the images are stored already: nothing is uploaded or inserted twice
-	assert len(stored) == 3 and len(client.db['images']) == 3 and again['judged']['images_not_shown'] == []
+	assert len(stored) == 3 and len(client.db['images']) == 3 and again['judged']['images'] == []
 	# the crop row holds every run's sets; the run says which were its own
-	assert again['judged']['crops'] == [{'crop_id': 1, 'sets': ['exclude', 'training'], 'weight': 0.5}]
+	assert again['judged']['exclude'] == [1] and again['judged']['training'] == {'1': 0.5}
 	crop_updates = client.db['updates']  # the run row stays the worker's
 	assert len(crop_updates) == 1 and crop_updates[0][0] == 'crops' and crop_updates[0][2] == [('id', 1)]
 	assert crop_updates[0][1]['crop_sets'] == ['exclude', 'training']
@@ -374,9 +374,9 @@ def test_write_stores_crops_once_and_links_every_row():
 	crop.in_aoi = np.zeros(crop.valid.shape, bool)
 	other = store.write(client, 7, result, **kw)
 	assert len(stored) == 6 and len(client.db['images']) == 3
-	not_shown = other['judged']['images_not_shown']
-	assert [i['kind'] for i in not_shown] == ['raw', 'deadwood_overlay', 'forest_cover_overlay']
-	assert all(i['storage_path'] in stored and i['crop_id'] == 1 for i in not_shown)
+	own = other['judged']['images']
+	assert [i['kind'] for i in own] == ['raw', 'deadwood_overlay', 'forest_cover_overlay']
+	assert all(i['storage_path'] in stored and i['crop_id'] == 1 for i in own)
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +552,7 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	assert rule_rows['deadwood']['verdict'] == 'major' and rule_rows['deadwood']['details']['major_crops'] == 4
 	# the registered version's cuts decide: a forest cut of 5 makes the judges' 10 major
 	assert rule_rows['forest_cover']['verdict'] == 'major' and rule_rows['forest_cover']['label_id'] == 12
-	assert out['evidence']['judged']['images_not_shown'] == [] and len(out['evidence']['judged']['crops']) == 4
+	assert out['evidence']['judged']['images'] == [] and len(out['evidence']['judged']['crop_ids']) == 4
 	assert refreshed == [True], 'the login is renewed before the writes'
 	# only the newest preferred prediction is drawn, without its deleted polygons
 	covered = {c['pixel_x0']: c['selection']['exclude']['predicted']['deadwood'] for c in client.db['crops']}

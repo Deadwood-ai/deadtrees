@@ -7,8 +7,9 @@ errors or unsure. It plugs into the audit framework like every check
 crop and layer, one dataset-level rule row per layer.
 
 Code: `processor/src/prediction_quality_v1/`; the audit worker runs it through
-`handler.py` (`worker.HANDLERS['prediction_quality']`). It needs no migration: it writes
-the base tables as the audit worker.
+`handler.py` (`worker.HANDLERS['prediction_quality']`). It writes the base tables as the
+audit worker. Its one migration grants signed-in users the read of `v2_model_preferences`
+that production already had, so the worker can tell which prediction to judge.
 
 ## What it looks at
 
@@ -34,12 +35,12 @@ and gold fill with outline; outside the AOI is darkened). Files are named by the
 content, so a later run on the same ortho never replaces a file a row points at. An
 image is stored once per crop and prediction: a later run uploads nothing that is
 already there. When its image differs from the stored one (the AOI changed, so other
-parts are darkened), the stored row stays what the review page shows and the run names
-the files it judged in `evidence.judged.images_not_shown`. Crops are `audit.crops` rows keyed
+parts are darkened), the stored row stays the first and the run names the files it
+judged in `evidence.judged.images`; the review page shows those. Crops are `audit.crops` rows keyed
 by the tile's pixel window: a tile the dataset evaluation already stored only gains the
 new sets. The row holds the sets of every run on the ortho, so each run records its own
-in `evidence.judged.crops` (crop id, sets, training weight): what a later rule version
-is recomputed from.
+in `evidence.judged` (`crop_ids`, `exclude`, `training` with the weights): what the
+review page lists and what a later rule version is recomputed from.
 
 ## Assessments per run
 
@@ -87,5 +88,5 @@ usage-limit errors reach the worker, which pauses instead of failing the run.
 `scripts/qa/prediction-quality/run_check.py` runs the same check read-only (analyst
 login, COG over HTTPS, the AOI and the preferred predictions picked as the worker picks
 them) and keeps the result in a local folder. It writes nothing to the database. Its
-judges are called differently from the worker's: Luna through an API key, Haiku through
-the Read tool.
+Haiku runs through the worker's backend; Luna through an API key instead of the Codex
+login.

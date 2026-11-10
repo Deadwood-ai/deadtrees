@@ -70,8 +70,8 @@ def test_the_audit_tables_take_a_run_and_a_second_run_on_the_same_ortho(
 					put_image=put_image_with(lambda: auth_token),
 				)
 			)
-		assert [(s['crops'], s['assessments'], s['judged']['images_not_shown']) for s in stored] == [(1, 5, [])] * 2
-		assert [s['judged']['crops'][0]['sets'] for s in stored] == [['exclude'], ['exclude', 'training']]
+		assert [(s['crops'], s['assessments'], s['judged']['images']) for s in stored] == [(1, 5, [])] * 2
+		assert [len(s['judged']['training']) for s in stored] == [0, 1]
 		crops = audit.table('crops').select('*').eq('dataset_id', dataset_id).execute().data
 		assert len(crops) == 1 and crops[0]['crop_sets'] == ['exclude', 'training']
 		assert set(crops[0]['selection']) == {'exclude', 'training'}
@@ -120,9 +120,7 @@ def test_the_handler_runs_on_stored_inputs(
 ):
 	"""The whole run on real tables and the storage server. Faked: the judges. The tiles are
 	read with the service key, because only the embedding stage's own completion call (bound
-	to a queue claim) makes a dataset's tiles readable. The model preferences are the
-	defaults, because a database built from the migrations lacks production's read grant on
-	v2_model_preferences for signed-in users (DT-1497)."""
+	to a queue claim) makes a dataset's tiles readable."""
 	from types import SimpleNamespace
 
 	from processor.src.prediction_quality_v1 import handler
@@ -158,7 +156,6 @@ def test_the_handler_runs_on_stored_inputs(
 		).execute()
 		stored_tiles = tile_rows(service, dataset_id)
 	monkeypatch.setattr(handler, 'tile_rows', lambda client, dataset_id: stored_tiles)
-	monkeypatch.setattr(handler, 'read_model_preferences', lambda client: DEFAULT_MODEL_PREFERENCES)
 	with use_client(auth_token) as client:
 		client.table('v2_orthos').update({'sha256': SHA}).eq('dataset_id', dataset_id).execute()
 		client.table('v2_cogs').insert(

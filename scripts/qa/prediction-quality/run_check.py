@@ -2,7 +2,7 @@
 
 The benchmark's way to run the check without the audit worker and without writing anything:
 inputs from production through the analyst role (read-only transaction), the COG streamed over
-HTTPS, judges Luna (OpenAI Responses API key) and Haiku (Claude Code login). Writes
+HTTPS, judges Luna (OpenAI Responses API key) and Haiku (the worker's Claude Code backend). Writes
 <out>/<dataset>/result.json and the crop images the judges saw. Production runs go through
 the audit worker (processor/src/prediction_quality_v1/handler.py).
 Run under a memory cap on the processing server (production ODM shares it):
@@ -17,9 +17,7 @@ import base64
 import io
 import json
 import os
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError
@@ -31,7 +29,9 @@ from psycopg.rows import dict_row
 from shapely.geometry import shape
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from processor.src.audit_worker.models import judges  # noqa: E402
 from processor.src.prediction_quality_v1.check import VERSIONS, run_prediction_quality  # noqa: E402
+from processor.src.prediction_quality_v1.handler import CONFIG  # noqa: E402
 from processor.src.prediction_quality_v1.render import judge_images  # noqa: E402
 from processor.src.prediction_quality_v1.tiles import Tile  # noqa: E402
 from processor.src.utils.stored_inputs import select_aoi  # noqa: E402
@@ -142,40 +142,6 @@ def luna_backend(key, effort='medium'):
 	return call
 
 
-def haiku_backend(model='claude-haiku-5-5'):
-	def call(prompt, images):
-		with tempfile.TemporaryDirectory(prefix='pq-haiku-') as d:
-			for i, im in enumerate(images):
-				Path(d, f'image{i + 1}.jpg').write_bytes(jpeg_bytes(im))
-			cmd = [
-				'claude',
-				'-p',
-				'--model',
-				model,
-				'--output-format',
-				'json',
-				'--tools',
-				'Read',
-				'--allowedTools',
-				'Read',
-				'--setting-sources',
-				'',
-				'--strict-mcp-config',
-				'--system-prompt',
-				'You assess aerial image predictions. Use the Read tool only to view the three image files named in '
-				'the request, then answer with the requested JSON only.',
-				'Read image1.jpg, image2.jpg and image3.jpg in this folder; they are Image 1, Image 2 and Image 3.\n\n'
-				+ prompt,
-			]
-			done = subprocess.run(cmd, cwd=d, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
-			result = json.loads(done.stdout)  # stdout only: newer model names warn on stderr
-			if done.returncode or result.get('is_error'):
-				raise RuntimeError(f'Haiku failed: {str(result.get("result"))[:200]}')
-			return result['result']
-
-	return call
-
-
 def read_key(path):
 	for line in Path(path).expanduser().read_text().splitlines():
 		if line.startswith('OPENAI_API_KEY='):
@@ -248,7 +214,9 @@ if __name__ == '__main__':
 	if 'luna' in a.judges:
 		backends['luna-medium'] = luna_backend(read_key(a.key_file))
 	if 'haiku' in a.judges:
-		backends['haiku-5.5'] = haiku_backend()
+		# the worker's backend: the images travel inline and the model has no tools, so nothing
+		# written in an image can make it read files of this account
+		backends.update(judges({'haiku-5.5': CONFIG['models']['haiku-5.5']}))
 	for dataset_id in a.datasets:
 		out = a.out / str(dataset_id)
 		if (out / 'result.json').exists():

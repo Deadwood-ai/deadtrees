@@ -234,7 +234,11 @@ shows the checks as sections in the sidebar: user reports, then 1 Dataset evalua
 (manual) and 6 Prediction quality. Opening a section puts the map into that check's
 mode: the reference and match lines for georeferencing, the judged crops for the
 dataset evaluation and prediction quality, and "Show what the model saw" loads the
-stored images.
+stored images. Crops and images are stored
+per ortho and shared by every run on it, so the page lists the crops the current run
+names in `evidence.judged.crop_ids` and shows the run's own image file where
+`evidence.judged.images` names one (a run of an earlier check version names none: the
+page then takes the crops its rows name and its sets' crops of the ortho).
 
 - A reviewer answers a check with Agree or Check wrong (the check's fixed reasons plus
   a note). Each answer is a new person row on the current run (`run_id`), so it marks

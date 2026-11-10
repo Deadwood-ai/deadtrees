@@ -43,6 +43,8 @@ export interface IAuditRun {
   check_key: AuditCheckKey;
   /** what the run judged, e.g. ortho_sha256 */
   inputs: Record<string, unknown>;
+  /** what the run found; `judged` names its own crops and the image files that differ from the stored rows */
+  evidence: Record<string, unknown>;
 }
 
 export interface IAuditCrop {
