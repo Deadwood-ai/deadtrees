@@ -29,7 +29,7 @@ interface AcquisitionDateCardProps {
 	/** the dataset's date decisions, newest first */
 	decisions: IAcquisitionDateDecision[];
 	reviewItems: IAuditReviewItem[];
-	/** the check has run: the reviewer's answer above decides "Reported date valid?" */
+	/** the reviewer answered the check above: that answer decides "Reported date valid?" */
 	answerOwned?: boolean;
 }
 

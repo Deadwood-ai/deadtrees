@@ -15,7 +15,7 @@ interface GeoreferencingCardProps {
 	prefilledFields: string[];
 	reviewItems: IAuditReviewItem[];
 	saved: Record<string, unknown> | null | undefined;
-	/** the check has run: the reviewer's answer above decides this field */
+	/** the reviewer answered the check above: that answer decides this field */
 	answerOwned?: boolean;
 }
 

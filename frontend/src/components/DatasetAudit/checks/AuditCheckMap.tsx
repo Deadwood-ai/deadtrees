@@ -141,8 +141,13 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 }
 
 function ModelImage({ image, hasCrop }: { image: IAuditImage | null; hasCrop: boolean }) {
-	const access = useAuditImageAccess();
 	if (!image) return <div className="text-gray-500">{hasCrop ? "No stored image for this crop." : "No stored overview; pick a crop."}</div>;
+	return <SignedImage image={image} />;
+}
+
+/** One stored image behind the auditors' signed link; mounting it is what asks for the ticket. */
+function SignedImage({ image }: { image: IAuditImage }) {
+	const access = useAuditImageAccess();
 	if (access.isError) return <InlineLoadError message="The images couldn’t load." onRetry={() => void access.refetch()} />;
 	if (!access.data) return <InlineSkeleton label="Loading the model's image" className="aspect-square w-full" />;
 	return (

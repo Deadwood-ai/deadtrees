@@ -69,7 +69,7 @@ function ListFrame({ list, children }: { list: IListState; children: ReactNode }
 					type="info"
 					showIcon
 					className="mb-3"
-					message={`Showing the first ${rows.length} of ${total} results. The rest appear as these are answered.`}
+					message={`Showing ${rows.length} of ${total} results, newest datasets first. The others cannot be listed here yet.`}
 				/>
 			)}
 			{children}
@@ -107,7 +107,7 @@ function ToReviewList({ locationOf }: Pick<AuditCheckQueueProps, "locationOf">) 
 					title="Nothing to review"
 					description={
 						all.length < (list.data?.total ?? 0)
-							? "You answered every result shown. Reload to see the next ones."
+							? "You answered every result this list can show. More are waiting, but cannot be listed here yet."
 							: "No check result is waiting for you."
 					}
 				/>

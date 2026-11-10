@@ -33,8 +33,9 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	const target = (layer: AuditLayer) => ({ checkKey, layer, cropId });
 	const modelRows = (layer: AuditLayer) => evidence.automated.filter((a) => a.crop_id === cropId && a.layer === layer);
 
-	const answer = async (layers: AuditLayer[], verdict: AuditVerdict) => {
-		if (cropId === null) return;
+	/** Stores one verdict for the layers of the selected crop; false when nothing was saved. */
+	const answer = async (layers: AuditLayer[], verdict: AuditVerdict): Promise<boolean> => {
+		if (cropId === null || isPending) return false;
 		try {
 			await save(
 				layers.map((layer) => ({
@@ -47,8 +48,10 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 					verdict,
 				})),
 			);
+			return true;
 		} catch {
 			message.error("Your crop answer was not saved. Please try again.");
+			return false;
 		}
 	};
 
@@ -68,7 +71,7 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 			else if (event.key === "p") k.step(-1);
 			else if (event.key === " " && k.cropId !== null && !k.disabled) {
 				event.preventDefault();
-				void k.answer(k.layers, "ok").then(() => k.step(1));
+				void k.answer(k.layers, "ok").then((saved) => saved && k.step(1));
 			}
 		};
 		window.addEventListener("keydown", onKey);

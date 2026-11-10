@@ -233,16 +233,18 @@ stored images.
 - Each reviewer answers on their own: a section under review needs you until you
   answered, whoever else did. Others' and the models' answers show after your answer
   (or "Show now").
-- Where a check has run, the answer decides its `dataset_audit` field (georeferencing,
-  date valid, the two prediction ratings): the form follows the answers and those
-  fields are read-only, so an answer and the saved audit cannot disagree. The dataset
+- Once a reviewer has answered a check, the answer decides its `dataset_audit` field
+  (georeferencing, date valid, the two prediction ratings): the form follows the
+  answers and that field is read-only, so an answer and the saved audit cannot
+  disagree. Without an answer on the current run the field stays editable. The dataset
   evaluation decides no field; its COG and thumbnail answers stay the reviewer's own.
   The derived decision at the top adds the sections up (evaluation exclude, any fix
   finding, else ready) and the reviewer confirms it or chooses another.
   `dataset_audit` is still what Save stores.
 - The queue's To review tab lists every result under review that you have not
   answered; Disagreements reads `audit.disagreements`. Both read one server response
-  (at most `max_rows`) and say so when the list is longer. Before the full backfill
+  (at most `max_rows`) and say so when the list is longer; the rows beyond it cannot
+  be reached from the tab yet. Before the full backfill
   the "answered by me" filter and paging move into the database (DT-1486 follow-up),
   together with the view's own "reviewed on the same evidence" rule: the page counts
   an answer only on the current run, so a rule-only rerun asks again.

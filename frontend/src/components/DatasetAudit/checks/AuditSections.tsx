@@ -6,6 +6,7 @@ import type { IAuditChecks } from "../../../types/auditChecks";
 import {
 	AUDIT_SECTIONS,
 	LAYER_LABELS,
+	answeredFormValues,
 	auditSection,
 	automatedVerdict,
 	legacySectionStatus,
@@ -116,8 +117,9 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 			</div>
 		);
 	};
-	// where a check has run, the reviewer's answer decides its saved-audit field
-	const answerOwned = (id: AuditSectionId) => !!evidenceOf(auditSection(id));
+	// once the reviewer has answered a check, the answer decides its saved-audit field
+	const owned = answeredFormValues(checks, user?.id);
+	const answerOwned = (field: keyof AuditFormValues) => field in owned;
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
 		evaluation: (
@@ -137,13 +139,13 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		georef: (
 			<>
 				{answers(auditSection("georef"))}
-				<GeoreferencingCard {...panels.georef} answerOwned={answerOwned("georef")} />
+				<GeoreferencingCard {...panels.georef} answerOwned={answerOwned("is_georeferenced")} />
 			</>
 		),
 		date: (
 			<>
 				{answers(auditSection("date"))}
-				<AcquisitionDateCard {...panels.date} answerOwned={answerOwned("date")} />
+				<AcquisitionDateCard {...panels.date} answerOwned={answerOwned("has_valid_acquisition_date")} />
 			</>
 		),
 		phenology: <PhenologyCard {...panels.phenology} />,
@@ -151,7 +153,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 			<>
 				{answers(auditSection("prediction"))}
 				<div className="mb-1 text-xs font-medium">Saved audit ratings</div>
-				<PredictionQualityCard answerOwned={answerOwned("prediction")} />
+				<PredictionQualityCard answerOwned={{ deadwood: answerOwned("deadwood_quality"), forestCover: answerOwned("forest_cover_quality") }} />
 			</>
 		),
 	};

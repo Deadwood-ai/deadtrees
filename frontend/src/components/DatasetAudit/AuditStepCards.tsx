@@ -250,9 +250,8 @@ export function PhenologyCard({ dataset, phenologyData, isPhenologyLoading, onCo
 }
 
 // === Prediction quality: the saved per-layer ratings ===
-export function PredictionQualityCard({ answerOwned }: { answerOwned?: boolean }) {
-	// the check has run: the reviewer's answers above decide both ratings
-	const disabled = answerOwned || undefined;
+/** `answerOwned`: the reviewer answered that layer's check above, and the answer decides its rating. */
+export function PredictionQualityCard({ answerOwned }: { answerOwned?: { deadwood: boolean; forestCover: boolean } }) {
 	return (
 		<div>
 			{/* Deadwood cover */}
@@ -265,7 +264,7 @@ export function PredictionQualityCard({ answerOwned }: { answerOwned?: boolean }
 					className="mb-1"
 					rules={createConditionalRule("Please rate deadwood quality")}
 				>
-					<Radio.Group disabled={disabled}>
+					<Radio.Group disabled={answerOwned?.deadwood || undefined}>
 						<Space size="large">
 							<Radio value="great">🟢 Great</Radio>
 							<Radio value="sentinel_ok">🟡 OK</Radio>
@@ -288,7 +287,7 @@ export function PredictionQualityCard({ answerOwned }: { answerOwned?: boolean }
 					className="mb-1"
 					rules={[{ required: false, message: "Please rate tree cover quality" }]}
 				>
-					<Radio.Group disabled={disabled}>
+					<Radio.Group disabled={answerOwned?.forestCover || undefined}>
 						<Space size="large">
 							<Radio value="great">🟢 Great</Radio>
 							<Radio value="sentinel_ok">🟡 OK</Radio>

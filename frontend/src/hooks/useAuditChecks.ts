@@ -3,7 +3,7 @@ import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { fetchAuditImages } from "../api/auditImages";
-import { refreshBeforeExpiry } from "../utils/signedFilesGrant";
+import { freshUntilExpiry, refreshBeforeExpiry } from "../utils/signedFilesGrant";
 import { mergeAnswers } from "../utils/auditChecks";
 import type {
   AuditCheckKey,
@@ -120,23 +120,23 @@ export function useSaveAuditAnswers() {
       if (error) throw error;
       return (data as IAuditAssessment[]).map((row) => ({ ...row, assessor_email: user.email ?? null }));
     },
-    onSuccess: (rows, answers) => {
-      queryClient.setQueryData<IAuditChecks>(
-        auditChecksKey(answers[0].dataset_id),
-        (checks) => checks && { ...checks, people: mergeAnswers(checks.people, rows) },
-      );
+    onSuccess: async (rows, answers) => {
+      const key = auditChecksKey(answers[0].dataset_id);
+      // a reload that started before the insert would bring back the checks without the answer
+      await queryClient.cancelQueries({ queryKey: key });
+      queryClient.setQueryData<IAuditChecks>(key, (checks) => checks && { ...checks, people: mergeAnswers(checks.people, rows) });
       queryClient.invalidateQueries({ queryKey: ["audit-check-queue"] });
     },
   });
 }
 
-/** Signed link prefix for the stored check images, renewed before it expires. It is kept for
- * its whole life: the ticket is part of every image link, so a new one would void the browser cache. */
+/** Signed link prefix for the stored check images, renewed before it expires. The cached grant
+ * outlives its readers: the ticket is part of every image link, so a new one would void the browser cache. */
 export function useAuditImageAccess() {
   return useQuery({
     queryKey: ["audit-image-access"],
     queryFn: fetchAuditImages,
-    staleTime: Infinity,
+    staleTime: freshUntilExpiry,
     gcTime: 60 * 60 * 1000,
     refetchInterval: refreshBeforeExpiry,
   });

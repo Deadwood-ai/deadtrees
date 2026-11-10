@@ -344,7 +344,7 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 
 				{/* The open section's check on the map */}
 				{!isEditing && checkLayersReady > 0 && (
-					<AuditCheckMap key={checkMap.section?.id ?? "none"} map={olMapRef.current} orthoLayer={orthoLayerRef.current} {...checkMap} />
+					<AuditCheckMap key={`${dataset.id}:${checkMap.section?.id ?? "none"}`} map={olMapRef.current} orthoLayer={orthoLayerRef.current} {...checkMap} />
 				)}
 
 				{/* Editor Toolbar */}
