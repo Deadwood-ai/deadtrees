@@ -5,7 +5,7 @@ Every check stores what it looked at and every answer, people's and models'.
 Dataset verdicts are derived from those rows by versioned rules, so thresholds
 and model combinations can change without new model calls. Everything lives in the
 `audit` schema: `supabase/migrations/20261029103000_audit_checks_base.sql`. Checks built
-on it: [dataset evaluation](dataset-evaluation.md).
+on it: [dataset evaluation](dataset-evaluation.md), [prediction quality](prediction-quality.md).
 
 ## Model
 

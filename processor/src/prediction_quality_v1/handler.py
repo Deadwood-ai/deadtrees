@@ -18,6 +18,7 @@ from shared.models import Cog, LabelDataEnum, LabelSourceEnum
 from shared.pagination import iter_pages_after_id
 from shared.settings import settings
 
+from ..audit_worker.worker import default_ready
 from ..utils.stored_inputs import aoi_key, local_cog, ortho_sha256, read_geometry, stored_aoi, tile_rows
 from . import store
 from .check import run_prediction_quality
@@ -48,11 +49,8 @@ __all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
 
 def ready(status: dict) -> bool:
-	"""After the COG, the CLIP tiles and both predictions exist."""
-	predictions = status.get('is_combined_model_done') or (
-		status.get('is_deadwood_done') and status.get('is_forest_cover_done')
-	)
-	return bool(status.get('is_cog_done') and status.get('is_embeddings_done') and predictions)
+	"""After the COG and both predictions exist (the worker's default), and the CLIP tiles."""
+	return bool(default_ready(status) and status.get('is_embeddings_done'))
 
 
 def inputs(client, dataset_id: int) -> dict:

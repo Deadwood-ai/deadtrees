@@ -111,3 +111,96 @@ def test_large_predictions_are_read_page_by_page(test_dataset_for_processing, au
 			client.table('v2_deadwood_geometries').insert(rows[start : start + 500]).execute()
 		found = prediction_polygons(client, 'v2_deadwood_geometries', label_id)
 	assert len(found) == count and found[0].geom_type == 'Polygon'
+
+
+def test_the_handler_runs_on_stored_inputs(
+	test_dataset_for_processing, auth_token, test_processor_user, tmp_path, monkeypatch
+):
+	"""The whole run on real tables and the storage server. Faked: the judges. The tiles are
+	read with the service key, because only the embedding stage's own completion call (bound
+	to a queue claim) makes a dataset's tiles readable. The model preferences are the
+	defaults, because a database built from the migrations lacks production's read grant on
+	v2_model_preferences for signed-in users (DT-1497)."""
+	from types import SimpleNamespace
+
+	from processor.src.prediction_quality_v1 import handler
+	from processor.src.utils.ssh import push_file_to_storage_server
+	from processor.src.utils.stored_inputs import tile_rows
+	from processor.tests.test_prediction_quality import _squares, _to_wgs
+	from shared.db import use_service_client
+	from shared.models import DEFAULT_MODEL_PREFERENCES, LabelDataEnum
+	from shared.settings import settings
+
+	dataset_id = test_dataset_for_processing
+	cog = tmp_path / 'cog.tif'
+	cog.write_bytes(_ortho(res=0.05).read())
+	cog_path = f'{dataset_id}_pq_test_cog.tif'
+	push_file_to_storage_server(
+		str(cog), f'{settings.STORAGE_SERVER_DATA_PATH}/{settings.COG_DIR}/{cog_path}', auth_token, dataset_id
+	)
+	squares = [mapping(_to_wgs(box(*square))) for square in _squares()]
+	with use_service_client() as service:
+		service.table('v2_tile_embeddings').insert(
+			[
+				{
+					'dataset_id': dataset_id,
+					'geometry': square,
+					'embedding': '[' + ','.join(['0'] * 1024) + ']',
+					'pixel_x0': 512 * n,
+					'pixel_y0': 0,
+					'pixel_x1': 512 * (n + 1),
+					'pixel_y1': 512,
+				}
+				for n, square in enumerate(squares)
+			]
+		).execute()
+		stored_tiles = tile_rows(service, dataset_id)
+	monkeypatch.setattr(handler, 'tile_rows', lambda client, dataset_id: stored_tiles)
+	monkeypatch.setattr(handler, 'read_model_preferences', lambda client: DEFAULT_MODEL_PREFERENCES)
+	with use_client(auth_token) as client:
+		client.table('v2_orthos').update({'sha256': SHA}).eq('dataset_id', dataset_id).execute()
+		client.table('v2_cogs').insert(
+			{
+				'dataset_id': dataset_id,
+				'cog_file_name': cog_path,
+				'cog_path': cog_path,
+				'version': 1,
+				'cog_file_size': 1,
+			}
+		).execute()
+		labels = {}
+		for data in (LabelDataEnum.deadwood, LabelDataEnum.forest_cover):
+			label = {
+				'dataset_id': dataset_id,
+				'user_id': test_processor_user,
+				'label_source': 'model_prediction',
+				'label_type': 'semantic_segmentation',
+				'label_data': data.value,
+				'label_quality': 3,
+				'model_config': DEFAULT_MODEL_PREFERENCES[data],
+				'is_active': True,
+			}
+			labels[data.value] = client.table('v2_labels').insert(label).execute().data[0]['id']
+		client.table('v2_deadwood_geometries').insert(
+			{'label_id': labels['deadwood'], 'geometry': squares[0]}
+		).execute()
+		version = runs.register_version(client, 'prediction_quality', 'v1-store-test', {})
+		run = {'check_key': 'prediction_quality', 'check_version_id': version['id'], 'dataset_id': dataset_id}
+		run = client.schema('audit').table('runs').insert({**run, 'queue': 'manual'}).execute().data[0]
+		ctx = SimpleNamespace(
+			run=run,
+			client=client,
+			token=auth_token,
+			put_image=put_image_with(lambda: auth_token),
+			judges={'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major')},
+		)
+		out = handler.handle(ctx)
+		assert out['inputs'] == handler.inputs(client, dataset_id)
+		assert out['inputs']['label_ids'] == labels and out['inputs']['ortho_sha256'] == SHA
+		assert out['coverage']['crops'] == 4 and out['evidence']['verdicts']['deadwood']['verdict'] == 'bad'
+		crops = client.schema('audit').table('crops').select('*').eq('dataset_id', dataset_id).execute().data
+		assert len(crops) == 4
+		covered = {c['pixel_x0']: c['selection']['exclude']['predicted']['deadwood'] for c in crops}
+		assert covered[0] > 0.9 and covered[512] < 0.1
+		images = client.schema('audit').table('images').select('id').eq('dataset_id', dataset_id).execute().data
+		assert len(images) == 12
