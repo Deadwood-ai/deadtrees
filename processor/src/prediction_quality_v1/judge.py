@@ -106,13 +106,15 @@ def _number(value, name) -> float:
 
 def parse(judge: str, text: str) -> Answer:
 	"""Validate one judge's answer; unknown modes are dropped, missing modes count as absent."""
-	found = re.search(r'\{.*\}', text, re.S)
+	found = re.search(r'\{.*\}', text, re.S) if isinstance(text, str) else None
 	if not found:
 		raise AnswerError('no JSON object')
 	try:
 		values = json.loads(found.group(0))
 	except json.JSONDecodeError as e:
 		raise AnswerError(f'invalid JSON: {e}') from None
+	if not isinstance(values, dict):
+		raise AnswerError('not a JSON object')
 	layers = {}
 	for layer in LAYERS:
 		v = values.get(layer)
@@ -120,15 +122,18 @@ def parse(judge: str, text: str) -> Answer:
 			raise AnswerError(f'{layer}: missing or bad verdict')
 		modes = {}
 		for k in MODES[layer]:
-			m = (v.get('modes') or {}).get(k) or {}
+			given = v.get('modes')
+			m = (given.get(k) if isinstance(given, dict) else None) or {}
 			if isinstance(m, (int, float)):  # older shape: likelihood only
 				m = {'likelihood': m, 'area_pct': 0}
+			if not isinstance(m, dict):
+				raise AnswerError(f'{k}: not a likelihood')
 			modes[k] = {'likelihood': _number(m.get('likelihood', 0), k), 'area_pct': _number(m.get('area_pct', 0), k)}
 		layers[layer] = LayerAnswer(
 			verdict=v['verdict'],
 			major_likelihood=_number(v.get('major_likelihood'), f'{layer} major_likelihood'),
 			modes=modes,
-			errors=[str(e)[:200] for e in (v.get('errors') or [])][:10],
+			errors=[str(e)[:200] for e in (v.get('errors') if isinstance(v.get('errors'), list) else [])][:10],
 		)
 	return Answer(judge=judge, assessable=bool(values.get('assessable', True)), layers=layers, raw=text)
 

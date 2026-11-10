@@ -14,16 +14,17 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 import rasterio
-from pyproj import Transformer
+from pyproj import CRS, Transformer
 from shapely.geometry import box
 
 from ..audit_worker.models import LimitReached, LoginExpired
+from ..utils.crs import get_utm_string_from_latlon
 from . import judge as judge_mod
 from . import rule as rule_mod
 from .render import Crop, judge_images, render_crop
-from .tiles import TILE_M, Tile, attach_cover, crop_count, exclude_set, project, training_set, utm_epsg
+from .tiles import TILE_M, Tile, attach_cover, crop_count, exclude_set, project, training_set, utm_layer
 
-CHECK_VERSION = 'prediction_quality_v1'
+VERSIONS = {'check': 'prediction_quality_v1', 'prompt': judge_mod.PROMPT_VERSION, 'rule': rule_mod.RULE_VERSION}
 
 
 @dataclass
@@ -44,13 +45,6 @@ class CheckResult:
 	tiles_total: int
 	seconds: float
 	cost: dict = field(default_factory=dict)  # judge -> {'seconds', 'calls', 'cost_usd'}
-	versions: dict = field(
-		default_factory=lambda: {
-			'check': CHECK_VERSION,
-			'prompt': judge_mod.PROMPT_VERSION,
-			'rule': rule_mod.RULE_VERSION,
-		}
-	)
 
 
 def pick(tiles: Sequence[Tile], hectares: float, seed: int) -> list[Tile]:
@@ -62,38 +56,45 @@ def pick(tiles: Sequence[Tile], hectares: float, seed: int) -> list[Tile]:
 	return list(chosen.values())
 
 
+def grid_epsg(src) -> int:
+	"""The UTM zone of the CLIP tile grid: the zone of the ortho's centre, as the embedding stage picks it."""
+	lon, lat = Transformer.from_crs(src.crs, 4326, always_xy=True).transform(
+		*(src.transform @ (src.width / 2, src.height / 2))
+	)
+	return CRS.from_string(get_utm_string_from_latlon(lat, lon)).to_epsg()
+
+
 def run_prediction_quality(
 	dataset_id: int,
 	cog: str,
 	tiles: Sequence[Tile],
 	aoi_4326,
-	deadwood_4326: Sequence,
-	forest_4326: Sequence,
+	predictions_4326: dict,
 	judges: dict,
 	workers: int = 4,
+	rule_config: dict = rule_mod.RULE_CONFIG,
 ) -> CheckResult:
-	"""aoi_4326 None judges every tile: a dataset without an AOI is predicted as a whole."""
+	"""predictions_4326: layer ('deadwood', 'forest') -> polygons. aoi_4326 None judges every
+	tile: a dataset without an AOI is predicted as a whole. `rule_config` is the version's."""
 	start = time.monotonic()
-	c = aoi_4326.centroid if aoi_4326 is not None else box(*tiles[0].bbox_4326).centroid
-	epsg = utm_epsg(c.x, c.y)
-	to_utm = Transformer.from_crs(4326, epsg, always_xy=True)
-	aoi = project(aoi_4326, to_utm).buffer(0) if aoi_4326 is not None else None
-	layers_utm = {
-		'deadwood': [project(g, to_utm) for g in deadwood_4326],
-		'forest': [project(g, to_utm) for g in forest_4326],
-	}
-	attach_cover(tiles, epsg, deadwood_4326, forest_4326)
-	# Only tiles whose square lies inside the AOI judge the prediction there.
-	inside = [
-		t for t in tiles if aoi is None or box(*t.square_utm).intersection(aoi).area >= 0.9 * box(*t.square_utm).area
-	]
-	hectares = (aoi.area if aoi is not None else len(inside) * TILE_M**2) / 1e4
-	results = [CropResult(tile=t) for t in pick(inside, hectares, dataset_id)]
-
 	with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='60'), rasterio.open(cog) as src:
+		epsg = grid_epsg(src)
+		to_utm = Transformer.from_crs(4326, epsg, always_xy=True)
+		aoi = project(aoi_4326, to_utm).buffer(0) if aoi_4326 is not None else None
+		layers = {layer: utm_layer(predictions_4326[layer], to_utm) for layer in judge_mod.LAYERS}
+		attach_cover(tiles, to_utm, layers['deadwood'], layers['forest'])
+		# Only tiles whose square lies inside the AOI judge the prediction there.
+		inside = [
+			t
+			for t in tiles
+			if aoi is None or box(*t.square_utm).intersection(aoi).area >= 0.9 * box(*t.square_utm).area
+		]
+		hectares = (aoi.area if aoi is not None else len(inside) * TILE_M**2) / 1e4
+		results = [CropResult(tile=t) for t in pick(inside, hectares, dataset_id)]
 		for r in results:
-			near = {k: [g for g in v if g.intersects(box(*r.tile.square_utm))] for k, v in layers_utm.items()}
+			near = {name: layer.near(r.tile.square_utm) for name, layer in layers.items()}
 			r.crop = render_crop(src, epsg, r.tile.square_utm, near, aoi)
+	del layers  # up to a few hundred thousand polygons, not needed while the judges take their minutes
 
 	def one(task):
 		r, name, backend = task
@@ -108,16 +109,20 @@ def run_prediction_quality(
 
 	tasks = [(r, name, backend) for r in results for name, backend in judges.items()]
 	cost = {name: {'seconds': 0.0, 'calls': 0, 'cost_usd': None} for name in judges}
+	answered = dict.fromkeys(judges, 0)
 	with ThreadPoolExecutor(max(1, workers)) as pool:
 		for r, name, answer, error, seconds in pool.map(one, tasks):
 			cost[name]['seconds'] = round(cost[name]['seconds'] + seconds, 1)
 			cost[name]['calls'] += 1
 			if answer is not None:
 				r.answers.append(answer)
+				answered[name] += 1
 			else:
 				r.failures[name] = error
-	if tasks and not any(r.answers for r in results):
-		raise RuntimeError(f'no judge answered: {next(iter(results[0].failures.values()))}')
+	# The cuts are calibrated on the judges' mean, so a verdict never rests on fewer judges.
+	silent = [name for name, count in answered.items() if results and not count]
+	if silent:
+		raise RuntimeError(f'{", ".join(silent)} answered no crop: {results[0].failures[silent[0]]}')
 	for r in results:
 		r.combined = {layer: judge_mod.combined(r.answers, layer) for layer in judge_mod.LAYERS}
 
@@ -127,7 +132,7 @@ def run_prediction_quality(
 		training = [
 			{'combined': r.combined[layer], 'weight': r.tile.weight} for r in results if 'training' in r.tile.sets
 		]
-		verdicts[layer] = rule_mod.dataset_verdict(layer, exclude, training)
+		verdicts[layer] = rule_mod.dataset_verdict(layer, exclude, training, rule_config)
 	return CheckResult(
 		dataset_id=dataset_id,
 		epsg=epsg,

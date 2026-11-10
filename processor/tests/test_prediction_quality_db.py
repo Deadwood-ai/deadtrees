@@ -66,11 +66,11 @@ def test_the_audit_tables_take_a_run_and_a_second_run_on_the_same_ortho(
 					_result(dataset_id, sets),
 					ortho_sha256=SHA,
 					label_ids=labels,
-					footprint=lambda tile: footprint,
+					footprints={7: footprint},
 					put_image=put_image_with(lambda: auth_token),
 				)
 			)
-		assert stored == [{'crops': 1, 'assessments': 5}] * 2
+		assert stored == [{'crops': 1, 'assessments': 5, 'images_not_shown': []}] * 2
 		crops = audit.table('crops').select('*').eq('dataset_id', dataset_id).execute().data
 		assert len(crops) == 1 and crops[0]['crop_sets'] == ['exclude', 'training']
 		assert set(crops[0]['selection']) == {'exclude', 'training'}
@@ -107,8 +107,9 @@ def test_large_predictions_are_read_page_by_page(test_dataset_for_processing, au
 		label_id = client.table('v2_labels').insert(label).execute().data[0]['id']
 		polygon = mapping(box(7.80, 48.00, 7.8001, 48.0001))
 		rows = [{'label_id': label_id, 'geometry': polygon} for _ in range(count)]
-		for start in range(0, count, 500):
-			client.table('v2_deadwood_geometries').insert(rows[start : start + 500]).execute()
+		# chunks that end inside a page: rows of one insert share their creation time
+		for start in range(0, count, 700):
+			client.table('v2_deadwood_geometries').insert(rows[start : start + 700]).execute()
 		found = prediction_polygons(client, 'v2_deadwood_geometries', label_id)
 	assert len(found) == count and found[0].geom_type == 'Polygon'
 

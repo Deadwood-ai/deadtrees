@@ -14,17 +14,25 @@ from shapely.geometry import mapping, shape
 from shared.labels import read_model_preferences
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
-from shared.models import Cog, LabelDataEnum, LabelSourceEnum
-from shared.pagination import iter_pages_after_id
+from shared.models import LabelDataEnum, LabelSourceEnum
+from shared.pagination import iter_pages_by_creation
 from shared.settings import settings
 
 from ..audit_worker.worker import default_ready
-from ..utils.stored_inputs import aoi_key, local_cog, ortho_sha256, read_geometry, stored_aoi, tile_rows
+from ..utils.stored_inputs import (
+	aoi_key,
+	local_cog,
+	ortho_sha256,
+	read_geometry,
+	stored_aoi,
+	stored_cog,
+	tile_rows,
+)
 from . import store
 from .check import run_prediction_quality
 from .judge import PROMPT_VERSION
 from .render import CROP_PX
-from .rule import CROP_MAJOR_CUT, MIN_MAJOR_CROPS, RULE_VERSION
+from .rule import RULE_CONFIG, RULE_VERSION
 from .tiles import EXCLUDE_SET_SIZE, TILE_M, Tile
 
 VERSION = 'v1'
@@ -35,7 +43,7 @@ CONFIG = {
 	},
 	'prompt_version': PROMPT_VERSION,
 	'rule': RULE_VERSION,
-	'rule_config': {'crop_major_cut': CROP_MAJOR_CUT, 'min_major_crops': MIN_MAJOR_CROPS},
+	'rule_config': RULE_CONFIG,
 	'crops': {'picker': store.SELECTED_BY, 'exclude_set': EXCLUDE_SET_SIZE, 'tile_m': TILE_M, 'crop_px': CROP_PX},
 }
 # The check's layer names and where each layer's prediction lives.
@@ -43,7 +51,6 @@ LAYERS = {
 	'deadwood': (LabelDataEnum.deadwood, settings.deadwood_geometries_table),
 	'forest': (LabelDataEnum.forest_cover, settings.forest_cover_geometries_table),
 }
-JUDGE_WORKERS = 4
 
 __all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
@@ -76,9 +83,7 @@ def handle(ctx) -> dict:
 	log = LogContext(
 		category=LogCategory.PROCESS, dataset_id=dataset_id, token=ctx.token, extra={'run_id': ctx.run['id']}
 	)
-	cogs = client.table(settings.cogs_table).select('*').eq('dataset_id', dataset_id).execute().data
-	if not cogs:
-		raise ValueError('dataset has no COG; run the cog stage first')
+	cog = stored_cog(client, dataset_id)
 	sha256 = ortho_sha256(client, dataset_id)
 	aoi = stored_aoi(client, dataset_id)
 	label_ids = prediction_labels(client, dataset_id)
@@ -93,19 +98,19 @@ def handle(ctx) -> dict:
 		)
 		for r in rows
 	]
-	footprints = {r['id']: mapping(r['geometry']) for r in rows}
-	polygons = {layer: prediction_polygons(client, table, label_ids[layer]) for layer, (_, table) in LAYERS.items()}
+	predictions = {layer: prediction_polygons(client, table, label_ids[layer]) for layer, (_, table) in LAYERS.items()}
+	# The thresholds the version was registered with (a version before they were recorded runs with today's).
+	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
 	with tempfile.TemporaryDirectory(prefix='prediction-quality-') as folder:
-		cog_file = local_cog(Cog(**cogs[0]), Path(folder), ctx.token, dataset_id, log)
+		cog_file = local_cog(cog, Path(folder), ctx.token, dataset_id, log)
 		result = run_prediction_quality(
 			dataset_id,
 			str(cog_file),
 			tiles,
 			shape(aoi) if aoi else None,
-			polygons['deadwood'],
-			polygons['forest'],
+			predictions,
 			ctx.judges,
-			workers=JUDGE_WORKERS,
+			rule_config=config['rule_config'],
 		)
 	stored = store.write(
 		client,
@@ -113,9 +118,10 @@ def handle(ctx) -> dict:
 		result,
 		ortho_sha256=sha256,
 		label_ids=label_ids,
-		footprint=lambda tile: footprints[tile.tile_id],
+		footprints={r['id']: mapping(r['geometry']) for r in rows},
 		put_image=ctx.put_image,
 	)
+	images_not_shown = stored.pop('images_not_shown')
 	logger.info(
 		'Prediction quality stored',
 		LogContext(
@@ -129,8 +135,13 @@ def handle(ctx) -> dict:
 			},
 		),
 	)
-	# inputs: what was judged, read at run time (the ortho, AOI or predictions may have changed since queueing)
-	return {'inputs': identity(sha256, aoi, label_ids), **store.summary(result)}
+	summary = store.summary(result)
+	return {
+		# what was judged, read at run time: the ortho, AOI or predictions may have changed since queueing
+		'inputs': identity(sha256, aoi, label_ids),
+		**summary,
+		'evidence': {**summary['evidence'], 'images_not_shown': images_not_shown},
+	}
 
 
 def prediction_labels(client, dataset_id: int) -> dict:
@@ -160,8 +171,8 @@ def prediction_labels(client, dataset_id: int) -> dict:
 
 def prediction_polygons(client, table: str, label_id: int) -> list:
 	"""Every polygon of one prediction, as shapely in WGS84. Large predictions hold a few
-	hundred thousand polygons, so the read continues after the last id instead of an offset."""
-	pages = iter_pages_after_id(
-		lambda: client.table(table).select('id,geometry').eq('label_id', label_id).eq('is_deleted', False)
+	hundred thousand polygons, so the read continues after the last row instead of an offset."""
+	pages = iter_pages_by_creation(
+		lambda: client.table(table).select('id,created_at,geometry').eq('label_id', label_id).eq('is_deleted', False)
 	)
 	return [read_geometry(row['geometry']) for page in pages for row in page]

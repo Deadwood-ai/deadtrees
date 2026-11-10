@@ -43,6 +43,14 @@ def local_cog(cog: Cog, temp_dir: Path, token: str, dataset_id: int, ctx: LogCon
 	return local
 
 
+def stored_cog(client, dataset_id: int) -> Cog:
+	"""The dataset's COG row; local_cog fetches the file."""
+	rows = client.table(settings.cogs_table).select('*').eq('dataset_id', dataset_id).execute().data
+	if not rows:
+		raise ValueError('dataset has no COG; run the cog stage first')
+	return Cog(**rows[0])
+
+
 def ortho_sha256(client, dataset_id: int) -> str:
 	"""The hash of the dataset's ortho: what an audit run's crops and images are stored under."""
 	rows = client.table(settings.orthos_table).select('sha256').eq('dataset_id', dataset_id).execute().data

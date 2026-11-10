@@ -12,11 +12,19 @@ from pathlib import Path
 
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
-from shared.models import Cog, Ortho
+from shared.models import Ortho
 from shared.settings import settings
 
 from ..utils.ssh import pull_file_from_storage_server
-from ..utils.stored_inputs import NO_ORTHO_HASH, aoi_key, local_cog, ortho_sha256, stored_aoi, tile_rows
+from ..utils.stored_inputs import (
+	NO_ORTHO_HASH,
+	aoi_key,
+	local_cog,
+	ortho_sha256,
+	stored_aoi,
+	stored_cog,
+	tile_rows,
+)
 from .check import CONFIG, evaluate, store_payload
 from .inputs import Tile, read_inputs
 from .rules import PHASH_METHOD, phash
@@ -48,13 +56,11 @@ def handle(ctx) -> dict:
 	log = LogContext(
 		category=LogCategory.PROCESS, dataset_id=dataset_id, token=ctx.token, extra={'run_id': ctx.run['id']}
 	)
-	cogs = client.table(settings.cogs_table).select('*').eq('dataset_id', dataset_id).execute().data
-	if not cogs:
-		raise ValueError('dataset has no COG; run the cog stage first')
+	cog = stored_cog(client, dataset_id)
 	ortho = _ortho(client, dataset_id)
 	aoi = stored_aoi(client, dataset_id)
 	with tempfile.TemporaryDirectory(prefix='dataset-evaluation-') as folder:
-		cog_file = local_cog(Cog(**cogs[0]), Path(folder), ctx.token, dataset_id, log)
+		cog_file = local_cog(cog, Path(folder), ctx.token, dataset_id, log)
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
 		seen = read_inputs(str(cog_file), aoi, seed=dataset_id, tiles=tiles(client, dataset_id))
 	# The thresholds the version was registered with (a version before they were recorded runs with today's).

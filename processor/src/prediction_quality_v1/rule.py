@@ -14,29 +14,35 @@ from typing import Sequence
 RULE_VERSION = 'pq-rule-v1'
 # Crop is major when the judges' mean major likelihood reaches this (calibrated on the gold set,
 # 13 Oct: at most 10% of the reviewer's non-major crops above it).
-CROP_MAJOR_CUT = {'deadwood': 52.0, 'forest': 69.0}
-MIN_MAJOR_CROPS = 2
+RULE_CONFIG = {'crop_major_cut': {'deadwood': 52.0, 'forest': 69.0}, 'min_major_crops': 2}
 
 
-def crop_major(layer: str, combined: dict) -> bool | None:
+def crop_major(layer: str, combined: dict, config: dict = RULE_CONFIG) -> bool | None:
 	score = combined.get('major_likelihood')
-	return None if score is None else score >= CROP_MAJOR_CUT[layer]
+	return None if score is None else score >= config['crop_major_cut'][layer]
 
 
-def dataset_verdict(layer: str, exclude_crops: Sequence[dict], training_crops: Sequence[dict] = ()) -> dict:
+def dataset_verdict(
+	layer: str, exclude_crops: Sequence[dict], training_crops: Sequence[dict] = (), config: dict = RULE_CONFIG
+) -> dict:
 	"""exclude_crops / training_crops: dicts with 'combined' (judge.combined) and, for training, 'weight'.
 
 	Returns the layer verdict ('bad' or 'ok', or None when no crop could be judged) with the
-	numbers it rests on, for the suggestion row and the audit card.
+	numbers it rests on, for the rule row and the review page. `config` is the version's
+	(`CONFIG['rule_config']`), so a registered version runs with the cuts it was registered with.
 	"""
-	judged = [c for c in exclude_crops if crop_major(layer, c['combined']) is not None]
-	major = sum(1 for c in judged if crop_major(layer, c['combined']))
-	verdict = None if not judged else ('bad' if major >= MIN_MAJOR_CROPS else 'ok')
+
+	def is_major(crop):
+		return crop_major(layer, crop['combined'], config)
+
+	judged = [c for c in exclude_crops if is_major(c) is not None]
+	major = sum(1 for c in judged if is_major(c))
+	verdict = None if not judged else ('bad' if major >= config['min_major_crops'] else 'ok')
 	weighted = None
-	trained = [c for c in training_crops if crop_major(layer, c['combined']) is not None and c.get('weight')]
+	trained = [c for c in training_crops if is_major(c) is not None and c.get('weight')]
 	if trained:
 		total = sum(c['weight'] for c in trained)
-		weighted = sum(c['weight'] for c in trained if crop_major(layer, c['combined'])) / total
+		weighted = sum(c['weight'] for c in trained if is_major(c)) / total
 	return {
 		'rule': RULE_VERSION,
 		'verdict': verdict,

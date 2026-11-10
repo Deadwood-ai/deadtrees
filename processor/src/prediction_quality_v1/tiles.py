@@ -7,7 +7,6 @@ the square of TILE_M metres centred on the stored footprint, in the dataset's UT
 
 from __future__ import annotations
 
-import hashlib
 import math
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
@@ -50,9 +49,22 @@ def project(geom, transformer: Transformer):
 	return shapely.transform(geom, lambda xy: np.column_stack(transformer.transform(xy[:, 0], xy[:, 1])))
 
 
-def utm_epsg(lon: float, lat: float) -> int:
-	zone = min(max(int((lon + 180.0) // 6.0) + 1, 1), 60)
-	return (32700 if lat < 0 else 32600) + zone
+@dataclass
+class Layer:
+	"""One prediction's polygons in the check's UTM zone, with their spatial index."""
+
+	polygons: list
+	tree: STRtree
+
+	def near(self, square: Sequence[float]) -> list:
+		return [self.polygons[i] for i in self.tree.query(box(*square), predicate='intersects')]
+
+
+def utm_layer(polygons_4326: Iterable, to_utm: Transformer) -> Layer:
+	"""Project a prediction once; every tile's cover and every crop's overlay read this copy."""
+	kept = [g for g in polygons_4326 if g is not None and not g.is_empty]
+	projected = list(project(np.array(kept, dtype=object), to_utm)) if kept else []
+	return Layer(projected, STRtree(projected))
 
 
 def square_from_bbox(bbox_4326: Sequence[float], to_utm: Transformer) -> tuple[float, float, float, float]:
@@ -70,20 +82,13 @@ def stratum(deadwood: float, forest: float) -> tuple[int, int]:
 	return d, f
 
 
-def attach_cover(tiles: Sequence[Tile], epsg: int, deadwood_geoms: Iterable, forest_geoms: Iterable) -> None:
-	"""Set each tile's square and its predicted deadwood and forest share (polygons in WGS84)."""
-	to_utm = Transformer.from_crs(4326, epsg, always_xy=True)
-	layers = {}
-	for name, geoms in (('deadwood', deadwood_geoms), ('forest', forest_geoms)):
-		projected = [project(g, to_utm) for g in geoms if g is not None and not g.is_empty]
-		layers[name] = (projected, STRtree(projected))
+def attach_cover(tiles: Sequence[Tile], to_utm: Transformer, deadwood: Layer, forest: Layer) -> None:
+	"""Set each tile's square and its predicted deadwood and forest share."""
 	for t in tiles:
 		t.square_utm = square_from_bbox(t.bbox_4326, to_utm)
-		cell = box(*t.square_utm)
 		affine = from_bounds(*t.square_utm, COVER_PX, COVER_PX)
-		for name, attr in (('deadwood', 'deadwood_share'), ('forest', 'forest_share')):
-			projected, tree = layers[name]
-			near = [(projected[i], 1) for i in tree.query(cell, predicate='intersects')]
+		for layer, attr in ((deadwood, 'deadwood_share'), (forest, 'forest_share')):
+			near = [(g, 1) for g in layer.near(t.square_utm)]
 			share = float(rasterize(near, out_shape=(COVER_PX, COVER_PX), transform=affine).mean()) if near else 0.0
 			setattr(t, attr, share)
 
@@ -96,7 +101,7 @@ def crop_count(hectares: float) -> int:
 def exclude_set(tiles: Sequence[Tile], n: int = EXCLUDE_SET_SIZE) -> list[Tile]:
 	"""The n tiles with the most predicted cover: where the audit judges the prediction."""
 	ranked = sorted(tiles, key=lambda t: (-(t.deadwood_share + t.forest_share), t.tile_id))
-	chosen = ranked[: min(n, len(ranked))]
+	chosen = ranked[:n]
 	for t in chosen:
 		t.sets.append('exclude')
 	return chosen
@@ -135,9 +140,3 @@ def training_set(tiles: Sequence[Tile], n: int, seed: int) -> list[Tile]:
 		t.weight = t.weight / total
 		t.sets.append('training')
 	return chosen
-
-
-def benchmark_split(dataset_id: int, holdout_share: float = 0.2) -> str:
-	"""Fixed development / holdout split by a hash of the dataset id (plan: set once, never moves)."""
-	h = int(hashlib.sha256(f'audit-benchmark-v1:{dataset_id}'.encode()).hexdigest(), 16)
-	return 'holdout' if (h % 1000) < holdout_share * 1000 else 'development'

@@ -31,7 +31,7 @@ from psycopg.rows import dict_row
 from shapely.geometry import shape
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from processor.src.prediction_quality_v1.check import run_prediction_quality  # noqa: E402
+from processor.src.prediction_quality_v1.check import VERSIONS, run_prediction_quality  # noqa: E402
 from processor.src.prediction_quality_v1.render import judge_images  # noqa: E402
 from processor.src.prediction_quality_v1.tiles import Tile  # noqa: E402
 
@@ -42,7 +42,7 @@ WITH pref AS (
   FROM v2_labels l
   WHERE l.dataset_id = %(id)s AND l.is_active AND l.label_source = 'model_prediction'
     AND l.label_data IN ('deadwood', 'forest_cover')
-    AND EXISTS (SELECT 1 FROM v2_model_preferences p WHERE p.label_data = l.label_data::text AND l.model_config @> p.model_config)
+    AND EXISTS (SELECT 1 FROM v2_model_preferences p WHERE p.label_data = l.label_data::text AND l.model_config = p.model_config)
   ORDER BY l.label_data, l.id DESC)
 SELECT c.cog_path, (SELECT id FROM pref WHERE layer = 'deadwood') AS deadwood_label_id,
   (SELECT id FROM pref WHERE layer = 'forest_cover') AS forest_label_id,
@@ -180,7 +180,7 @@ def read_key(path):
 def save(out, result, label_ids):
 	out.mkdir(parents=True, exist_ok=True)
 	crops = []
-	for n, r in enumerate(result.crops, 1):
+	for r in result.crops:
 		folder = out / f'crop-{r.tile.tile_id}'
 		folder.mkdir(exist_ok=True)
 		for name, im in zip(('raw', 'deadwood', 'forest'), judge_images(r.crop)):
@@ -218,7 +218,7 @@ def save(out, result, label_ids):
 			{
 				'dataset_id': result.dataset_id,
 				'epsg': result.epsg,
-				'versions': result.versions,
+				'versions': VERSIONS,
 				'label_ids': label_ids,
 				'tiles_total': result.tiles_total,
 				'seconds': result.seconds,
@@ -257,8 +257,7 @@ if __name__ == '__main__':
 			COG_ROOT + quote(row['cog_path'], safe='/'),
 			tiles,
 			shape(row['aoi']),
-			geoms['deadwood'],
-			geoms['forest'],
+			geoms,
 			backends,
 			workers=a.workers,
 		)
