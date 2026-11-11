@@ -31,6 +31,8 @@ export type IAuditSectionMap =
       images: CropImageKind[];
       /** layers whose model verdict can colour the squares */
       colorLayers: AuditLayer[];
+      /** the check judges the orthophoto alone: the AOI outline and the prediction layers are hidden while its section is open */
+      orthoOnly?: boolean;
     };
 
 export interface IAuditReason {
@@ -63,7 +65,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Dataset evaluation",
     checkKey: "dataset_evaluation",
     layers: ["image"],
-    map: { kind: "crops", images: ["raw"], colorLayers: [] },
+    map: { kind: "crops", images: ["raw"], colorLayers: [], orthoOnly: true },
     reasons: [
       { code: "exclude_call_wrong", label: "Keep or exclude call wrong" },
       { code: "fix_call_wrong", label: "COG or thumbnail call wrong" },

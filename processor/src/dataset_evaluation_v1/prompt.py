@@ -7,7 +7,7 @@ import re
 from .rules import Call
 from .vocabulary import CATEGORIES, FLAGS, MODEL_REASONS, VERDICTS
 
-PROMPT_VERSION = 'v1'
+PROMPT_VERSION = 'v2'
 
 
 class AnswerError(ValueError):
@@ -18,7 +18,7 @@ def _choices(values) -> str:
 	return ' | '.join(values)
 
 
-def build_prompt(overview_mpp: float, crop_mpp: float, has_aoi: bool, has_thumbnail: bool, crop_count: int = 4) -> str:
+def build_prompt(overview_mpp: float, crop_mpp: float, has_thumbnail: bool, crop_count: int = 4) -> str:
 	"""The question for one dataset. The image numbers follow the images actually sent:
 	the overview, then `crop_count` samples (a small plot has fewer than four), then the thumbnail."""
 	if crop_count == 0:
@@ -33,16 +33,11 @@ def build_prompt(overview_mpp: float, crop_mpp: float, has_aoi: bool, has_thumbn
 	thumbnail = (
 		f'Image {crop_count + 2} is the 256 px thumbnail the website shows for this dataset.\n' if has_thumbnail else ''
 	)
-	aoi = (
-		'A magenta line on Image 1 marks the area of interest (AOI); judge the AOI, the rest is context.\n'
-		if has_aoi
-		else 'There is no area of interest; judge the whole image.\n'
-	)
 	return f"""You check drone and aerial orthophotos for deadtrees.earth, a database that maps dead trees and
 forest cover from this imagery and uses it to train satellite products.
 Image 1 is the whole orthophoto at about {overview_mpp * 100:.0f} cm per pixel; black or empty areas are outside the
 flight. {samples}
-{thumbnail}{aoi}
+{thumbnail}Judge the whole orthophoto.
 Decide whether the imagery can be used to map dead trees and forest cover.
 - exclude: unusable as a whole. Only for these reasons:
   blurry (blurry or smeared throughout, crowns cannot be told apart at full resolution),
@@ -68,7 +63,7 @@ Answer with this JSON only:
 {chr(10).join(f' "{k}": "{_choices(v)}",' for k, v in CATEGORIES.items())}
  "summary": "<one sentence on what the imagery shows and why it is usable or not>"}}
 Each flag is how likely that problem is present to a degree that matters. scene is what the flight shows as a
-whole; land_cover is the dominant cover in the AOI (else the image); leaf_state is what the trees look like.
+whole; land_cover is the dominant cover of the image; leaf_state is what the trees look like.
 """
 
 

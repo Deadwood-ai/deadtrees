@@ -13,13 +13,17 @@ Code: `processor/src/dataset_evaluation_v1/`; the audit worker runs it through
 
 ## What it looks at
 
+The orthophoto alone. The area of interest is a check of its own and the predictions
+are judged by the prediction quality check, so neither plays a part here (version 2,
+DT-1538; version 1 judged inside the AOI and drew its edge on the overview).
+
 Read from the stored COG at run time (`utils/stored_inputs.local_cog`, so private
 datasets work):
 
 | Image | Size | Purpose |
 |---|---|---|
-| Overview | at most 2048 px, about 30 cm/px | the whole flight; no-data black, the AOI edge in magenta |
-| 4 crops | CLIP tiles (51.2 m windows on the 10 cm UTM grid of `v2_tile_embeddings`) at 5 cm, 1024 px, or native when coarser | sharpness and artifacts; picked by a seeded k-means spread of the tiles in the AOI (else the data), so a rerun judges the same crops and prediction quality can reuse them. A dataset without tiles gets 1024 px native windows inside the data instead |
+| Overview | at most 2048 px, about 30 cm/px | the whole flight; no-data black |
+| 4 crops | CLIP tiles (51.2 m windows on the 10 cm UTM grid of `v2_tile_embeddings`) at 5 cm, 1024 px, or native when coarser | sharpness and artifacts; picked by a seeded k-means spread of the tiles over the data, so a rerun judges the same crops and prediction quality can reuse them. A dataset without tiles gets 1024 px native windows inside the data instead |
 | Thumbnail | the stored 256 px website thumbnail | thumbnail issues |
 
 Footprint padding without a mask (solid white or black connected to the image edge) is
@@ -31,9 +35,9 @@ already stored only joins the set (native fallback crops are off the grid). The 
 reads the tile windows as the processor account, which already sees the tiles of every
 dataset whose embeddings are done; a run is ready only then.
 
-Crops and images are stored per ortho. A later run on the same ortho with another AOI
-adds its crops to the set and keeps the first overview row, so the run records what it
-judged: `evidence.judged` holds its crop ids and image files.
+Crops and images are stored per ortho. An ortho a version 1 run judged inside its AOI
+holds that run's crops and overview too, so the run records what it judged:
+`evidence.judged` holds its crop ids and image files.
 
 ## Assessments per run
 
@@ -58,8 +62,9 @@ Model `modes` carry a 0-100 likelihood for `blurry`, `not_rgb`, `no_trees`,
 lighting, leaf state (a hint only), image type, scene, land cover and a one-sentence
 summary, from the fixed lists in `vocabulary.py`; `raw` holds the reply, token usage and
 seconds. The run's `evidence` holds the resolution, valid share, footprint, crop
-settings, the two folded-in rules and the overview hash; `inputs` the ortho sha256 and
-AOI key the run judged, read again at run time.
+settings, the two folded-in rules and the overview hash; `inputs` the ortho sha256 the
+run judged, read again at run time. A new or changed AOI or prediction does not make a
+new run.
 
 The dataset rule averages the two models' exclude likelihoods:
 
@@ -83,8 +88,8 @@ file an earlier run's rows point at), then calls
 assessments and overview hash (`audit.image_hashes`) in one transaction; a bad row rolls
 everything back. The worker then finishes the run with the returned evidence, coverage
 and cost and points the dataset at it when the version is active. A run is ready once
-the COG, thumbnail and CLIP tiles exist (`ready`); its `inputs` are the ortho sha256 and
-the AOI. `audit.duplicate_candidates(dataset_id, hash)` lists possible duplicates for
+the COG, thumbnail and CLIP tiles exist (`ready`); its `inputs` are the ortho sha256.
+`audit.duplicate_candidates(dataset_id, hash)` lists possible duplicates for
 the duplicate rule; archived datasets are not candidates, because archiving the older
 copy is how a duplicate is resolved. Both functions run with the caller's rights, so
 only the audit worker writes. The rule thresholds and the duplicate thresholds are read

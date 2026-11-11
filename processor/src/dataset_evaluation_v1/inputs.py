@@ -2,7 +2,7 @@
 
 One read at most `overview_px` on the long side through the COG overviews gives the
 overview, its valid-data mask, per-band statistics and the perceptual hash. Four
-crops spread over the data (inside the AOI when there is one) show sharpness and
+crops spread over the data show sharpness and
 artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
 windows on the 10 cm UTM grid of the embedding stage), rendered at 5 cm or native
 when coarser, so the prediction quality check judges the same crops. A dataset
@@ -18,7 +18,6 @@ import rasterio
 from pyproj import Geod, Transformer
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.features import rasterize
 from rasterio.transform import from_origin
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_geom
@@ -68,7 +67,6 @@ class Crop:
 class Inputs:
 	overview: np.ndarray  # H x W x 3 uint8
 	valid: np.ndarray  # H x W bool: real data
-	aoi: np.ndarray | None  # H x W bool inside the AOI, None without an AOI
 	bands: np.ndarray  # C x H x W, every COG band at overview size
 	overview_mpp: float
 	native_mpp: float
@@ -195,14 +193,12 @@ def grid_crops(src, tiles: list[Tile], where: np.ndarray, scale: float, native_m
 	return crops
 
 
-def native_crops(
-	src, valid: np.ndarray, where: np.ndarray, scale: float, native_mpp: float, crop_px: int, count: int, seed: int
-):
+def native_crops(src, valid: np.ndarray, scale: float, native_mpp: float, crop_px: int, count: int, seed: int):
 	"""`count` native-resolution windows of up to `crop_px`, wholly inside the data where possible."""
 	cw, ch = min(crop_px, src.width), min(crop_px, src.height)
 	half = int(np.ceil(max(cw, ch) / 2 / scale))
-	eligible = where & inside(valid, half)
-	ys, xs = np.nonzero(eligible if eligible.any() else where)
+	eligible = inside(valid, half)
+	ys, xs = np.nonzero(eligible if eligible.any() else valid)
 	crops = []
 	for x, y in spread_points(np.column_stack((xs, ys)).astype(float), count, seed):
 		col = int(np.clip((x + 0.5) * scale - cw / 2, 0, src.width - cw))
@@ -222,7 +218,6 @@ def native_crops(
 
 def read_inputs(
 	cog: str,
-	aoi_4326: dict | None = None,
 	seed: int = 0,
 	overview_px: int = OVERVIEW_PX,
 	crop_px: int = CROP_PX,
@@ -230,7 +225,8 @@ def read_inputs(
 	tiles: list[Tile] | None = None,
 ) -> Inputs:
 	"""Read the overview and crops of the COG at `cog` (path or URL); `tiles` are the
-	dataset's CLIP tiles, if the embedding stage has run."""
+	dataset's CLIP tiles, if the embedding stage has run. The whole orthophoto is judged:
+	the area of interest is a check of its own and plays no part here."""
 	env = dict(
 		GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='60', GDAL_HTTP_MAX_RETRY='2', GDAL_CACHEMAX=128
 	)
@@ -246,15 +242,6 @@ def read_inputs(
 		valid = src.dataset_mask(out_shape=(h, w), resampling=Resampling.nearest) > 0
 		valid &= ~padding(overview, valid)
 		scale = src.width / w
-		aoi = None
-		if aoi_4326 and aoi_4326.get('type') == 'Feature':
-			aoi_4326 = aoi_4326['geometry']  # older AOI rows hold a Feature
-		if aoi_4326:
-			native_aoi = transform_geom('EPSG:4326', src.crs, aoi_4326)
-			overview_transform = src.transform @ rasterio.Affine.scale(src.width / w, src.height / h)
-			aoi = rasterize([(native_aoi, 1)], out_shape=(h, w), transform=overview_transform, dtype='uint8') > 0
-			if not (aoi & valid).any():
-				aoi = None  # an AOI off the data says nothing about where to look
 		rows, cols = np.nonzero(valid)
 		valid_window = (
 			Window(
@@ -267,16 +254,14 @@ def read_inputs(
 			else Window(0, 0, src.width, src.height)
 		)
 		native_mpp = ground_mpp(src, src.width / 2, src.height / 2)
-		where = valid & aoi if aoi is not None else valid
 		crops = []
 		if valid.mean() >= MIN_VALID_SHARE:
-			crops = grid_crops(src, tiles or [], where, scale, native_mpp, crop_count, seed)
+			crops = grid_crops(src, tiles or [], valid, scale, native_mpp, crop_count, seed)
 			if not crops:
-				crops = native_crops(src, valid, where, scale, native_mpp, crop_px, crop_count, seed)
+				crops = native_crops(src, valid, scale, native_mpp, crop_px, crop_count, seed)
 		return Inputs(
 			overview=overview,
 			valid=valid,
-			aoi=aoi,
 			bands=bands,
 			overview_mpp=native_mpp * scale,
 			native_mpp=native_mpp,
