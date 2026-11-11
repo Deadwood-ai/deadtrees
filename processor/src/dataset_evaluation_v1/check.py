@@ -34,7 +34,6 @@ from .rules import (
 from .vocabulary import CHECK_KEY
 
 JPEG_QUALITY = 90
-AOI_COLOUR = (255, 0, 255)
 
 # A judge: (prompt, PIL images) -> answer text (audit_worker.models.Backend).
 Judge = Callable[[str, Sequence], str]
@@ -85,7 +84,7 @@ class ImageFile:
 	@property
 	def name(self) -> str:
 		"""The file name inside the ortho's storage folder, named by content. A later run on
-		the same ortho (another AOI, other tiles) then never overwrites a file an earlier
+		the same ortho (other tiles, say) then never overwrites a file an earlier
 		run's rows point at, and the same picture is stored once."""
 		return f'{self.stem}-{self.sha256[:16]}.jpg'
 
@@ -125,15 +124,8 @@ def jpeg(rgb: np.ndarray) -> bytes:
 
 
 def overview_image(inputs: Inputs) -> np.ndarray:
-	"""The overview as the models see it: no-data black, the AOI edge in magenta."""
-	rgb = np.where(inputs.valid[..., None], inputs.overview, 0).astype(np.uint8)
-	if inputs.aoi is None:
-		return rgb
-	inside = inputs.aoi
-	edge = inside & ~(np.roll(inside, 1, 0) & np.roll(inside, -1, 0) & np.roll(inside, 1, 1) & np.roll(inside, -1, 1))
-	edge = edge | np.roll(edge, 1, 0) | np.roll(edge, 1, 1)  # two pixels wide
-	rgb[edge] = AOI_COLOUR
-	return rgb
+	"""The overview as the models see it: no-data black."""
+	return np.where(inputs.valid[..., None], inputs.overview, 0).astype(np.uint8)
 
 
 def model_images(inputs: Inputs, thumbnail: bytes | None) -> list[ImageFile]:
@@ -186,7 +178,6 @@ def evaluate(
 		'overview_mpp': round(inputs.overview_mpp, 4),
 		'size_px': list(inputs.size),
 		'valid_share': round(inputs.valid_share, 4),
-		'aoi_share': None if inputs.aoi is None else round(float(inputs.aoi.mean()), 4),
 		'footprint': mapping(inputs.footprint),
 		'prompt_version': PROMPT_VERSION,
 	}
@@ -194,9 +185,7 @@ def evaluate(
 		# Nothing to look at: the rule decides, no model is asked.
 		return Evaluation(images=images, calls=[empty_cog(inputs.valid_share)], phash=None, evidence=evidence)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
-	prompt = build_prompt(
-		inputs.overview_mpp, crop_mpp, inputs.aoi is not None, thumbnail is not None, crop_count=len(inputs.crops)
-	)
+	prompt = build_prompt(inputs.overview_mpp, crop_mpp, thumbnail is not None, crop_count=len(inputs.crops))
 	# Decoded here: the judges run in threads and must not share lazily loading files.
 	pictures = [Image.open(io.BytesIO(f.data)).convert('RGB') for f in images]
 	# Independent calls: the slower model sets the run time.

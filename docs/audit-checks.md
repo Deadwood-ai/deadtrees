@@ -239,7 +239,9 @@ shows the checks as sections in the sidebar: user reports, then 1 Dataset evalua
 (COG and thumbnail folded in), 2 AOI, 3 Georeferencing, 4 Acquisition date, 5 Phenology
 (manual) and 6 Prediction quality. Opening a section puts the map into that check's
 mode: the reference and match lines for georeferencing, the judged crops for the
-dataset evaluation and prediction quality, and "Show what the model saw" loads the
+dataset evaluation and prediction quality (the dataset evaluation judges the
+orthophoto alone, so the AOI outline and the prediction layers are switched off while
+it is open), and "Show what the model saw" loads the
 stored images. Crops and images are stored
 per ortho and shared by every run on it, so the page lists the crops the current run
 names in `evidence.judged.crop_ids` and shows the run's own image file where

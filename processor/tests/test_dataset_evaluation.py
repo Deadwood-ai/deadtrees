@@ -28,7 +28,7 @@ from processor.src.dataset_evaluation_v1.rules import (
 	hamming,
 	phash,
 )
-from processor.src.utils.stored_inputs import aoi_key, read_geometry
+from processor.src.utils.stored_inputs import read_geometry
 
 SHA = 'b' * 64
 # EPSG:3857 metres near Freiburg (48.0 N): 0.05 m map pixels are about 3.3 cm on the ground
@@ -73,16 +73,6 @@ def write_cog(path: Path, rgb: np.ndarray, nodata_border: int = 0) -> Path:
 	return path
 
 
-def aoi_box(x0, y0, x1, y1):
-	"""An AOI over COG pixel columns x0..x1 and rows y0..y1, in EPSG:4326 GeoJSON."""
-	from pyproj import Transformer
-
-	t = Transformer.from_crs(3857, 4326, always_xy=True)
-	corners = [(ORIGIN[0] + x * MAP_PX, ORIGIN[1] - y * MAP_PX) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
-	ring = [list(t.transform(*c)) for c in corners]
-	return {'type': 'Polygon', 'coordinates': [ring + [ring[0]]]}
-
-
 @pytest.fixture
 def cog(tmp_path):
 	return write_cog(tmp_path / 'forest_cog.tif', forest(3000, 4000), nodata_border=200)
@@ -94,21 +84,18 @@ def cog(tmp_path):
 
 
 @pytest.mark.unit
-def test_inputs_read_a_bounded_overview_and_four_native_crops_inside_the_aoi(cog):
-	aoi = aoi_box(2000, 0, 4000, 3000)
-	inputs = read_inputs(str(cog), aoi, seed=7, overview_px=1024, crop_px=512)
+def test_inputs_read_a_bounded_overview_and_four_native_crops_spread_over_the_data(cog):
+	inputs = read_inputs(str(cog), seed=7, overview_px=1024, crop_px=512)
 
 	assert inputs.overview.shape == (768, 1024, 3)
 	assert 0.90 < inputs.valid.mean() < 0.96  # the 200 px no-data border
-	assert inputs.aoi is not None and 0.45 < inputs.aoi.mean() < 0.55
 	assert inputs.native_mpp == pytest.approx(MAP_PX * np.cos(np.radians(48.06)), rel=0.02)
 	assert len(inputs.crops) == 4
 	for crop in inputs.crops:
 		col, row, w, h = crop.cog_window
 		assert crop.image.shape == (512, 512, 3) and (w, h) == (512, 512)
-		assert col + w / 2 >= 1900  # centred in the AOI half
 	cols = sorted(c.cog_window[0] for c in inputs.crops)
-	assert cols[-1] - cols[0] > 600  # spread out, not clustered
+	assert cols[0] < 1500 and cols[-1] > 2000  # spread over the whole image, not one part of it
 
 
 @pytest.mark.unit
@@ -119,13 +106,6 @@ def test_crops_are_the_same_on_a_rerun_and_move_with_the_seed(cog):
 
 	assert first == again
 	assert first != other
-
-
-@pytest.mark.unit
-def test_an_aoi_off_the_data_is_ignored(cog):
-	inputs = read_inputs(str(cog), aoi_box(5000, 5000, 6000, 6000), overview_px=512, crop_px=256)
-
-	assert inputs.aoi is None and len(inputs.crops) == 4
 
 
 @pytest.mark.unit
@@ -206,7 +186,6 @@ def clip_tiles(cog_path):
 
 @pytest.mark.unit
 def test_crops_are_spread_clip_tiles_rendered_at_5_cm(tmp_path):
-	from shapely.geometry import shape as to_shape
 
 	big = tmp_path / 'big.tif'
 	rgb = forest(4500, 6000)
@@ -226,9 +205,7 @@ def test_crops_are_spread_clip_tiles_rendered_at_5_cm(tmp_path):
 		dst.write(rgb.transpose(2, 0, 1))
 		dst.build_overviews([2, 4, 8], rasterio.enums.Resampling.average)
 	tiles = clip_tiles(big)
-	# the east half, in this COG's 0.07 m pixels
-	aoi = aoi_box(3000 * 0.07 / MAP_PX, 0, 6000 * 0.07 / MAP_PX, 4500 * 0.07 / MAP_PX)
-	inputs = read_inputs(str(big), aoi, seed=4, overview_px=1024, tiles=tiles)
+	inputs = read_inputs(str(big), seed=4, overview_px=1024, tiles=tiles)
 
 	assert len(tiles) >= 16 and len(inputs.crops) == 4
 	assert inputs.settings['crop_picker'] == 'clip-grid-kmeans-v1'
@@ -238,9 +215,8 @@ def test_crops_are_spread_clip_tiles_rendered_at_5_cm(tmp_path):
 		assert crop.image.shape == (1024, 1024, 3) and crop.mpp == 0.05
 		centre = crop.footprint.centroid
 		assert centre.x == pytest.approx(by_window[crop.grid_window].centre[0], abs=1e-6)
-		assert to_shape(aoi).contains(centre)
 	assert len({c.grid_window for c in inputs.crops}) == 4
-	again = read_inputs(str(big), aoi, seed=4, overview_px=1024, tiles=tiles)
+	again = read_inputs(str(big), seed=4, overview_px=1024, tiles=tiles)
 	assert [c.grid_window for c in again.crops] == [c.grid_window for c in inputs.crops]
 
 
@@ -394,7 +370,7 @@ def answer(verdict='keep', likelihood=5, reason='none', **flags):
 def test_a_reply_becomes_a_model_assessment_in_the_audit_vocabulary():
 	call = parse_answer('Here it is:\n```json\n' + answer('exclude', 88, 'blurry', blurry=90) + '\n```', 'haiku-5.5')
 
-	assert (call.assessor_kind, call.model, call.prompt_version) == ('model', 'haiku-5.5', 'v1')
+	assert (call.assessor_kind, call.model, call.prompt_version) == ('model', 'haiku-5.5', 'v2')
 	assert call.verdict == 'major' and call.major_likelihood == 88
 	assert call.modes['blurry'] == {'likelihood': 90.0}
 	assert call.details['reason'] == 'blurry' and call.details['scene'] == 'forest_interior'
@@ -455,8 +431,14 @@ def test_fix_flags_keep_the_dataset_but_mark_it_for_fixing():
 		calls(answer('keep', 5, thumbnail_issue=80), answer('fix', 10, thumbnail_issue=70)), OK_BAND, NO_DUP
 	)
 	assert rule.verdict == 'minor' and rule.modes['thumbnail_issue']['likelihood'] == 75
+	assert rule.details['fix_flags'] == ['thumbnail_issue']  # the page names what to fix
 
 	assert dataset_rule(calls(answer(), answer()), OK_BAND, NO_DUP).verdict == 'ok'
+	# one model alone asking for a fix is not enough, nor two models naming different problems
+	alone = dataset_rule(calls(answer(), answer('fix', 18, reprocess=75)), OK_BAND, NO_DUP)
+	assert alone.verdict == 'ok' and alone.details['fix_flags'] == []
+	apart = dataset_rule(calls(answer('fix', 10, cog_issue=80), answer('fix', 10, reprocess=80)), OK_BAND, NO_DUP)
+	assert apart.verdict == 'ok'
 
 
 # ---------------------------------------------------------------------------
@@ -487,8 +469,8 @@ def thumbnail_bytes():
 
 @pytest.mark.unit
 def test_a_run_judges_six_images_and_stores_every_answer(cog):
-	inputs = read_inputs(str(cog), aoi_box(0, 0, 4000, 1500), seed=3, overview_px=1024, crop_px=512)
-	luna, haiku = Fake(answer()), Fake(answer('fix', 20, reprocess=60))
+	inputs = read_inputs(str(cog), seed=3, overview_px=1024, crop_px=512)
+	luna, haiku = Fake(answer('fix', 10, reprocess=55)), Fake(answer('fix', 20, reprocess=60))
 	image_hash = phash(inputs.overview, inputs.valid)
 	evaluation = evaluate(
 		inputs,
@@ -501,7 +483,7 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 
 	assert len(luna.images[0]) == 6 and all(isinstance(i, Image.Image) for i in luna.images[0])
 	assert luna.images[0][0].size == (1024, 768)
-	assert 'magenta line' in luna.prompts[0] and 'Image 6 is the 256 px thumbnail' in luna.prompts[0]
+	assert 'Judge the whole orthophoto' in luna.prompts[0] and 'Image 6 is the 256 px thumbnail' in luna.prompts[0]
 	# the models and the dataset verdict are the stored rows; the rules it folds in are run evidence
 	assert [c.model for c in evaluation.calls] == ['luna-medium', 'haiku-5.5', 'dataset-evaluation-rule']
 	assert list(evaluation.evidence['rules']) == ['band_check', 'duplicates']
@@ -536,12 +518,13 @@ def test_a_run_judges_six_images_and_stores_every_answer(cog):
 
 
 @pytest.mark.unit
-def test_the_overview_shows_the_aoi_edge_and_hides_no_data(cog):
-	inputs = read_inputs(str(cog), aoi_box(1000, 500, 3000, 2500), overview_px=1024, crop_px=256)
+def test_the_overview_is_the_orthophoto_alone_with_no_data_hidden(cog):
+	inputs = read_inputs(str(cog), overview_px=1024, crop_px=256)
 	shown = check_module.overview_image(inputs)
 
 	assert (shown[~inputs.valid] == 0).all()
-	assert (shown == check_module.AOI_COLOUR).all(axis=2).sum() > 1000
+	# nothing is drawn on it: the area of interest is a check of its own
+	assert (shown[inputs.valid] == inputs.overview[inputs.valid]).all()
 
 
 @pytest.mark.unit
@@ -565,19 +548,13 @@ def test_a_malformed_reply_is_asked_again_once_and_login_errors_reach_the_worker
 
 @pytest.mark.unit
 def test_the_prompt_lists_only_the_reasons_the_models_decide():
-	prompt = build_prompt(0.4, 0.03, has_aoi=False, has_thumbnail=False)
+	prompt = build_prompt(0.4, 0.03, has_thumbnail=False)
 
 	assert 'about 40 cm per pixel' in prompt and 'about 3.0 cm per pixel' in prompt
 	assert 'Images 2 to 5 are 4 samples' in prompt
-	assert 'Image 6' not in prompt and 'judge the whole image' in prompt
+	assert 'Image 6' not in prompt and 'Judge the whole orthophoto' in prompt
+	assert 'area of interest' not in prompt and 'AOI' not in prompt
 	assert '"reason": "blurry | no_trees | artifacts | not_rgb | broken_ortho | too_dark | other | none"' in prompt
-
-
-@pytest.mark.unit
-def test_the_aoi_key_is_stable():
-	aoi = aoi_box(0, 0, 10, 10)
-	assert aoi_key(aoi) == aoi_key(json.loads(json.dumps(aoi))) and len(aoi_key(aoi)) == 16
-	assert aoi_key(None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -690,7 +667,7 @@ def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path,
 	assert summary['coverage'] == {'crops': 4, 'crop_picker': 'kmeans-inside-v1'}
 	assert set(summary) == {'inputs', 'evidence', 'coverage', 'cost'}
 	# the run's inputs have the one shape the queueing compares, and the run names what it judged
-	assert summary['inputs'] == handler.identity(SHA, None) == {'ortho_sha256': SHA, 'aoi': None}
+	assert summary['inputs'] == handler.inputs(client, 42) == {'ortho_sha256': SHA}
 	judged = summary['evidence']['judged']
 	assert judged['crop_ids'] == [11, 12, 13, 14]
 	assert [i['kind'] for i in judged['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
@@ -700,12 +677,22 @@ def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path,
 
 
 @pytest.mark.unit
+def test_a_run_of_an_earlier_version_is_not_judged_by_this_code():
+	"""Version 1 judged inside the AOI: its runs must not get this code's answers under its name."""
+	ctx = SimpleNamespace(
+		run={'id': 7, 'dataset_id': 42}, version={'version': 'v1', 'config': {}}, client=None, token='t'
+	)
+	with pytest.raises(ValueError, match='the run is of version v1; this code judges v2'):
+		handler.handle(ctx)
+
+
+@pytest.mark.unit
 def test_the_handler_runs_after_the_cog_thumbnail_and_tiles_and_is_registered():
 	from processor.src.audit_worker import worker
 
 	assert worker.HANDLERS['dataset_evaluation'] == 'processor.src.dataset_evaluation_v1.handler'
 	handlers, missing = worker.load_handlers()
-	assert not missing and handlers['dataset_evaluation'].VERSION == 'v1'
+	assert not missing and handlers['dataset_evaluation'].VERSION == 'v2'
 	assert set(handlers['dataset_evaluation'].CONFIG['models']) == {'luna-medium', 'haiku-5.5'}
 	assert handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': True})
 	assert not handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': False})
@@ -785,7 +772,7 @@ def test_the_handler_skips_the_duplicate_lookup_for_an_empty_cog(tmp_path, monke
 	],
 )
 def test_the_prompt_numbers_the_images_that_are_sent(crops, samples, thumbnail):
-	prompt = build_prompt(0.4, 0.03, has_aoi=True, has_thumbnail=True, crop_count=crops)
+	prompt = build_prompt(0.4, 0.03, has_thumbnail=True, crop_count=crops)
 
 	assert samples in prompt and f'{thumbnail} the 256 px thumbnail' in prompt
 	assert 'Images 2 to 5' not in prompt

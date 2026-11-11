@@ -15,7 +15,7 @@ from .vocabulary import EXCLUDE_FLAGS, FIX_FLAGS, FLAGS
 
 BAND_RULE = ('band_check', 'v1')
 DUPLICATE_RULE = ('duplicates', 'v1')
-DATASET_RULE = ('dataset-evaluation-rule', 'v1')
+DATASET_RULE = ('dataset-evaluation-rule', 'v2')
 EMPTY_COG_RULE = ('empty_cog', 'v1')
 PHASH_METHOD = 'phash-dct64-v1'
 
@@ -214,7 +214,7 @@ def empty_cog(valid_share: float) -> Call:
 RULE_CONFIG = {
 	'major_at': 60,  # mean model exclude likelihood that excludes
 	'disagree_at': 50,  # spread between the models that sends the dataset to a person
-	'fix_at': 50,  # mean fix-flag likelihood that makes a kept dataset "keep, fix"
+	'fix_at': 50,  # fix-flag likelihood every model must reach to make a kept dataset "keep, fix"
 }
 
 
@@ -256,7 +256,10 @@ def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict 
 	}
 	modes['not_rgb']['likelihood'] = max(modes['not_rgb']['likelihood'], band.major_likelihood)
 	modes['duplicate'] = {'likelihood': duplicates.major_likelihood}
-	fix = max(modes[k]['likelihood'] for k in FIX_FLAGS)
+	# A fix both models name: one model alone asking for a fix proved to be noise (DT-1538).
+	fix_flags = [
+		k for k in FIX_FLAGS if min(m.modes.get(k, {}).get('likelihood', 0) for m in models) >= config['fix_at']
+	]
 	why = []
 	if band.verdict == 'major':
 		verdict = 'major'
@@ -274,7 +277,7 @@ def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict 
 	elif band.verdict == 'unsure' or duplicates.verdict == 'unsure':
 		verdict = 'unsure'
 		why += [c.model for c in (band, duplicates) if c.verdict == 'unsure']
-	elif any(m.verdict == 'minor' for m in models) or fix >= config['fix_at']:
+	elif fix_flags:
 		verdict = 'minor'
 		why.append('fix_flagged')
 	else:
@@ -302,6 +305,8 @@ def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict 
 			'model_spread': round(spread, 1),
 			'models': {m.model: m.verdict for m in models},
 			'exclude_flags': {k: modes[k]['likelihood'] for k in EXCLUDE_FLAGS},
+			# what should be fixed, for the review page to name
+			'fix_flags': fix_flags if verdict == 'minor' else [],
 			'config': config,
 		},
 	)

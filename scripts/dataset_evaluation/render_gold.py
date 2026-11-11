@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Render what the dataset evaluation models see, for every gold-set dataset.
 
-Uses the check's own input code (processor/src/dataset_evaluation_v1): the overview
-with the AOI edge, up to four crops and the website thumbnail, written under
+Uses the check's own input code (processor/src/dataset_evaluation_v1): the overview,
+up to four crops and the website thumbnail, written under
 <root>/datasets/<id>/ for the labeling page. Public and view-only COGs are read from
 data2 over HTTPS; private ones only from a local copy (--cog-dir <dir>/<cog_path>),
-otherwise they are skipped and listed. Paths and AOIs come from the analyst login
+otherwise they are skipped and listed. Paths come from the analyst login
 (read-only). No model is called.
 
 Run it under a memory cap, because production ODM runs on the processing server:
@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dataset_evaluation.gold_set import analyst
 from processor.src.dataset_evaluation_v1.check import model_images
 from processor.src.dataset_evaluation_v1.inputs import Tile, read_inputs
-from processor.src.utils.stored_inputs import select_aoi
 
 DATA_URL = 'https://data2.deadtrees.earth'
 SERVED = ('public', 'viewonly')  # the public file routes serve these; private files are refused
@@ -41,18 +40,12 @@ def sources(ids: list[int]) -> dict[int, dict]:
 			'WHERE d.id = ANY(%s)',
 			(ids,),
 		).fetchall()
-		aois = db.execute(
-			'SELECT dataset_id, geometry, is_whole_image, source, created_at FROM public.v2_aois WHERE dataset_id = ANY(%s)',
-			(ids,),
-		).fetchall()
 		tiles = db.execute(
 			'SELECT dataset_id, pixel_x0, pixel_y0, pixel_x1, pixel_y1, ST_X(ST_Centroid(geometry)) AS lon, '
 			'ST_Y(ST_Centroid(geometry)) AS lat FROM public.v2_tile_embeddings WHERE dataset_id = ANY(%s)',
 			(ids,),
 		).fetchall()
-	out = {r['id']: dict(r, aois=[], tiles=[]) for r in rows}
-	for a in aois:
-		out[a['dataset_id']]['aois'].append(dict(a, created_at=str(a['created_at'])))
+	out = {r['id']: dict(r, tiles=[]) for r in rows}
 	for t in tiles:
 		out[t['dataset_id']]['tiles'].append(
 			Tile((t['pixel_x0'], t['pixel_y0'], t['pixel_x1'], t['pixel_y1']), (t['lon'], t['lat']))
@@ -71,7 +64,7 @@ def render(dataset_id: int, source: dict, folder: Path, cog_dir: Path | None) ->
 	if source['thumbnail_path'] and source['data_access'] in SERVED:
 		with urlopen(f'{DATA_URL}/thumbnails/v1/{quote(source["thumbnail_path"], safe="/")}', timeout=60) as r:
 			thumbnail = r.read(5_000_000)
-	inputs = read_inputs(cog, select_aoi(source['aois']), seed=dataset_id, tiles=source['tiles'])
+	inputs = read_inputs(cog, seed=dataset_id, tiles=source['tiles'])
 	folder.mkdir(parents=True, exist_ok=True)
 	images = model_images(inputs, thumbnail)
 	# The labeling page reads fixed names; the check's own content-based names are for the storage server.
@@ -94,7 +87,6 @@ def render(dataset_id: int, source: dict, folder: Path, cog_dir: Path | None) ->
 					{'grid_window': c.grid_window, 'cog_window': c.cog_window, 'picker': c.picker} for c in inputs.crops
 				],
 				'settings': inputs.settings,
-				'has_aoi': inputs.aoi is not None,
 			},
 			indent=1,
 		)

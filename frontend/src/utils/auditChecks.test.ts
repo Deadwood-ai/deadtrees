@@ -273,6 +273,17 @@ describe("crops", () => {
     ]);
   });
 
+  it("shows a dataset evaluation's own overview, which names no crop", () => {
+    // an earlier version's overview is the stored row; this run judged another picture of the ortho
+    const own = { crop_ids: [1], images: [{ kind: "overview", crop_index: null, storage_path: "audit/own-overview.jpg" }, { kind: "raw", crop_index: 1, storage_path: "audit/own-crop.jpg" }] };
+    const run = { id: 22, check_key: "dataset_evaluation" as const, inputs: { ortho_sha256: "a" }, evidence: { judged: own } };
+    const judged = runEvidence(run, { automated: [], queue: [], crops: [crop(1, ["evaluation"])], images: [image(1, 1, "raw"), image(5, null, "overview")] });
+    expect(judged.images.map((i) => [i.id, i.storage_path])).toEqual([
+      [1, image(1, 1, "raw").storage_path],
+      [5, "audit/own-overview.jpg"],
+    ]);
+  });
+
   it("numbers the exclude set first", () => {
     const ordered = orderedCrops({ crops: [crop(5, ["training"]), crop(9, ["exclude"]), crop(2, ["training", "exclude"])] });
     expect(ordered.map((c) => c.id)).toEqual([2, 9, 5]);

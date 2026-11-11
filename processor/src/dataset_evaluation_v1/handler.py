@@ -18,10 +18,8 @@ from shared.settings import settings
 from ..utils.ssh import pull_file_from_storage_server
 from ..utils.stored_inputs import (
 	NO_ORTHO_HASH,
-	aoi_key,
 	local_cog,
 	ortho_sha256,
-	stored_aoi,
 	stored_cog,
 	tile_rows,
 )
@@ -29,7 +27,9 @@ from .check import CONFIG, evaluate, store_payload
 from .inputs import Tile, read_inputs
 from .rules import PHASH_METHOD, phash
 
-VERSION = 'v1'
+# v2: the orthophoto alone. v1 judged inside the AOI and drew its edge on the overview; the
+# AOI is a check of its own (DT-1538).
+VERSION = 'v2'
 
 __all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
@@ -40,17 +40,23 @@ def ready(status: dict) -> bool:
 
 
 def inputs(client, dataset_id: int) -> dict:
-	"""What a run judges: a new ortho or AOI makes a new run (and reopens a review)."""
-	return identity(ortho_sha256(client, dataset_id), stored_aoi(client, dataset_id))
+	"""What a run judges: a new ortho makes a new run (and reopens a review). The AOI and the
+	predictions play no part, so changing them does not."""
+	return identity(ortho_sha256(client, dataset_id))
 
 
-def identity(sha256: str, aoi: dict | None) -> dict:
+def identity(sha256: str) -> dict:
 	"""The one shape of a run's inputs. The worker compares it with the stored run to tell
 	whether a dataset was already judged, so the queueing and the run must build it alike."""
-	return {'ortho_sha256': sha256, 'aoi': aoi_key(aoi)}
+	return {'ortho_sha256': sha256}
 
 
 def handle(ctx) -> dict:
+	# The code is the version: its prompt and sampling under an earlier version's name would mix
+	# two behaviours in that version's results. Such a run fails; an operator activates this version.
+	queued_for = (getattr(ctx, 'version', None) or {}).get('version', VERSION)
+	if queued_for != VERSION:
+		raise ValueError(f'the run is of version {queued_for}; this code judges {VERSION}')
 	dataset_id = ctx.run['dataset_id']
 	client = ctx.client
 	log = LogContext(
@@ -58,11 +64,10 @@ def handle(ctx) -> dict:
 	)
 	cog = stored_cog(client, dataset_id)
 	ortho = _ortho(client, dataset_id)
-	aoi = stored_aoi(client, dataset_id)
 	with tempfile.TemporaryDirectory(prefix='dataset-evaluation-') as folder:
 		cog_file = local_cog(cog, Path(folder), ctx.token, dataset_id, log)
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
-		seen = read_inputs(str(cog_file), aoi, seed=dataset_id, tiles=tiles(client, dataset_id))
+		seen = read_inputs(str(cog_file), seed=dataset_id, tiles=tiles(client, dataset_id))
 	# The thresholds the version was registered with (a version before they were recorded runs with today's).
 	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
 	image_hash, candidates = None, []
@@ -102,8 +107,8 @@ def handle(ctx) -> dict:
 		.execute()
 		.data
 	)
-	# The run names what it judged. Crops and images are stored per ortho, so after a run
-	# with another AOI the ortho holds more crops than this run saw and keeps the first overview.
+	# The run names what it judged. Crops and images are stored per ortho, and an ortho a
+	# version 1 run judged inside its AOI holds that run's crops and overview too.
 	judged = {
 		'crop_ids': crop_ids or [],
 		'images': [{k: row[k] for k in ('kind', 'crop_index', 'storage_path', 'sha256')} for row in payload['images']],
@@ -119,8 +124,8 @@ def handle(ctx) -> dict:
 		),
 	)
 	return {
-		# what was judged, read at run time: the ortho or AOI may have changed since the run was queued
-		'inputs': identity(ortho.sha256, aoi),
+		# what was judged, read at run time: the ortho may have changed since the run was queued
+		'inputs': identity(ortho.sha256),
 		'evidence': {**evaluation.evidence, 'judged': judged},
 		'coverage': {'crops': len(seen.crops), 'crop_picker': seen.settings['crop_picker']},
 		'cost': evaluation.cost,

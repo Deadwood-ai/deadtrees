@@ -149,7 +149,7 @@ for i, (c, r) in enumerate([(600, 700), (2600, 500), (900, 2700), (2900, 2900)])
 	image(cid, 'raw', c, r, 512)
 modes = {'cog_issue': {'likelihood': 80}, 'thumbnail_issue': {'likelihood': 10}, 'blurry': {'likelihood': 5}}
 assess('dataset_evaluation', ev, 'image', 'rule', 'dataset-evaluation-rule', 'minor', modes=modes,
-       details={'reason': None, 'why': ['fix_flagged'], 'models': {'luna': 'minor', 'haiku': 'minor'}})
+       details={'reason': None, 'why': ['fix_flagged'], 'fix_flags': ['cog_issue'], 'models': {'luna': 'minor', 'haiku': 'minor'}})
 assess('dataset_evaluation', ev, 'image', 'model', 'luna', 'minor', modes=modes, details={'summary': 'RGB forest scene, sharp; black edge band in the COG'})
 assess('dataset_evaluation', ev, 'image', 'model', 'haiku', 'minor', modes=modes, details={'summary': 'Sharp RGB forest image with a COG edge artifact'})
 

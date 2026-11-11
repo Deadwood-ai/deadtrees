@@ -31,6 +31,8 @@ export type IAuditSectionMap =
       images: CropImageKind[];
       /** layers whose model verdict can colour the squares */
       colorLayers: AuditLayer[];
+      /** the check judges the orthophoto alone: the AOI outline and the prediction layers are hidden while its section is open */
+      orthoOnly?: boolean;
     };
 
 export interface IAuditReason {
@@ -63,7 +65,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Dataset evaluation",
     checkKey: "dataset_evaluation",
     layers: ["image"],
-    map: { kind: "crops", images: ["raw"], colorLayers: [] },
+    map: { kind: "crops", images: ["raw"], colorLayers: [], orthoOnly: true },
     reasons: [
       { code: "exclude_call_wrong", label: "Keep or exclude call wrong" },
       { code: "fix_call_wrong", label: "COG or thumbnail call wrong" },
@@ -389,8 +391,9 @@ export function runEvidence(
     own ? own.has(c.id) : named.has(c.id) || (c.ortho_sha256 === ortho && c.crop_sets.some((set) => sets.includes(set))),
   );
   const cropIds = new Set(crops.map((c) => c.id));
-  const imageKey = (i: { crop_id?: number | null; label_id?: number | null; kind: string }) => `${i.crop_id}:${i.label_id ?? null}:${i.kind}`;
-  const ownFiles = new Map((judged.images ?? []).filter((i) => i.crop_id != null).map((i) => [imageKey(i), i.storage_path]));
+  // an entry without a crop is the run's overview or thumbnail; the dataset evaluation names its crops by index only
+  const imageKey = (i: { crop_id?: number | null; label_id?: number | null; kind: string }) => `${i.crop_id ?? null}:${i.label_id ?? null}:${i.kind}`;
+  const ownFiles = new Map((judged.images ?? []).filter((i) => i.crop_id != null || i.kind !== "raw").map((i) => [imageKey(i), i.storage_path]));
   return {
     run,
     automated,

@@ -46,7 +46,7 @@ SCENES = (
 	'mountain_or_rock',
 	'other',
 )
-# The dominant land cover inside the AOI (else the whole image).
+# The dominant land cover of the image.
 LAND_COVERS = (
 	'closed_forest',
 	'open_forest',
