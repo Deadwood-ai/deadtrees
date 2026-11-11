@@ -34,7 +34,10 @@ from .utils.drain_control import (
 	BackgroundProcessResult,
 	acknowledge_drain_request,
 	clear_loop_unhealthy,
+	clear_pending_docker_cleanup,
 	is_drain_requested,
+	load_pending_docker_cleanup,
+	mark_pending_docker_cleanup,
 )
 from .utils.queue_runtime import (
 	claim_task,
@@ -118,6 +121,10 @@ def _handle_graceful_shutdown(signum, frame):
 	task = _inflight_task
 	if task is not None:
 		try:
+			mark_pending_docker_cleanup(task.dataset_id)
+		except OSError as e:
+			logger.warning(f'Could not record pending Docker cleanup for dataset {task.dataset_id}: {e}')
+		try:
 			# The token captured at task start may have expired during a long
 			# stage; log in fresh for the bookkeeping writes.
 			token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
@@ -131,11 +138,6 @@ def _handle_graceful_shutdown(signum, frame):
 					token=token,
 				),
 			)
-			# ODM runs as a detached container via the host Docker socket
-			# and outlive this process. Kill them before making the task retryable,
-			# otherwise the next run starts a duplicate while the old one keeps
-			# consuming GPU/CPU.
-			_kill_dangling_dataset_resources(task.dataset_id)
 			with use_client(token) as client:
 				client.table(settings.statuses_table).update({
 					'current_status': StatusEnum.idle.value,
@@ -148,7 +150,24 @@ def _handle_graceful_shutdown(signum, frame):
 			# Best-effort: if we cannot clean up, fall through and exit anyway. The
 			# task is then left as a stale active row and treated as a crash next run.
 			logger.error(f'Failed to gracefully re-queue task {task.id} during shutdown: {e}')
+		# ODM runs as a detached container via the host Docker socket and outlives
+		# this process, so stop it too. This comes after the queue release because
+		# Docker can be slow enough to outlast the stop grace period, and a kill
+		# before the release turns the retry into a crash (DT-1543). If a kill cuts
+		# the cleanup short, the restarted worker finishes it from the marker.
+		_kill_dangling_dataset_resources(task.dataset_id)
+		clear_pending_docker_cleanup()
 	sys.exit(0)
+
+
+def _finish_pending_docker_cleanup() -> None:
+	"""Remove Docker resources that an interrupted shutdown left on this host."""
+	dataset_id = load_pending_docker_cleanup()
+	if dataset_id is None:
+		return
+	_kill_dangling_dataset_resources(dataset_id)
+	clear_pending_docker_cleanup()
+
 
 # Task lifecycle events in v2_logs.extra.event, read per worker_id by the
 # Factory processors panel (factory_processors).
@@ -785,6 +804,7 @@ def background_process() -> BackgroundProcessResult:
 
 	worker_id = get_worker_id()
 	set_process_log_fields(worker_id=worker_id)
+	_finish_pending_docker_cleanup()
 	active_recovery_attempted = False
 
 	while True:
