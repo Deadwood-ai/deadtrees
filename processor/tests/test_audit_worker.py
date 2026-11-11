@@ -652,6 +652,61 @@ def test_judges_come_from_the_version_config():
 
 
 @pytest.mark.unit
+def test_a_rate_limited_call_waits_and_is_asked_again_before_the_worker_pauses():
+	rate = models.LimitReached('codex', 'exceeded retry limit, last status: 429 Too Many Requests')
+	replies, waits = [rate, rate, '{"ok": true}'], []
+
+	def backend(prompt, images):
+		reply = replies.pop(0)
+		if isinstance(reply, Exception):
+			raise reply
+		return reply
+
+	assert models.paced('claude', backend, sleep=waits.append)('judge', []) == '{"ok": true}'
+	assert waits == list(models.RATE_WAITS[:2])
+	# a rate limit that outlasts the waits reaches the worker, which pauses
+	replies[:] = [rate] * (len(models.RATE_WAITS) + 1)
+	with pytest.raises(models.LimitReached):
+		models.paced('claude', backend, sleep=waits.append)('judge', [])
+	assert replies == []
+	# a usage limit is not waited out, and other errors pass through
+	for error in (
+		models.LimitReached('codex', 'You have hit your usage limit'),
+		models.ModelError('codex: no final answer'),
+	):
+		replies[:], waits[:] = [error, 'never asked'], []
+		with pytest.raises(type(error)):
+			models.paced('codex', backend, sleep=waits.append)('judge', [])
+		assert replies == ['never asked'] and waits == []
+
+
+@pytest.mark.unit
+def test_one_call_at_a_time_on_the_codex_login():
+	import threading
+
+	running, most, lock = [0], [0], threading.Lock()
+
+	def backend(prompt, images):
+		with lock:
+			running[0] += 1
+			most[0] = max(most[0], running[0])
+		time.sleep(0.02)
+		with lock:
+			running[0] -= 1
+		return 'ok'
+
+	for transport, expected in (('codex', 1), ('claude', 4)):
+		most[0] = 0
+		ask = models.paced(transport, backend)
+		threads = [threading.Thread(target=ask, args=('judge', [])) for _ in range(4)]
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join()
+		assert most[0] == expected
+
+
+@pytest.mark.unit
 def test_a_run_records_the_inputs_its_handler_read_again():
 	"""The AOI can change between queueing and running: the run then says what it judged."""
 	client = Client()
