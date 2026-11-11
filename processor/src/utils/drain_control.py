@@ -34,6 +34,10 @@ def unhealthy_path() -> Path:
 	return Path(settings.PROCESSOR_UNHEALTHY_PATH)
 
 
+def pending_docker_cleanup_path() -> Path:
+	return drain_request_path().with_name('pending-docker-cleanup.json')
+
+
 def load_drain_request() -> dict | None:
 	return _read_json(drain_request_path())
 
@@ -66,6 +70,29 @@ def mark_loop_unhealthy(failure_count: int) -> None:
 
 def clear_loop_unhealthy() -> None:
 	unhealthy_path().unlink(missing_ok=True)
+
+
+def mark_pending_docker_cleanup(dataset_id: int) -> None:
+	"""Remember on this host that a dataset's Docker resources still need removal.
+
+	A graceful shutdown releases its queue row before the slow Docker cleanup, so
+	the stale-row recovery no longer covers a cleanup cut short by a kill. The
+	marker lives in this processor's own control directory and survives restarts.
+	"""
+	path = pending_docker_cleanup_path()
+	temporary_path = path.with_suffix(f'{path.suffix}.tmp')
+	temporary_path.write_text(json.dumps({'dataset_id': dataset_id}) + '\n')
+	temporary_path.replace(path)
+
+
+def load_pending_docker_cleanup() -> int | None:
+	payload = _read_json(pending_docker_cleanup_path())
+	dataset_id = payload.get('dataset_id') if isinstance(payload, dict) else None
+	return dataset_id if isinstance(dataset_id, int) else None
+
+
+def clear_pending_docker_cleanup() -> None:
+	pending_docker_cleanup_path().unlink(missing_ok=True)
 
 
 def acknowledge_drain_request(worker_id: str) -> dict | None:

@@ -483,11 +483,14 @@ def test_shutdown_during_completion_notification_does_not_release_task(monkeypat
 	assert processor_module._inflight_task is None
 
 
+
 @pytest.mark.unit
-def test_shutdown_releases_task_before_slow_docker_cleanup(monkeypatch):
+def test_shutdown_releases_task_before_slow_docker_cleanup(monkeypatch, tmp_path):
 	# DT-1543: a stop signal must make the task retryable before Docker cleanup,
 	# which can outlast the stop grace period and end in a kill.
 	order = []
+	monkeypatch.setattr(settings, 'PROCESSOR_DRAIN_REQUEST_PATH', str(tmp_path / 'drain-request.json'))
+	marker = tmp_path / 'pending-docker-cleanup.json'
 
 	class FakeQuery:
 		def update(self, values):
@@ -507,12 +510,14 @@ def test_shutdown_releases_task_before_slow_docker_cleanup(monkeypatch):
 		def __exit__(self, *args):
 			return False
 
+	def docker_cleanup(dataset_id):
+		assert marker.exists(), 'the marker must outlive a kill during Docker cleanup'
+		order.append('docker_cleanup')
+
 	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'token')
 	monkeypatch.setattr(processor_module, 'use_client', lambda token: FakeClient())
 	monkeypatch.setattr(processor_module, 'release_queue_task', lambda token, task: order.append('release'))
-	monkeypatch.setattr(
-		processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: order.append('docker_cleanup')
-	)
+	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', docker_cleanup)
 	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
 
 	processor_module._set_inflight_task(_task())
@@ -523,20 +528,20 @@ def test_shutdown_releases_task_before_slow_docker_cleanup(monkeypatch):
 		processor_module._set_inflight_task(None)
 
 	assert order == ['reset_status', 'release', 'docker_cleanup']
+	assert not marker.exists()
 
 
 @pytest.mark.unit
-def test_task_start_clears_leftover_containers_for_its_dataset(monkeypatch):
+def test_restart_finishes_docker_cleanup_cut_short_by_a_kill(monkeypatch, tmp_path):
+	from processor.src.utils.drain_control import mark_pending_docker_cleanup
+
+	monkeypatch.setattr(settings, 'PROCESSOR_DRAIN_REQUEST_PATH', str(tmp_path / 'drain-request.json'))
+	mark_pending_docker_cleanup(84)
 	cleared = []
 	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', cleared.append)
-	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'token')
-	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'token')
-	monkeypatch.setattr(processor_module, 'process_metadata', lambda current_task, processing_path: None)
-	monkeypatch.setattr(processor_module, '_notify_processing_result_safely', lambda *args: None)
-	monkeypatch.setattr(processor_module, 'delete_queue_task', lambda token, task: None)
-	monkeypatch.setattr(processor_module, 'update_status', lambda *args, **kwargs: None)
-	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
 
-	process_task(_task(), 'token')
+	processor_module._finish_pending_docker_cleanup()
+	processor_module._finish_pending_docker_cleanup()
 
 	assert cleared == [84]
+	assert not (tmp_path / 'pending-docker-cleanup.json').exists()

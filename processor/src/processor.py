@@ -34,7 +34,10 @@ from .utils.drain_control import (
 	BackgroundProcessResult,
 	acknowledge_drain_request,
 	clear_loop_unhealthy,
+	clear_pending_docker_cleanup,
 	is_drain_requested,
+	load_pending_docker_cleanup,
+	mark_pending_docker_cleanup,
 )
 from .utils.queue_runtime import (
 	claim_task,
@@ -118,6 +121,10 @@ def _handle_graceful_shutdown(signum, frame):
 	task = _inflight_task
 	if task is not None:
 		try:
+			mark_pending_docker_cleanup(task.dataset_id)
+		except OSError as e:
+			logger.warning(f'Could not record pending Docker cleanup for dataset {task.dataset_id}: {e}')
+		try:
 			# The token captured at task start may have expired during a long
 			# stage; log in fresh for the bookkeeping writes.
 			token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
@@ -146,10 +153,21 @@ def _handle_graceful_shutdown(signum, frame):
 		# ODM runs as a detached container via the host Docker socket and outlives
 		# this process, so stop it too. This comes after the queue release because
 		# Docker can be slow enough to outlast the stop grace period, and a kill
-		# before the release turns the retry into a crash (DT-1543). The next task
-		# start on this host clears anything left over for its dataset.
+		# before the release turns the retry into a crash (DT-1543). If a kill cuts
+		# the cleanup short, the restarted worker finishes it from the marker.
 		_kill_dangling_dataset_resources(task.dataset_id)
+		clear_pending_docker_cleanup()
 	sys.exit(0)
+
+
+def _finish_pending_docker_cleanup() -> None:
+	"""Remove Docker resources that an interrupted shutdown left on this host."""
+	dataset_id = load_pending_docker_cleanup()
+	if dataset_id is None:
+		return
+	_kill_dangling_dataset_resources(dataset_id)
+	clear_pending_docker_cleanup()
+
 
 # Task lifecycle events in v2_logs.extra.event, read per worker_id by the
 # Factory processors panel (factory_processors).
@@ -399,9 +417,6 @@ def process_task(task: QueueTask, token: str):
 	# Register as in-flight after the queue row has been claimed so a SIGTERM can
 	# release this worker's task without touching another worker's active row.
 	_set_inflight_task(task)
-	# A shutdown releases the queue row before it stops the dataset's ODM
-	# container, so a retry on this host can find that container still running.
-	_kill_dangling_dataset_resources(task.dataset_id)
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)
@@ -789,6 +804,7 @@ def background_process() -> BackgroundProcessResult:
 
 	worker_id = get_worker_id()
 	set_process_log_fields(worker_id=worker_id)
+	_finish_pending_docker_cleanup()
 	active_recovery_attempted = False
 
 	while True:
