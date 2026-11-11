@@ -31,6 +31,13 @@ LOGIN_PATTERN = re.compile(
 	re.IGNORECASE,
 )
 LIMIT_PATTERN = re.compile(r'usage limit|rate limit|limit reached|too many requests|\b429\b|quota', re.IGNORECASE)
+# A limit on the pace of calls, not on the usage: over within a minute or two.
+RATE_PATTERN = re.compile(r'rate limit|too many requests|\b429\b', re.IGNORECASE)
+# Seconds a rate-limited call waits before it is asked again; after the last the worker pauses.
+RATE_WAITS = (30, 60, 120)
+# Calls at a time per login. Two image turns at once on the ChatGPT login ran into
+# "429 Too Many Requests" within a minute (DT-1536); single turns did not.
+CONCURRENT_CALLS = {'codex': 1}
 # The environment a model process gets: enough to find its login and binaries, nothing else.
 ENV_KEYS = ('HOME', 'PATH', 'TMPDIR', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM')
 
@@ -327,13 +334,39 @@ def codex_logged_in(run=subprocess.run) -> bool:
 TRANSPORTS = {'claude': (claude_backend, claude_logged_in), 'codex': (codex_backend, codex_logged_in)}
 
 
+_slots = {transport: threading.BoundedSemaphore(calls) for transport, calls in CONCURRENT_CALLS.items()}
+
+
+def paced(transport: str, backend: Backend, sleep=time.sleep) -> Backend:
+	"""The backend at the pace its login takes: no more calls at a time than CONCURRENT_CALLS
+	allows, and a rate-limited call waits and is asked again. It keeps its slot while it
+	waits, so the other calls on that login wait with it. A usage limit, and a rate limit
+	that outlasts the waits, reach the worker, which pauses."""
+	slot = _slots.get(transport)
+
+	def ask(prompt: str, images: Sequence) -> str:
+		for wait in (*RATE_WAITS, None):
+			try:
+				return backend(prompt, images)
+			except LimitReached as exc:
+				if wait is None or not RATE_PATTERN.search(str(exc)):
+					raise
+			sleep(wait)
+
+	def one_at_a_time(prompt: str, images: Sequence) -> str:
+		with slot:
+			return ask(prompt, images)
+
+	return one_at_a_time if slot else ask
+
+
 def judges(models: dict) -> dict[str, Backend]:
 	"""Backends from a check version's config: {"luna-medium": {"transport": "codex", "model": ..., "effort": ...}}."""
 	out = {}
 	for name, spec in models.items():
 		make, _ = TRANSPORTS[spec['transport']]
 		options = {'effort': spec['effort']} if spec.get('effort') else {}
-		out[name] = make(spec['model'], **options)
+		out[name] = paced(spec['transport'], make(spec['model'], **options))
 	return out
 
 

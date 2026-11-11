@@ -182,8 +182,11 @@ images travel inline in the request, so a model cannot read files of the account
   which repairs a pointer that did not land and carries out a promotion.
 - At start the worker puts runs left `running` by a stopped worker back in the queue
   (there is one worker), or fails them after their last attempt.
-- An expired login or a usage limit puts the run back without spending an attempt and
-  pauses the worker. The pause shows in its status file
+- Calls are paced per login (`models.paced`): one call at a time on the Codex login,
+  because two image turns at once ran into "429 Too Many Requests" in the pilot
+  (DT-1536), and a rate-limited call waits 30, 60 and 120 seconds and is asked again.
+- An expired login, a usage limit, or a rate limit that outlasts those waits puts the run
+  back without spending an attempt and pauses the worker. The pause shows in its status file
   (`~/.local/state/deadtrees-audit-worker/status.json`), and the platform monitor turns
   it into a finding, as it does for a worker that stops writing that file. Other errors
   are retried up to three times, then the run fails with its error.
