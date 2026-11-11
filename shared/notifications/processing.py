@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 
 from shared.db import use_service_client
-from shared.models import QueueTask
+from shared.models import QueueTask, TaskTypeEnum
 from shared.notifications.email import send_email
 from shared.notifications.templates import dataset_completed_email, dataset_failed_email
 from shared.settings import settings
@@ -36,6 +36,10 @@ STATUS_SNAPSHOT_FIELDS = (
 	'is_aoi_required',
 	'has_error',
 )
+
+# Stages that only add evidence for the audit. A run of nothing else changes nothing the
+# uploader sees, so it sends no email, whether it succeeds or fails.
+AUDIT_ONLY_TASKS = frozenset({TaskTypeEnum.doy_estimation_v1, TaskTypeEnum.georef_check_v1})
 
 MAX_DELIVERY_ATTEMPTS = 3
 SENDING_STALE_AFTER = timedelta(minutes=10)
@@ -79,6 +83,11 @@ def is_dataset_user_visible_ready(status: dict[str, Any], file_name: str) -> boo
 		and predictions_done
 		and (not status.get('is_aoi_required') or status.get('is_aoi_done'))
 	)
+
+
+def is_audit_only(task: QueueTask) -> bool:
+	"""A run of audit check stages only, e.g. the georeferencing check over the archive."""
+	return bool(task.task_types) and set(task.task_types) <= AUDIT_ONLY_TASKS
 
 
 def build_recipient_roles(owner_user_id: str, requester_user_id: str) -> dict[str, list[str]]:
@@ -409,7 +418,7 @@ def record_processing_result(
 	event_type: ProcessingNotificationType,
 ) -> ProcessingNotificationBatch:
 	"""Persist at most one processing result event per run and recipient."""
-	if not settings.PROCESSING_EMAIL_NOTIFICATIONS_ENABLED:
+	if not settings.PROCESSING_EMAIL_NOTIFICATIONS_ENABLED or is_audit_only(task):
 		return ProcessingNotificationBatch(events=[], file_name=f'dataset_{task.dataset_id}')
 
 	with use_service_client() as client:

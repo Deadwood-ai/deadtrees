@@ -341,6 +341,36 @@ def test_disabled_notifications_do_not_require_service_access(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('event_type', [ProcessingNotificationType.completed, ProcessingNotificationType.failed])
+def test_a_run_of_audit_checks_only_sends_no_email(monkeypatch, event_type):
+	"""A georeferencing check or date estimate over old datasets changes nothing the uploader sees."""
+
+	def fail_if_service_client_is_used():
+		raise AssertionError('a check-only run must not look up recipients')
+
+	monkeypatch.setattr(processing_notifications, 'use_service_client', fail_if_service_client_is_used)
+	monkeypatch.setattr(processing_notifications.settings, 'PROCESSING_EMAIL_NOTIFICATIONS_ENABLED', True)
+
+	def task(*task_types):
+		return QueueTask(
+			id=123,
+			dataset_id=456,
+			user_id='agent-user',
+			priority=3,
+			is_processing=True,
+			current_position=1,
+			task_types=list(task_types),
+		)
+
+	for checks in ([TaskTypeEnum.georef_check_v1], [TaskTypeEnum.doy_estimation_v1, TaskTypeEnum.georef_check_v1]):
+		assert processing_notifications.notify_processing_result(task(*checks), event_type) == []
+	# with a stage the uploader sees, the run is announced as before
+	assert not processing_notifications.is_audit_only(task(TaskTypeEnum.georef_check_v1, TaskTypeEnum.cog))
+	with pytest.raises(AssertionError, match='must not look up recipients'):
+		processing_notifications.record_processing_result(task(TaskTypeEnum.cog), event_type)
+
+
+@pytest.mark.unit
 def test_failed_notification_handles_missing_status_response(monkeypatch):
 	event_payloads = []
 
