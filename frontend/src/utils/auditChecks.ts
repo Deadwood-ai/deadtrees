@@ -391,8 +391,9 @@ export function runEvidence(
     own ? own.has(c.id) : named.has(c.id) || (c.ortho_sha256 === ortho && c.crop_sets.some((set) => sets.includes(set))),
   );
   const cropIds = new Set(crops.map((c) => c.id));
-  const imageKey = (i: { crop_id?: number | null; label_id?: number | null; kind: string }) => `${i.crop_id}:${i.label_id ?? null}:${i.kind}`;
-  const ownFiles = new Map((judged.images ?? []).filter((i) => i.crop_id != null).map((i) => [imageKey(i), i.storage_path]));
+  // an entry without a crop is the run's overview or thumbnail; the dataset evaluation names its crops by index only
+  const imageKey = (i: { crop_id?: number | null; label_id?: number | null; kind: string }) => `${i.crop_id ?? null}:${i.label_id ?? null}:${i.kind}`;
+  const ownFiles = new Map((judged.images ?? []).filter((i) => i.crop_id != null || i.kind !== "raw").map((i) => [imageKey(i), i.storage_path]));
   return {
     run,
     automated,

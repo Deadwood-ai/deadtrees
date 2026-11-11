@@ -15,9 +15,10 @@ export function useOrthoOnlyLayers(active: boolean) {
 		setShowDeadwood(false);
 		setShowAOI(false);
 		return () => {
-			setShowForestCover(before.showForestCover);
-			setShowDeadwood(before.showDeadwood);
-			setShowAOI(before.showAOI);
+			// a layer the reviewer switched on meanwhile stays on
+			if (!shown.current.showForestCover) setShowForestCover(before.showForestCover);
+			if (!shown.current.showDeadwood) setShowDeadwood(before.showDeadwood);
+			if (!shown.current.showAOI) setShowAOI(before.showAOI);
 		};
 	}, [active, setShowForestCover, setShowDeadwood, setShowAOI]);
 }

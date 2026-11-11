@@ -21,6 +21,7 @@ export default function CheckSummary({ section, evidence }: { section: IAuditSec
 					typeof details.major_crops === "number" && typeof details.judged_crops === "number"
 						? `${details.major_crops} of ${details.judged_crops} crops major`
 						: null;
+				const toFix = verdict === "minor" ? fixes(details.fix_flags) : null;
 				const because = [words(details.reason), crops, words(details.summary)].filter(Boolean).join("; ");
 				const queued = evidence.queue.find((q) => q.layer === layer);
 				return (
@@ -28,7 +29,7 @@ export default function CheckSummary({ section, evidence }: { section: IAuditSec
 						{section.layers.length > 1 && <span>{LAYER_LABELS[layer]}: </span>}
 						<b>
 							{verdict ? verdictLabel(checkKey, verdict) : "No call"}
-							{verdict === "minor" && fixes(details.fix_flags) && `: ${fixes(details.fix_flags)}`}
+							{toFix && `: ${toFix}`}
 						</b>
 						{because && <span>. {because.charAt(0).toUpperCase() + because.slice(1)}</span>}
 						{queued?.reason && <span className="text-gray-500"> · Here because {QUEUE_REASONS[queued.reason].because}.</span>}
