@@ -186,16 +186,17 @@ describe("the dataset evaluation answer", () => {
   it("says what a row decided in a few words", () => {
     expect(evaluationAnswerText(answer({ verdict: "ok" }))).toBe("Keep");
     expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["cog_issue", "thumbnail_issue"] } }))).toBe("Keep (COG issue, thumbnail issue)");
-    // the check may ask for a fix the two flags do not name
-    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } }))).toBe("Keep (something to fix)");
+    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } }))).toBe("Keep (needs reprocessing)");
+    // an answer from before the flags existed
+    expect(evaluationAnswerText(answer({ verdict: "minor" }))).toBe("Keep (something to fix)");
     expect(evaluationAnswerText(answer({ verdict: "major", reason_code: "blurry" }))).toBe("Exclude (blurry)");
     // a rule row keeps its reason in the details
     expect(evaluationAnswerText(row({ assessor_kind: "rule", verdict: "major", details: { reason: "no_trees" } }))).toBe("Exclude (no trees)");
     expect(evaluationAnswerText(answer({ verdict: "unsure" }))).toBe("Unsure");
   });
 
-  it("reads the two flags and nothing else", () => {
-    expect(evaluationFlags(answer({ details: { fix_flags: ["reprocess", "thumbnail_issue"] } }))).toEqual(["thumbnail_issue"]);
+  it("reads the known flags and nothing else", () => {
+    expect(evaluationFlags(answer({ details: { fix_flags: ["reprocess", "blurry", "thumbnail_issue"] } }))).toEqual(["thumbnail_issue", "reprocess"]);
     expect(evaluationFlags(answer({ details: { fix_flags: "cog_issue" } }))).toEqual([]);
     expect(evaluationFlags(null)).toEqual([]);
   });
@@ -209,6 +210,10 @@ describe("the dataset evaluation answer", () => {
     // no flag means both are fine: nothing is left for the reviewer to click
     expect(answeredFormValues(checks(answer({ verdict: "ok", details: { fix_flags: [] } })), "me")).toEqual({ has_cog_issue: false, has_thumbnail_issue: false });
     expect(answeredFormValues(checks(answer({ verdict: "minor", details: { fix_flags: ["cog_issue"] } })), "me")).toEqual({ has_cog_issue: true, has_thumbnail_issue: false });
+    // reprocessing is no field of the saved audit; it keeps the answer at "keep, fix"
+    expect(answeredFormValues(checks(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } })), "me")).toEqual({ has_cog_issue: false, has_thumbnail_issue: false });
+    // an answer from before the flags existed leaves what the saved audit holds
+    expect(answeredFormValues(checks(answer({ verdict: "ok", details: {} })), "me")).toEqual({});
   });
 });
 

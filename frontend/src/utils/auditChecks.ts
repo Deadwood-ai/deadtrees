@@ -304,12 +304,20 @@ export function formValuesForVerdict(checkKey: AuditCheckKey, layer: AuditLayer,
   }
 }
 
-export type EvaluationFlag = "cog_issue" | "thumbnail_issue";
+export type EvaluationFlag = "cog_issue" | "thumbnail_issue" | "reprocess";
 
-/** The two problems a kept dataset can carry, each with the saved-audit field it sets. */
-export const EVALUATION_FLAGS: { flag: EvaluationFlag; label: string; inText: string; field: "has_cog_issue" | "has_thumbnail_issue" }[] = [
-  { flag: "cog_issue", label: "COG issue", inText: "COG issue", field: "has_cog_issue" },
-  { flag: "thumbnail_issue", label: "Thumbnail issue", inText: "thumbnail issue", field: "has_thumbnail_issue" },
+/** The problems a kept dataset can carry (the check's fix flags). Two of them are fields of the
+ * saved audit, with a note each; reprocessing only makes the answer "keep, fix". */
+export const EVALUATION_FLAGS: {
+  flag: EvaluationFlag;
+  label: string;
+  inText: string;
+  field?: "has_cog_issue" | "has_thumbnail_issue";
+  notes?: "cog_issue_notes" | "thumbnail_issue_notes";
+}[] = [
+  { flag: "cog_issue", label: "COG issue", inText: "COG issue", field: "has_cog_issue", notes: "cog_issue_notes" },
+  { flag: "thumbnail_issue", label: "Thumbnail issue", inText: "thumbnail issue", field: "has_thumbnail_issue", notes: "thumbnail_issue_notes" },
+  { flag: "reprocess", label: "Needs reprocessing", inText: "needs reprocessing" },
 ];
 
 /** The problems to fix a dataset evaluation row names (details.fix_flags): the check's rule row, or a reviewer's answer. */
@@ -343,10 +351,11 @@ export function answeredFormValues(checks: IAuditChecks | undefined, userId: str
       const mine = myAnswer(checks.people, userId, evidence.run.id, { checkKey: section.checkKey!, layer });
       if (!mine) continue;
       Object.assign(values, formValuesForVerdict(section.checkKey!, layer, mine.verdict));
-      if (section.checkKey === "dataset_evaluation") {
-        // the answer carries the reviewer's two flags; no flag means the COG and the thumbnail are fine
+      // The answer carries the reviewer's flags: none means the COG and the thumbnail are fine. An
+      // answer from before the flags existed says nothing about them, so the saved audit keeps its values.
+      if (section.checkKey === "dataset_evaluation" && Array.isArray(mine.details.fix_flags)) {
         const flags = evaluationFlags(mine);
-        for (const { flag, field } of EVALUATION_FLAGS) values[field] = flags.includes(flag);
+        for (const { flag, field } of EVALUATION_FLAGS) if (field) values[field] = flags.includes(flag);
       }
     }
     return values;

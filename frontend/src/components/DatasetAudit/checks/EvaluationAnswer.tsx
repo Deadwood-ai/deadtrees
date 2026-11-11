@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, message } from "antd";
+import { Button, Form, Input, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
@@ -64,11 +64,19 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 	const [excluding, setExcluding] = useState(false);
 	const [reason, setReason] = useState<string | null>(verdict === "major" ? text(rule?.details.reason) : null);
 	const [note, setNote] = useState("");
-	const [draftFlags, setDraftFlags] = useState<EvaluationFlag[]>(() => evaluationFlags(rule));
+	// the flags before an answer: what the check names, and what a saved audit already holds
+	const [draftFlags, setDraftFlags] = useState<EvaluationFlag[] | null>(null);
 	const [showOthers, setShowOthers] = useState(false);
+	const form = Form.useFormInstance();
+	const savedCog = Form.useWatch("has_cog_issue", { form, preserve: true });
+	const savedThumbnail = Form.useWatch("has_thumbnail_issue", { form, preserve: true });
+	const preset = EVALUATION_FLAGS.map((f) => f.flag).filter(
+		(flag) => evaluationFlags(rule).includes(flag) || (flag === "cog_issue" && savedCog === true) || (flag === "thumbnail_issue" && savedThumbnail === true),
+	);
 
 	const answered = !!mine && !changing;
-	const flags = answered ? evaluationFlags(mine) : draftFlags;
+	const draft = draftFlags ?? preset;
+	const flags = answered ? evaluationFlags(mine) : draft;
 
 	const store = async (answer: AuditVerdict, fixFlags: EvaluationFlag[], reasonCode: string | null = null, reasonText: string | null = null) => {
 		try {
@@ -86,6 +94,7 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 			]);
 			setChanging(false);
 			setExcluding(false);
+			setDraftFlags(null);
 			setNote("");
 		} catch {
 			message.error("Your answer was not saved. Please try again.");
@@ -121,7 +130,17 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 							You: <b>{describe(mine)}</b>
 							{decided && (agrees(myCall!) ? ", as the check says" : `, the check said ${verdict === "major" ? "exclude" : "keep"}`)}
 						</span>
-						<Button size="small" type="link" className="p-0 text-xs" onClick={() => setChanging(true)} disabled={disabled}>
+						<Button
+							size="small"
+							type="link"
+							className="p-0 text-xs"
+							disabled={disabled}
+							onClick={() => {
+								// changing starts from the answer, not from what the check said
+								setDraftFlags(evaluationFlags(mine));
+								setChanging(true);
+							}}
+						>
 							Change
 						</Button>
 					</div>
@@ -150,7 +169,7 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 				<div>
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Your call</div>
 					<div className="flex gap-2">
-						<button type="button" className={call(false, "keep")} disabled={disabled || isPending} onClick={() => keep(draftFlags)}>
+						<button type="button" className={call(false, "keep")} disabled={disabled || isPending} onClick={() => keep(draft)}>
 							Keep
 							<span className="text-[11px] font-normal text-gray-500">{hint("keep")}</span>
 						</button>
@@ -179,6 +198,11 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 							</button>
 						))}
 					</div>
+					{EVALUATION_FLAGS.filter((f) => f.notes && flags.includes(f.flag)).map(({ flag, notes, inText }) => (
+						<Form.Item key={flag} name={notes} className="mb-0 mt-1.5">
+							<Input size="small" placeholder={`What is the ${inText}?`} aria-label={`Note on the ${inText}`} maxLength={2000} />
+						</Form.Item>
+					))}
 				</div>
 			)}
 

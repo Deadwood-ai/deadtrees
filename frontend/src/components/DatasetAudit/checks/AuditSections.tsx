@@ -134,11 +134,14 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		evaluation: evaluation ? (
 			<>
 				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} />
-				{EVALUATION_FLAGS.map(({ field }) => (
-					<Form.Item key={field} name={field} noStyle rules={createConditionalRule("Please answer the dataset evaluation")}>
-						<AnswerField />
-					</Form.Item>
-				))}
+				{EVALUATION_FLAGS.map(
+					({ field }) =>
+						field && (
+							<Form.Item key={field} name={field} noStyle rules={createConditionalRule("Please answer the dataset evaluation")}>
+								<AnswerField />
+							</Form.Item>
+						),
+				)}
 				<OrthoFilePanel {...panels.file} thumbnailUrl={panels.thumbnailUrl} />
 			</>
 		) : (
