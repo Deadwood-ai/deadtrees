@@ -66,10 +66,14 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     checkKey: "dataset_evaluation",
     layers: ["image"],
     map: { kind: "crops", images: ["raw"], colorLayers: [], orthoOnly: true },
+    // why a dataset is excluded: the reviewer answers Keep or Exclude, not "check wrong"
     reasons: [
-      { code: "exclude_call_wrong", label: "Keep or exclude call wrong" },
-      { code: "fix_call_wrong", label: "COG or thumbnail call wrong" },
-      { code: "image_facts_wrong", label: "Image facts wrong" },
+      { code: "blurry", label: "Blurry" },
+      { code: "no_trees", label: "No trees" },
+      { code: "artifacts", label: "Artifacts" },
+      { code: "not_rgb", label: "Not RGB" },
+      { code: "broken_ortho", label: "Broken ortho" },
+      { code: "too_dark", label: "Too dark" },
       OTHER,
     ],
     verdicts: ["ok", "minor", "major"],
@@ -300,6 +304,43 @@ export function formValuesForVerdict(checkKey: AuditCheckKey, layer: AuditLayer,
   }
 }
 
+export type EvaluationFlag = "cog_issue" | "thumbnail_issue" | "reprocess";
+
+/** The problems a kept dataset can carry (the check's fix flags). Two of them are fields of the
+ * saved audit, with a note each; reprocessing only makes the answer "keep, fix". */
+export const EVALUATION_FLAGS: {
+  flag: EvaluationFlag;
+  label: string;
+  inText: string;
+  field?: "has_cog_issue" | "has_thumbnail_issue";
+  notes?: "cog_issue_notes" | "thumbnail_issue_notes";
+}[] = [
+  { flag: "cog_issue", label: "COG issue", inText: "COG issue", field: "has_cog_issue", notes: "cog_issue_notes" },
+  { flag: "thumbnail_issue", label: "Thumbnail issue", inText: "thumbnail issue", field: "has_thumbnail_issue", notes: "thumbnail_issue_notes" },
+  { flag: "reprocess", label: "Needs reprocessing", inText: "needs reprocessing" },
+];
+
+/** The problems to fix a dataset evaluation row names (details.fix_flags): the check's rule row, or a reviewer's answer. */
+export function evaluationFlags(row: Pick<IAuditAssessment, "details"> | null | undefined): EvaluationFlag[] {
+  const named = Array.isArray(row?.details?.fix_flags) ? row.details.fix_flags : [];
+  return EVALUATION_FLAGS.map((f) => f.flag).filter((flag) => named.includes(flag));
+}
+
+const keepsDataset = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
+
+/** A dataset evaluation answer in a few words, the check's or a person's: "Keep", "Keep (COG issue)", "Exclude (blurry)". */
+export function evaluationAnswerText(row: Pick<IAuditAssessment, "verdict" | "details" | "reason_code">): string {
+  if (row.verdict === "unsure") return "Unsure";
+  if (!keepsDataset(row.verdict)) {
+    const code = row.reason_code ?? (typeof row.details.reason === "string" ? row.details.reason : null);
+    const reason = auditSection("evaluation").reasons.find((r) => r.code === code)?.label.toLowerCase();
+    return reason ? `Exclude (${reason})` : "Exclude";
+  }
+  const flags = evaluationFlags(row);
+  const fixes = EVALUATION_FLAGS.filter((f) => flags.includes(f.flag)).map((f) => f.inText);
+  return fixes.length ? `Keep (${fixes.join(", ")})` : row.verdict === "minor" ? "Keep (something to fix)" : "Keep";
+}
+
 /** The saved-audit fields the reviewer's own answers on the current runs decide. */
 export function answeredFormValues(checks: IAuditChecks | undefined, userId: string | undefined): Partial<AuditFormValues> {
   if (!checks || !userId) return {};
@@ -308,7 +349,14 @@ export function answeredFormValues(checks: IAuditChecks | undefined, userId: str
     if (!evidence) return values;
     for (const layer of section.layers) {
       const mine = myAnswer(checks.people, userId, evidence.run.id, { checkKey: section.checkKey!, layer });
-      if (mine) Object.assign(values, formValuesForVerdict(section.checkKey!, layer, mine.verdict));
+      if (!mine) continue;
+      Object.assign(values, formValuesForVerdict(section.checkKey!, layer, mine.verdict));
+      // The answer carries the reviewer's flags: none means the COG and the thumbnail are fine. An
+      // answer from before the flags existed says nothing about them, so the saved audit keeps its values.
+      if (section.checkKey === "dataset_evaluation" && Array.isArray(mine.details.fix_flags)) {
+        const flags = evaluationFlags(mine);
+        for (const { flag, field } of EVALUATION_FLAGS) if (field) values[field] = flags.includes(flag);
+      }
     }
     return values;
   }, {});
@@ -334,7 +382,8 @@ export interface IDerivedDecision {
 export function deriveDecision(values: Partial<AuditFormValues>, evaluation: AuditVerdict | null): IDerivedDecision {
   if (evaluation === "major") return { disposition: "exclude_completely", because: ["dataset evaluation: exclude"], open: [] };
   const fixes: [boolean, string][] = [
-    [evaluation === "minor", "dataset evaluation: keep, fix"],
+    // a "keep, fix" the two flags do not already name (the check may ask for reprocessing)
+    [evaluation === "minor" && !values.has_cog_issue && !values.has_thumbnail_issue, "dataset evaluation: keep, fix"],
     [values.has_cog_issue === true, "COG issue"],
     [values.has_thumbnail_issue === true, "thumbnail issue"],
     [values.is_georeferenced === false, "georeferencing poor"],

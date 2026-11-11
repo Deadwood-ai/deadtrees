@@ -5,6 +5,7 @@ import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
 import type { IAuditChecks } from "../../../types/auditChecks";
 import {
 	AUDIT_SECTIONS,
+	EVALUATION_FLAGS,
 	LAYER_LABELS,
 	answeredFormValues,
 	auditSection,
@@ -20,13 +21,19 @@ import { AcquisitionDateCard } from "../AcquisitionDateCard";
 import AuditAOICard from "../AuditAOICard";
 import { COGQualityCard, OrthoFilePanel, PhenologyCard, PredictionQualityCard, ThumbnailCard } from "../AuditStepCards";
 import { GeoreferencingCard } from "../GeoreferencingCard";
+import { createConditionalRule } from "../auditConstants";
 import { InlineLoadError } from "../../SectionStates";
 import AuditSection from "./AuditSection";
 import CheckAnswer from "./CheckAnswer";
 import CheckSummary from "./CheckSummary";
 import CropAnswers from "./CropAnswers";
+import EvaluationAnswer from "./EvaluationAnswer";
 import DerivedDecision from "./DerivedDecision";
 import type { IAuditCheckView } from "./auditCheckView";
+
+/** A saved-audit field the reviewer's answer sets: it takes part in the form, and so in its
+ * validation and saving, without a control of its own. */
+const AnswerField = () => null;
 
 interface AuditSectionsProps {
 	datasetId: number;
@@ -122,9 +129,23 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const answerOwned = (field: keyof AuditFormValues) => field in owned;
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
-		evaluation: (
+		// where the check has run, one answer decides the step and sets the two saved-audit fields;
+		// without it the reviewer fills the two fields by hand
+		evaluation: evaluation ? (
 			<>
-				{answers(auditSection("evaluation"))}
+				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} />
+				{EVALUATION_FLAGS.map(
+					({ field }) =>
+						field && (
+							<Form.Item key={field} name={field} noStyle rules={createConditionalRule("Please answer the dataset evaluation")}>
+								<AnswerField />
+							</Form.Item>
+						),
+				)}
+				<OrthoFilePanel {...panels.file} thumbnailUrl={panels.thumbnailUrl} />
+			</>
+		) : (
+			<>
 				<COGQualityCard />
 				<ThumbnailCard thumbnailUrl={panels.thumbnailUrl} />
 				<OrthoFilePanel {...panels.file} />

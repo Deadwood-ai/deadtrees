@@ -98,4 +98,6 @@ export interface IAuditAnswerInput {
   verdict: AuditVerdict;
   reason_code?: string | null;
   reason_text?: string | null;
+  /** what the reviewer adds to the verdict, e.g. the dataset evaluation's fix_flags */
+  details?: Record<string, unknown>;
 }

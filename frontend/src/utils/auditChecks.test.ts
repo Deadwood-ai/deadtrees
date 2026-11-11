@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { IAuditAssessment, IAuditCheckEvidence, IAuditQueueRow } from "../types/auditChecks";
+import type { IAuditAssessment, IAuditCheckEvidence, IAuditChecks, IAuditQueueRow } from "../types/auditChecks";
 import type { IGeorefCheck } from "../types/georefCheck";
 import {
   answeredFormValues,
@@ -7,6 +7,8 @@ import {
   automatedVerdict,
   cropModelVerdict,
   deriveDecision,
+  evaluationAnswerText,
+  evaluationFlags,
   formValuesForVerdict,
   legacySectionStatus,
   mergeAnswers,
@@ -175,6 +177,43 @@ describe("verdicts and the saved audit", () => {
     };
     expect(answeredFormValues(checks, "me")).toEqual({ is_georeferenced: true, deadwood_quality: "bad" });
     expect(answeredFormValues(undefined, "me")).toEqual({});
+  });
+});
+
+describe("the dataset evaluation answer", () => {
+  const answer = (overrides: Partial<IAuditAssessment>) => person("me", { check_key: "dataset_evaluation", layer: "image", run_id: 30, ...overrides });
+
+  it("says what a row decided in a few words", () => {
+    expect(evaluationAnswerText(answer({ verdict: "ok" }))).toBe("Keep");
+    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["cog_issue", "thumbnail_issue"] } }))).toBe("Keep (COG issue, thumbnail issue)");
+    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } }))).toBe("Keep (needs reprocessing)");
+    // an answer from before the flags existed
+    expect(evaluationAnswerText(answer({ verdict: "minor" }))).toBe("Keep (something to fix)");
+    expect(evaluationAnswerText(answer({ verdict: "major", reason_code: "blurry" }))).toBe("Exclude (blurry)");
+    // a rule row keeps its reason in the details
+    expect(evaluationAnswerText(row({ assessor_kind: "rule", verdict: "major", details: { reason: "no_trees" } }))).toBe("Exclude (no trees)");
+    expect(evaluationAnswerText(answer({ verdict: "unsure" }))).toBe("Unsure");
+  });
+
+  it("reads the known flags and nothing else", () => {
+    expect(evaluationFlags(answer({ details: { fix_flags: ["reprocess", "blurry", "thumbnail_issue"] } }))).toEqual(["thumbnail_issue", "reprocess"]);
+    expect(evaluationFlags(answer({ details: { fix_flags: "cog_issue" } }))).toEqual([]);
+    expect(evaluationFlags(null)).toEqual([]);
+  });
+
+  it("sets the COG and thumbnail fields of the saved audit", () => {
+    const checks = (mine: IAuditAssessment): IAuditChecks => ({
+      available: true,
+      checks: { dataset_evaluation: evidence({ run: { id: 30, check_key: "dataset_evaluation", inputs: {}, evidence: {} } }) },
+      people: [mine],
+    });
+    // no flag means both are fine: nothing is left for the reviewer to click
+    expect(answeredFormValues(checks(answer({ verdict: "ok", details: { fix_flags: [] } })), "me")).toEqual({ has_cog_issue: false, has_thumbnail_issue: false });
+    expect(answeredFormValues(checks(answer({ verdict: "minor", details: { fix_flags: ["cog_issue"] } })), "me")).toEqual({ has_cog_issue: true, has_thumbnail_issue: false });
+    // reprocessing is no field of the saved audit; it keeps the answer at "keep, fix"
+    expect(answeredFormValues(checks(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } })), "me")).toEqual({ has_cog_issue: false, has_thumbnail_issue: false });
+    // an answer from before the flags existed leaves what the saved audit holds
+    expect(answeredFormValues(checks(answer({ verdict: "ok", details: {} })), "me")).toEqual({});
   });
 });
 
