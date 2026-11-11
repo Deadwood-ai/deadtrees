@@ -66,10 +66,13 @@ the benchmark does not send everything back to review.
 - Rows are never updated. A correction is a new row; `audit.latest_assessments` shows
   the latest row per target, layer and assessor, where a native answer replaces the
   same person's imported one. `audit.disagreements` lists targets where people
-  disagree with each other or with a model or rule in the current run
+  disagree with each other or with the check's call in the current run
   (`people_disagree`, `people_and_models_disagree`, native rows only), and where an
-  imported answer differs from the current models (`legacy_and_models_disagree`), so
-  that dataset gets an early look.
+  imported answer differs from that call (`legacy_and_models_disagree`), so that
+  dataset gets an early look. The call is read as `audit.review_queue` reads it: the
+  target's rule rows where it has any, else its model rows, the worst verdict. An
+  `unsure` call is no call, so a reviewer who confirms the verdict, or settles an
+  unsure one, is not listed.
 
 ## Benchmarks
 

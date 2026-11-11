@@ -354,6 +354,40 @@ def test_a_newer_run_that_is_not_current_does_not_hide_the_current_answers(db):
 	]
 
 
+def test_a_reviewer_disagrees_with_the_checks_call_not_with_each_model(db):
+	"""Two models and a rule answer per target; they often differ among themselves."""
+	auditor = create_user(db, can_audit=True)
+	dataset = create_dataset(db, create_user(db))
+	run = create_run(db, dataset, register_version(db))
+	# dataset level: the rule row is the call
+	model_row(db, dataset, run, None, 'ok')
+	model_row(db, dataset, run, None, 'major', model='haiku-5.5')
+	model_row(db, dataset, run, None, 'minor', model='pq-rule', kind='rule', version='pq-rule-v1')
+	# crop level: no rule row, the models' worst verdict is the call
+	agreed, corrected, unsure = (create_crop(db, dataset, x0=x0) for x0 in (0, 512, 1024))
+	for crop in (agreed, corrected):
+		model_row(db, dataset, run, crop, 'ok')
+		model_row(db, dataset, run, crop, 'minor', model='haiku-5.5')
+	model_row(db, dataset, run, unsure, 'unsure')
+	model_row(db, dataset, run, unsure, 'ok', model='haiku-5.5')
+	person_row(db, auditor, dataset, None, 'minor', run)  # confirms the rule's verdict
+	person_row(db, auditor, dataset, agreed, 'minor', run)  # confirms the worst model verdict
+	person_row(db, auditor, dataset, corrected, 'ok', run)  # says the check is wrong
+	person_row(db, auditor, dataset, unsure, 'major', run)  # settles what the check left open
+
+	def listed():
+		act_as(db, auditor)
+		return db.execute(
+			'SELECT crop_id,people_disagree,people_and_models_disagree FROM audit.disagreements '
+			'WHERE dataset_id=%s ORDER BY crop_id NULLS FIRST',
+			(dataset,),
+		).fetchall()
+
+	assert listed() == [(corrected, False, True)]
+	person_row(db, auditor, dataset, None, 'ok', run)  # now overrides the rule
+	assert listed() == [(None, False, True), (corrected, False, True)]
+
+
 def import_legacy(db, auditor, dataset, verdict, created_at="now() - interval '1 year'", layer='deadwood'):
 	as_admin(db)
 	db.execute(
