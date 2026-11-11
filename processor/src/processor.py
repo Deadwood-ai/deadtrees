@@ -131,11 +131,6 @@ def _handle_graceful_shutdown(signum, frame):
 					token=token,
 				),
 			)
-			# ODM runs as a detached container via the host Docker socket
-			# and outlive this process. Kill them before making the task retryable,
-			# otherwise the next run starts a duplicate while the old one keeps
-			# consuming GPU/CPU.
-			_kill_dangling_dataset_resources(task.dataset_id)
 			with use_client(token) as client:
 				client.table(settings.statuses_table).update({
 					'current_status': StatusEnum.idle.value,
@@ -148,6 +143,12 @@ def _handle_graceful_shutdown(signum, frame):
 			# Best-effort: if we cannot clean up, fall through and exit anyway. The
 			# task is then left as a stale active row and treated as a crash next run.
 			logger.error(f'Failed to gracefully re-queue task {task.id} during shutdown: {e}')
+		# ODM runs as a detached container via the host Docker socket and outlives
+		# this process, so stop it too. This comes after the queue release because
+		# Docker can be slow enough to outlast the stop grace period, and a kill
+		# before the release turns the retry into a crash (DT-1543). The next task
+		# start on this host clears anything left over for its dataset.
+		_kill_dangling_dataset_resources(task.dataset_id)
 	sys.exit(0)
 
 # Task lifecycle events in v2_logs.extra.event, read per worker_id by the
@@ -398,6 +399,9 @@ def process_task(task: QueueTask, token: str):
 	# Register as in-flight after the queue row has been claimed so a SIGTERM can
 	# release this worker's task without touching another worker's active row.
 	_set_inflight_task(task)
+	# A shutdown releases the queue row before it stops the dataset's ODM
+	# container, so a retry on this host can find that container still running.
+	_kill_dangling_dataset_resources(task.dataset_id)
 	# remove processing path if it exists
 	if Path(settings.processing_path).exists():
 		shutil.rmtree(settings.processing_path, ignore_errors=True)

@@ -481,3 +481,62 @@ def test_shutdown_during_completion_notification_does_not_release_task(monkeypat
 
 	assert released == []
 	assert processor_module._inflight_task is None
+
+
+@pytest.mark.unit
+def test_shutdown_releases_task_before_slow_docker_cleanup(monkeypatch):
+	# DT-1543: a stop signal must make the task retryable before Docker cleanup,
+	# which can outlast the stop grace period and end in a kill.
+	order = []
+
+	class FakeQuery:
+		def update(self, values):
+			order.append('reset_status')
+			return self
+
+		def eq(self, *args):
+			return self
+
+		def execute(self):
+			return SimpleNamespace(data=[])
+
+	class FakeClient:
+		def __enter__(self):
+			return SimpleNamespace(table=lambda name: FakeQuery())
+
+		def __exit__(self, *args):
+			return False
+
+	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'token')
+	monkeypatch.setattr(processor_module, 'use_client', lambda token: FakeClient())
+	monkeypatch.setattr(processor_module, 'release_queue_task', lambda token, task: order.append('release'))
+	monkeypatch.setattr(
+		processor_module, '_kill_dangling_dataset_resources', lambda dataset_id: order.append('docker_cleanup')
+	)
+	monkeypatch.setattr(processor_module.logger, 'warning', lambda *args, **kwargs: None)
+
+	processor_module._set_inflight_task(_task())
+	try:
+		with pytest.raises(SystemExit):
+			processor_module._handle_graceful_shutdown(15, None)
+	finally:
+		processor_module._set_inflight_task(None)
+
+	assert order == ['reset_status', 'release', 'docker_cleanup']
+
+
+@pytest.mark.unit
+def test_task_start_clears_leftover_containers_for_its_dataset(monkeypatch):
+	cleared = []
+	monkeypatch.setattr(processor_module, '_kill_dangling_dataset_resources', cleared.append)
+	monkeypatch.setattr(processor_module, 'login', lambda username, password: 'token')
+	monkeypatch.setattr(processor_module, 'refresh_processor_token', lambda task, token=None: 'token')
+	monkeypatch.setattr(processor_module, 'process_metadata', lambda current_task, processing_path: None)
+	monkeypatch.setattr(processor_module, '_notify_processing_result_safely', lambda *args: None)
+	monkeypatch.setattr(processor_module, 'delete_queue_task', lambda token, task: None)
+	monkeypatch.setattr(processor_module, 'update_status', lambda *args, **kwargs: None)
+	monkeypatch.setattr(processor_module.logger, 'info', lambda *args, **kwargs: None)
+
+	process_task(_task(), 'token')
+
+	assert cleared == [84]
