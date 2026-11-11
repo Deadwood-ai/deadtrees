@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { Card, Typography, Form, Radio, Input, Space, Tooltip, Tag, Button, Image, Collapse, message, notification, Popconfirm } from "antd";
 import {
 	CopyOutlined,
 	DownloadOutlined,
 } from "@ant-design/icons";
 import { createConditionalRule } from "./auditConstants";
+import { imageFacts } from "../../utils/imageFacts";
 import { IDataset } from "../../types/dataset";
 import { OrthoMetadata } from "../../hooks/useDatasetAudit";
 import { DatasetFlag, FlagStatus } from "../../types/flags";
@@ -380,9 +381,11 @@ export function ThumbnailCard({ thumbnailUrl }: ThumbnailCardProps) {
 	);
 }
 
-// === Ortho file: technical metadata and download (dataset evaluation) ===
+// === Ortho file: image facts, technical metadata and download (dataset evaluation) ===
 interface OrthoFilePanelProps {
 	dataset: IDataset;
+	/** shown beside the facts; the legacy thumbnail card shows its own */
+	thumbnailUrl?: string | null;
 	orthoMetadata: OrthoMetadata | null | undefined;
 	isOrthoLoading: boolean;
 	isDownloading: boolean;
@@ -392,6 +395,7 @@ interface OrthoFilePanelProps {
 
 export function OrthoFilePanel({
 	dataset,
+	thumbnailUrl,
 	orthoMetadata,
 	isOrthoLoading,
 	isDownloading,
@@ -399,21 +403,46 @@ export function OrthoFilePanel({
 	onStartDownload,
 }: OrthoFilePanelProps) {
 	const isViewOnlyDataset = dataset.data_access === "viewonly";
+	const facts = imageFacts(orthoMetadata?.ortho_info);
 
 	return (
 		<div className="flex flex-col gap-2">
 			{isOrthoLoading ? (
 				<InlineSkeleton label="Loading technical metadata" className="h-8 w-full" />
 			) : orthoMetadata?.ortho_info ? (
-				<Collapse size="small">
-					<Panel header="Technical metadata" key="1">
-						<div className="max-h-32 overflow-y-auto">
-							<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
-								{JSON.stringify(orthoMetadata.ortho_info, null, 2)}
-							</pre>
-						</div>
-					</Panel>
-				</Collapse>
+				<>
+					<div className="flex items-start gap-3 rounded-md bg-white p-2" data-testid="audit-image-facts">
+						{thumbnailUrl && (
+							<Image
+								src={thumbnailUrl}
+								alt="Dataset thumbnail"
+								width={76}
+								height={76}
+								style={{ objectFit: "cover" }}
+								className="rounded border"
+							/>
+						)}
+						<dl className="m-0 grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+							{facts.map((fact, i) => (
+								<Fragment key={i}>
+									<dt className="text-gray-500">{fact.label}</dt>
+									<dd className={`m-0 tabular-nums ${fact.tone === "warn" ? "font-medium text-amber-800" : fact.tone === "ok" ? "text-green-800" : ""}`}>
+										{fact.value}
+									</dd>
+								</Fragment>
+							))}
+						</dl>
+					</div>
+					<Collapse size="small" ghost>
+						<Panel header={<span className="text-xs">All technical metadata</span>} key="1">
+							<div className="max-h-64 overflow-y-auto">
+								<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
+									{JSON.stringify(orthoMetadata.ortho_info, null, 2)}
+								</pre>
+							</div>
+						</Panel>
+					</Collapse>
+				</>
 			) : (
 				<div className="text-xs text-gray-500">No technical metadata available</div>
 			)}
