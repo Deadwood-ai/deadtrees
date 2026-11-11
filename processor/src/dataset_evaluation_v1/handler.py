@@ -52,6 +52,11 @@ def identity(sha256: str) -> dict:
 
 
 def handle(ctx) -> dict:
+	# The code is the version: its prompt and sampling under an earlier version's name would mix
+	# two behaviours in that version's results. Such a run fails; an operator activates this version.
+	queued_for = (getattr(ctx, 'version', None) or {}).get('version', VERSION)
+	if queued_for != VERSION:
+		raise ValueError(f'the run is of version {queued_for}; this code judges {VERSION}')
 	dataset_id = ctx.run['dataset_id']
 	client = ctx.client
 	log = LogContext(

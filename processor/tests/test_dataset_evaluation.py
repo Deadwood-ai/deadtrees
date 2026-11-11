@@ -677,6 +677,16 @@ def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path,
 
 
 @pytest.mark.unit
+def test_a_run_of_an_earlier_version_is_not_judged_by_this_code():
+	"""Version 1 judged inside the AOI: its runs must not get this code's answers under its name."""
+	ctx = SimpleNamespace(
+		run={'id': 7, 'dataset_id': 42}, version={'version': 'v1', 'config': {}}, client=None, token='t'
+	)
+	with pytest.raises(ValueError, match='the run is of version v1; this code judges v2'):
+		handler.handle(ctx)
+
+
+@pytest.mark.unit
 def test_the_handler_runs_after_the_cog_thumbnail_and_tiles_and_is_registered():
 	from processor.src.audit_worker import worker
 

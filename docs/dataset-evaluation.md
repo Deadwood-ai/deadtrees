@@ -17,6 +17,10 @@ The orthophoto alone. The area of interest is a check of its own and the predict
 are judged by the prediction quality check, so neither plays a part here (version 2,
 DT-1538; version 1 judged inside the AOI and drew its edge on the overview).
 
+The code is the version: the handler refuses a run that was queued for version 1 (the
+run fails with that reason), so version 1's results never hold version 2's answers. An
+operator activates version 2 before the worker judges with it.
+
 Read from the stored COG at run time (`utils/stored_inputs.local_cog`, so private
 datasets work):
 
