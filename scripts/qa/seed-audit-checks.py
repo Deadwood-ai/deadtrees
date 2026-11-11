@@ -33,6 +33,17 @@ if not os.path.exists(COG):
 	os.makedirs(os.path.dirname(COG), exist_ok=True)
 	subprocess.run(['gdal_translate', '-q', '-of', 'COG', '-srcwin', '4000', '6000', str(PX), str(PX), SOURCE, COG], check=True)
 SHA = hashlib.sha256(open(COG, 'rb').read()).hexdigest()
+# what the page reads its image facts from (the shape rio-cogeo reports)
+ORTHO_INFO = json.dumps(
+	{
+		'COG': True,
+		'COG_errors': None,
+		'COG_warnings': None,
+		'Compression': 'DEFLATE',
+		'GEO': {'CRS': 'PROJCS["WGS 84 / UTM zone 32N",GEOGCS["WGS 84"]]', 'Resolution': [0.05, -0.05]},
+		'Profile': {'Bands': 3, 'Dtype': 'uint8', 'Tiled': True, 'Width': PX, 'Height': PX, 'ColorInterp': ['red', 'green', 'blue']},
+	}
+)
 INFO = json.loads(subprocess.run(['gdalinfo', '-json', COG], check=True, capture_output=True, text=True).stdout)
 X0, PIXEL, _, Y1 = INFO['geoTransform'][:4]
 SIZE_M = PX * PIXEL
@@ -72,8 +83,8 @@ insert into public.v2_statuses (dataset_id, current_status, is_upload_done, is_o
 values ({ds}, 'idle', true, true, true, true, true, true, true, true, false);
 insert into public.v2_cogs (dataset_id, cog_file_name, version, cog_file_size, cog_info, cog_processing_runtime, cog_path)
 values ({ds}, 'review.tif', 1, {os.path.getsize(COG)}, '{{}}', 0.1, 'qa-audit-review/review.tif');
-insert into public.v2_orthos (dataset_id, ortho_file_name, version, ortho_file_size, sha256, bbox)
-values ({ds}, 'review.tif', 1, {os.path.getsize(COG)}, '{SHA}', box2d({envelope_sql(X0, Y1 - SIZE_M, X0 + SIZE_M, Y1)}));
+insert into public.v2_orthos (dataset_id, ortho_file_name, version, ortho_file_size, sha256, bbox, ortho_info)
+values ({ds}, 'review.tif', 1, {os.path.getsize(COG)}, '{SHA}', box2d({envelope_sql(X0, Y1 - SIZE_M, X0 + SIZE_M, Y1)}), '{ORTHO_INFO}');
 """)
 
 # --- georeferencing: a poor call decided by Bing alone, with match lines ---------------

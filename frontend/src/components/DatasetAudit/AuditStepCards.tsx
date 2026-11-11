@@ -409,19 +409,12 @@ export function OrthoFilePanel({
 		<div className="flex flex-col gap-2">
 			{isOrthoLoading ? (
 				<InlineSkeleton label="Loading technical metadata" className="h-8 w-full" />
-			) : orthoMetadata?.ortho_info ? (
-				<>
-					<div className="flex items-start gap-3 rounded-md bg-white p-2" data-testid="audit-image-facts">
-						{thumbnailUrl && (
-							<Image
-								src={thumbnailUrl}
-								alt="Dataset thumbnail"
-								width={76}
-								height={76}
-								style={{ objectFit: "cover" }}
-								className="rounded border"
-							/>
-						)}
+			) : (
+				<div className="flex items-start gap-3 rounded-md bg-white p-2" data-testid="audit-image-facts">
+					{thumbnailUrl && (
+						<Image src={thumbnailUrl} alt="Dataset thumbnail" width={76} height={76} style={{ objectFit: "cover" }} className="rounded border" />
+					)}
+					{facts.length ? (
 						<dl className="m-0 grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
 							{facts.map((fact, i) => (
 								<Fragment key={i}>
@@ -432,19 +425,19 @@ export function OrthoFilePanel({
 								</Fragment>
 							))}
 						</dl>
-					</div>
-					<Collapse size="small" ghost>
-						<Panel header={<span className="text-xs">All technical metadata</span>} key="1">
-							<div className="max-h-64 overflow-y-auto">
-								<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
-									{JSON.stringify(orthoMetadata.ortho_info, null, 2)}
-								</pre>
-							</div>
-						</Panel>
-					</Collapse>
-				</>
-			) : (
-				<div className="text-xs text-gray-500">No technical metadata available</div>
+					) : (
+						<div className="text-xs text-gray-500">No technical metadata available</div>
+					)}
+				</div>
+			)}
+			{orthoMetadata?.ortho_info && (
+				<Collapse size="small" ghost>
+					<Panel header={<span className="text-xs">All technical metadata</span>} key="1">
+						<div className="max-h-64 overflow-y-auto">
+							<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">{JSON.stringify(orthoMetadata.ortho_info, null, 2)}</pre>
+						</div>
+					</Panel>
+				</Collapse>
 			)}
 			<div>
 				<Tooltip

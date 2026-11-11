@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { IAuditAssessment, IAuditCheckEvidence, IAuditQueueRow } from "../types/auditChecks";
+import type { IAuditAssessment, IAuditCheckEvidence, IAuditChecks, IAuditQueueRow } from "../types/auditChecks";
 import type { IGeorefCheck } from "../types/georefCheck";
 import {
   answeredFormValues,
@@ -7,6 +7,8 @@ import {
   automatedVerdict,
   cropModelVerdict,
   deriveDecision,
+  evaluationAnswerText,
+  evaluationFlags,
   formValuesForVerdict,
   legacySectionStatus,
   mergeAnswers,
@@ -175,6 +177,38 @@ describe("verdicts and the saved audit", () => {
     };
     expect(answeredFormValues(checks, "me")).toEqual({ is_georeferenced: true, deadwood_quality: "bad" });
     expect(answeredFormValues(undefined, "me")).toEqual({});
+  });
+});
+
+describe("the dataset evaluation answer", () => {
+  const answer = (overrides: Partial<IAuditAssessment>) => person("me", { check_key: "dataset_evaluation", layer: "image", run_id: 30, ...overrides });
+
+  it("says what a row decided in a few words", () => {
+    expect(evaluationAnswerText(answer({ verdict: "ok" }))).toBe("Keep");
+    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["cog_issue", "thumbnail_issue"] } }))).toBe("Keep (COG issue, thumbnail issue)");
+    // the check may ask for a fix the two flags do not name
+    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } }))).toBe("Keep (something to fix)");
+    expect(evaluationAnswerText(answer({ verdict: "major", reason_code: "blurry" }))).toBe("Exclude (blurry)");
+    // a rule row keeps its reason in the details
+    expect(evaluationAnswerText(row({ assessor_kind: "rule", verdict: "major", details: { reason: "no_trees" } }))).toBe("Exclude (no trees)");
+    expect(evaluationAnswerText(answer({ verdict: "unsure" }))).toBe("Unsure");
+  });
+
+  it("reads the two flags and nothing else", () => {
+    expect(evaluationFlags(answer({ details: { fix_flags: ["reprocess", "thumbnail_issue"] } }))).toEqual(["thumbnail_issue"]);
+    expect(evaluationFlags(answer({ details: { fix_flags: "cog_issue" } }))).toEqual([]);
+    expect(evaluationFlags(null)).toEqual([]);
+  });
+
+  it("sets the COG and thumbnail fields of the saved audit", () => {
+    const checks = (mine: IAuditAssessment): IAuditChecks => ({
+      available: true,
+      checks: { dataset_evaluation: evidence({ run: { id: 30, check_key: "dataset_evaluation", inputs: {}, evidence: {} } }) },
+      people: [mine],
+    });
+    // no flag means both are fine: nothing is left for the reviewer to click
+    expect(answeredFormValues(checks(answer({ verdict: "ok", details: { fix_flags: [] } })), "me")).toEqual({ has_cog_issue: false, has_thumbnail_issue: false });
+    expect(answeredFormValues(checks(answer({ verdict: "minor", details: { fix_flags: ["cog_issue"] } })), "me")).toEqual({ has_cog_issue: true, has_thumbnail_issue: false });
   });
 });
 
