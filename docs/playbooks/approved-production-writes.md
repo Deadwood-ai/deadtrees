@@ -1,6 +1,6 @@
 # Approved one-off production writes
 
-Draft for review (DT-1514). It describes how a thread carries out a production
+This playbook (DT-1514) describes how a thread carries out a production
 write that the user has approved, such as an import, a backfill or a data fix.
 Nothing here grants new access: every write still needs the user's explicit
 words for that write, in the thread that asks.
