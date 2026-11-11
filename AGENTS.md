@@ -15,6 +15,7 @@ it). Start here, then open the linked docs that match the task.
 - Failed or stuck processing: `docs/playbooks/dataset-debugging.md`
 - Security audit findings and risk acceptance: `docs/playbooks/security-audit.md`
 - Routine production database reads: `docs/playbooks/analyst-database-access.md`
+- Approved one-off production writes: `docs/playbooks/approved-production-writes.md`
 - Local code review: `docs/agents/local-review-instructions.md`
 - Manual QA (production read-only and isolated local write):
   `.agents/skills/run-deadtrees-qa/SKILL.md`
