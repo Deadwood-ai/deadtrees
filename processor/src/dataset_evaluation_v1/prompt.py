@@ -47,9 +47,11 @@ Decide whether the imagery can be used to map dead trees and forest cover.
   broken_ortho (mostly empty, black, cut off or only a few scattered pieces),
   too_dark (too dark or overexposed to see the trees),
   other (unusable for another reason you name in the summary).
-- fix: usable, but something should be fixed: cog_issue (display problems in the orthophoto: wrong colour
-  stretch, black tiles, stripes), thumbnail_issue (the thumbnail is empty, black, wrong or unlike Image 1),
-  reprocess (local reconstruction errors or colour problems that reprocessing could fix).
+- fix: usable, but one of these concrete problems should be fixed: cog_issue (display problems in the
+  orthophoto: wrong colour stretch, black tiles, stripes), thumbnail_issue (the thumbnail is empty, black,
+  wrong or unlike Image 1), reprocess (local reconstruction errors that reprocessing could fix: warped, torn
+  or doubled areas). Bright, pale, dark or shadowed imagery is not a reason to fix: reprocessing does not
+  change the light of the flight.
 - keep: usable as it is. Small problems at the edges, a few artifacts, partial cloud or shadow are fine.
 - unsure: you cannot tell from these images.
 Not a reason to exclude: the season or leafless trees, the georeferencing, or another upload of the same

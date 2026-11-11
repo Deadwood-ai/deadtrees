@@ -3,6 +3,11 @@ import { LAYER_LABELS, QUEUE_REASONS, automatedRows, automatedVerdict, verdictLa
 
 const words = (value: unknown) => (typeof value === "string" ? value.replace(/_/g, " ") : null);
 
+/** What a "keep, fix" verdict asks to be fixed (the rule row's details.fix_flags). */
+const FIX_LABELS: Record<string, string> = { cog_issue: "COG issue", thumbnail_issue: "thumbnail issue", reprocess: "reprocess" };
+const fixes = (value: unknown) =>
+	Array.isArray(value) && value.length ? value.map((flag) => FIX_LABELS[String(flag)] ?? words(flag)).join(", ") : null;
+
 /** One line per layer on the check's call, with what it rests on and why a person sees it. */
 export default function CheckSummary({ section, evidence }: { section: IAuditSectionDef; evidence: IAuditCheckEvidence }) {
 	const checkKey = section.checkKey!;
@@ -21,7 +26,10 @@ export default function CheckSummary({ section, evidence }: { section: IAuditSec
 				return (
 					<div key={layer}>
 						{section.layers.length > 1 && <span>{LAYER_LABELS[layer]}: </span>}
-						<b>{verdict ? verdictLabel(checkKey, verdict) : "No call"}</b>
+						<b>
+							{verdict ? verdictLabel(checkKey, verdict) : "No call"}
+							{verdict === "minor" && fixes(details.fix_flags) && `: ${fixes(details.fix_flags)}`}
+						</b>
 						{because && <span>. {because.charAt(0).toUpperCase() + because.slice(1)}</span>}
 						{queued?.reason && <span className="text-gray-500"> · Here because {QUEUE_REASONS[queued.reason].because}.</span>}
 					</div>

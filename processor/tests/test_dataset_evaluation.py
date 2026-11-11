@@ -431,8 +431,14 @@ def test_fix_flags_keep_the_dataset_but_mark_it_for_fixing():
 		calls(answer('keep', 5, thumbnail_issue=80), answer('fix', 10, thumbnail_issue=70)), OK_BAND, NO_DUP
 	)
 	assert rule.verdict == 'minor' and rule.modes['thumbnail_issue']['likelihood'] == 75
+	assert rule.details['fix_flags'] == ['thumbnail_issue']  # the page names what to fix
 
 	assert dataset_rule(calls(answer(), answer()), OK_BAND, NO_DUP).verdict == 'ok'
+	# one model alone asking for a fix is not enough, nor two models naming different problems
+	alone = dataset_rule(calls(answer(), answer('fix', 18, reprocess=75)), OK_BAND, NO_DUP)
+	assert alone.verdict == 'ok' and alone.details['fix_flags'] == []
+	apart = dataset_rule(calls(answer('fix', 10, cog_issue=80), answer('fix', 10, reprocess=80)), OK_BAND, NO_DUP)
+	assert apart.verdict == 'ok'
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +470,7 @@ def thumbnail_bytes():
 @pytest.mark.unit
 def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	inputs = read_inputs(str(cog), seed=3, overview_px=1024, crop_px=512)
-	luna, haiku = Fake(answer()), Fake(answer('fix', 20, reprocess=60))
+	luna, haiku = Fake(answer('fix', 10, reprocess=55)), Fake(answer('fix', 20, reprocess=60))
 	image_hash = phash(inputs.overview, inputs.valid)
 	evaluation = evaluate(
 		inputs,

@@ -73,7 +73,9 @@ The dataset rule averages the two models' exclude likelihoods:
 3. a mean of 60+ excludes, with the reason of the surer model;
 4. a model that votes to exclude while the mean stays under 60 goes to a person;
 5. a band or duplicate flag goes to a person;
-6. any model `fix`, or a fix flag averaging 50+, keeps the dataset but marks it `minor`;
+6. a fix flag both models put at 50+ keeps the dataset but marks it `minor`; the flags
+   are in the rule row's `details.fix_flags`, which the review page names. One model
+   alone asking for a fix is not enough (rule v2: in the pilot that was lighting noise);
 7. otherwise `ok`.
 
 `audit.review_queue` reads the rule row. The version starts in `review_all`. Nothing
