@@ -848,18 +848,22 @@ test.describe("auditor local e2e", () => {
 
     const phenologyCard = await section(page, "Phenology");
     await phenologyCard.getByText(/In Season/).click();
+    // notes stay behind "Add a … note" links until they are needed
+    await phenologyCard.getByRole("button", { name: "Add a phenology note" }).click();
     await phenologyCard
       .getByPlaceholder("Seasonal observations...")
       .fill("Leaf-on season confirmed in local workflow smoke.");
 
     const predictionCard = await section(page, "Prediction quality");
     await predictionCard.getByText("🟡 OK").nth(0).click();
+    await predictionCard.getByRole("button", { name: "Add a deadwood note" }).click();
     await predictionCard
-      .getByPlaceholder("Deadwood cover notes...")
+      .getByPlaceholder("Deadwood notes...")
       .fill("Deadwood cover is usable with minor noise.");
     await predictionCard.getByText("🟢 Great").nth(1).click();
+    await predictionCard.getByRole("button", { name: "Add a tree cover note" }).click();
     await predictionCard
-      .getByPlaceholder("Forest cover notes...")
+      .getByPlaceholder("Tree cover notes...")
       .fill("Tree cover looks consistent.");
 
     const cogCard = (await section(page, "Dataset evaluation")).getByTestId("audit-cog");
@@ -886,6 +890,7 @@ test.describe("auditor local e2e", () => {
     // every section is answered, so the derived decision is Ready; confirm it
     await expect(finalAssessmentCard.getByText("Ready", { exact: true }).first()).toBeVisible();
     await finalAssessmentCard.getByRole("button", { name: "Confirm" }).click();
+    await finalAssessmentCard.getByRole("button", { name: "Add a note" }).click();
     await finalAssessmentCard
       .getByPlaceholder("Notes on the decision...")
       .fill("Audit workflow local smoke completed.");
