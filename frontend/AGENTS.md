@@ -20,6 +20,14 @@ frontend work.
 - Never put service-role keys, MCP tokens, SSH/VPN credentials, or private API
   keys in `frontend/.env*`.
 
+## Ant Design And Tailwind
+
+Tailwind's base reset (preflight) is off so that it does not fight Ant Design.
+A plain `<button>`, `<input>` or `<select>` therefore keeps the browser's own
+look, for example a 3D border. Use the Ant Design control (`Button`,
+`Radio.Group`, `Checkbox`, `Tag.CheckableTag`, `Input`) instead of styling a
+native one with Tailwind classes.
+
 ## TypeScript And React
 
 - Prefix domain interfaces with `I` where that pattern already exists.

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Button, Input, message } from "antd";
+import { Button, Input, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
+import ShowNow from "./ShowNow";
 import {
 	automatedRows,
 	automatedVerdict,
@@ -22,9 +23,6 @@ interface CheckAnswerProps {
 	/** no audit lease on this page: answers cannot be stored */
 	disabled: boolean;
 }
-
-const chip = (on: boolean) =>
-	`min-h-[32px] cursor-pointer rounded-md border px-2.5 text-xs ${on ? "border-blue-700 bg-blue-700 text-white" : "border-gray-300 bg-white text-gray-800 hover:border-gray-500"}`;
 
 /** Agree with a check, or mark it wrong with a fixed reason and a note. Every answer is a
  * new person row on the current run; other reviewers' answers stay hidden until you answer. */
@@ -119,9 +117,9 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 				<div className="flex flex-col gap-2 rounded-md border border-red-100 bg-white p-2">
 					<div className="flex flex-wrap gap-1.5">
 						{section.reasons.map((r) => (
-							<button key={r.code} type="button" className={chip(reason === r.code)} onClick={() => setReason(r.code)}>
+							<Tag.CheckableTag key={r.code} checked={reason === r.code} onChange={() => setReason(r.code)}>
 								{r.label}
-							</button>
+							</Tag.CheckableTag>
 						))}
 					</div>
 					{!twoWay && (
@@ -130,9 +128,9 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 							{choices
 								.filter((c) => c !== verdict)
 								.map((c) => (
-									<button key={c} type="button" className={chip(own === c)} onClick={() => setOwn(c)}>
+									<Tag.CheckableTag key={c} checked={own === c} onChange={() => setOwn(c)}>
 										{label(c)}
-									</button>
+									</Tag.CheckableTag>
 								))}
 						</div>
 					)}
@@ -172,9 +170,7 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 				) : (
 					<>
 						Other reviewers' and the models' answers appear after you answer.{" "}
-						<button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-[11px] text-blue-700 underline" onClick={() => setShowOthers(true)}>
-							Show now
-						</button>
+						<ShowNow onClick={() => setShowOthers(true)} />
 					</>
 				)}
 			</div>
