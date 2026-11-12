@@ -11,7 +11,7 @@ import { orderedCrops, stepCrop, type CropImageKind, type IAuditSectionDef } fro
 import { cropCall, cropsForReview } from "../../../utils/cropCalls";
 import { InlineLoadError, InlineSkeleton } from "../../SectionStates";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
-import { CROP_COLOR, useCropSquares, zoomToCrop } from "./useCropSquares";
+import { useCropSquares, zoomToCrop } from "./useCropSquares";
 import { useSectionLayers } from "./useSectionLayers";
 import { modelViewImage } from "./auditCheckView";
 
@@ -30,7 +30,6 @@ interface AuditCheckMapProps extends IAuditCheckMapProps {
 	orthoLayer: BaseLayer | null;
 }
 
-const MAJOR_COLOR = "#ff4d4f";
 const IMAGE_LABELS: Record<CropImageKind, string> = { raw: "Raw", deadwood_overlay: "Deadwood", forest_cover_overlay: "Forest" };
 
 /** Puts the audit map into the open section's mode (reference and match lines, or the
@@ -59,14 +58,14 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 		if (!cropMode || !cropRows?.length) return null;
 		return run && automated && colorLayers?.length ? cropsForReview({ run, automated, crops: cropRows }, colorLayers) : orderedCrops({ crops: cropRows });
 	}, [cropMode, cropRows, run, automated, colorLayers]);
-	const colors = useMemo(() => {
+	const flagged = useMemo(() => {
 		if (!crops || !run || !colorByVerdict || !colorLayers?.length) return undefined;
-		return Object.fromEntries(crops.map((c) => [c.id, cropCall({ run, automated: automated ?? [] }, c.id, colorLayers) === "major" ? MAJOR_COLOR : CROP_COLOR]));
+		return new Set(crops.filter((c) => cropCall({ run, automated: automated ?? [] }, c.id, colorLayers) === "major").map((c) => c.id));
 	}, [crops, run, colorByVerdict, colorLayers, automated]);
 
 	useSectionLayers(section?.shows ?? null);
 	useGeorefLayers({ map, orthoLayer, check: georef, provider: shownProvider, showMatches, droneOpacity });
-	useCropSquares({ map, crops, selectedId: cropId, colors, onSelect: onSelectCrop });
+	useCropSquares({ map, crops, selectedId: cropId, flagged, onSelect: onSelectCrop });
 
 	const index = crops ? crops.findIndex((c) => c.id === cropId) : -1;
 	useEffect(() => {
@@ -120,7 +119,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 					</div>
 					{cropMode.colorLayers.length > 0 && (
 						<Checkbox checked={colorByVerdict} onChange={(e) => setColorByVerdict(e.target.checked)}>
-							Mark the crops the check counted major (red)
+							Mark the crops the check counted major (orange, dashed, "!")
 						</Checkbox>
 					)}
 				</>

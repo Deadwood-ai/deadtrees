@@ -98,3 +98,11 @@ describe("answersWithSave", () => {
 		expect(answers.map((a) => a.check_key)).toEqual(["dataset_evaluation"]);
 	});
 });
+
+describe("answersWithSave for one step", () => {
+	it("answers only the given check, with the mark it is given", () => {
+		const answers = answersWithSave(checks(), "me", { is_georeferenced: false }, 7, { only: "georef", mark: {} });
+		expect(answers).toHaveLength(1);
+		expect(answers[0]).toMatchObject({ check_key: "georef", verdict: "major", details: {} });
+	});
+});

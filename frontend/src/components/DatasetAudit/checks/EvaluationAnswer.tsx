@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Form, Input, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
@@ -13,6 +13,7 @@ import {
 	myAnswer,
 	type EvaluationFlag,
 } from "../../../utils/auditChecks";
+import { typing } from "./useAuditShortcuts";
 
 interface EvaluationAnswerProps {
 	datasetId: number;
@@ -20,6 +21,8 @@ interface EvaluationAnswerProps {
 	people: IAuditAssessment[];
 	/** no audit lease on this page: answers cannot be stored */
 	disabled: boolean;
+	/** the step is open: only then do K (keep) and X (exclude) answer it */
+	active: boolean;
 }
 
 const LAYER = "image" as const;
@@ -39,7 +42,7 @@ const CallLabel = ({ title, hint }: { title: string; hint: string }) => (
  * the check said is agreeing, picking the other is disagreeing. Excluding needs the reason. A
  * kept dataset can carry two flags, a COG issue and a thumbnail issue, preset from the check.
  * Every answer is a new person row on the current run. */
-export default function EvaluationAnswer({ datasetId, evidence, people, disabled }: EvaluationAnswerProps) {
+export default function EvaluationAnswer({ datasetId, evidence, people, disabled, active }: EvaluationAnswerProps) {
 	const { user } = useAuth();
 	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
 	const runId = evidence.run.id;
@@ -89,6 +92,20 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 		}
 	};
 	const keep = (fixFlags: EvaluationFlag[]) => store(fixFlags.length ? "minor" : "ok", fixFlags);
+	// K keeps, X opens the exclude reasons, while the step is open and not yet answered
+	const keys = useRef({ keep: () => keep(draft), exclude: () => setExcluding(true), ready: false });
+	keys.current = { keep: () => keep(draft), exclude: () => setExcluding(true), ready: !answered && !excluding && !disabled && !isPending };
+	useEffect(() => {
+		if (!active) return;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.ctrlKey || event.metaKey || event.altKey || typing(event.target) || !keys.current.ready) return;
+			if (event.key === "k") void keys.current.keep();
+			else if (event.key === "x") keys.current.exclude();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [active]);
+
 	const toggle = (flag: EvaluationFlag) => {
 		const next = flags.includes(flag) ? flags.filter((f) => f !== flag) : [...flags, flag];
 		// a flag changed after the answer is part of the answer: it is stored at once

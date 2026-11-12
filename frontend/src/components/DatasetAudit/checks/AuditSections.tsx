@@ -1,6 +1,8 @@
 import { useEffect, useRef, type ComponentProps, type ReactNode } from "react";
-import { Form } from "antd";
+import { Form, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
+import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
+import { answersWithSave } from "../../../utils/auditPrefill";
 import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
 import type { AuditCheckKey, AuditLayer, IAuditChecks } from "../../../types/auditChecks";
 import {
@@ -24,6 +26,7 @@ import { GeoreferencingCard } from "../GeoreferencingCard";
 import { createConditionalRule } from "../auditConstants";
 import { InlineLoadError } from "../../SectionStates";
 import AnswerDetails from "./AnswerDetails";
+import { useAuditShortcuts } from "./useAuditShortcuts";
 import AuditSection from "./AuditSection";
 import CheckAnswer from "./CheckAnswer";
 import CheckSummary from "./CheckSummary";
@@ -107,6 +110,36 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		if (view.section && before.section === view.section && !before.answered && openAnswered) goTo(next(view.section));
 	});
 
+	// Enter takes the open step's suggestions as your answers (checks you have not answered yet) and
+	// moves on; a step without a check just moves on. Shift+Enter goes back, Ctrl+S saves the audit.
+	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
+	const accept = async () => {
+		const id = view.section;
+		if (!id) return goTo(order[0]);
+		const section = auditSection(id);
+		const answers = section.checkKey
+			? answersWithSave(checks, user?.id, form.getFieldsValue(true), datasetId, { only: section.checkKey, mark: {} })
+			: [];
+		if (answers.length) {
+			try {
+				await saveAnswers(answers);
+			} catch {
+				message.error("Your answer was not saved. Please try again.");
+				return;
+			}
+		}
+		// a stored answer moves on by itself (above); otherwise move on here
+		if (!answers.length) goTo(next(id));
+	};
+	useAuditShortcuts(
+		{
+			accept: disabled ? undefined : () => void accept(),
+			back: () => view.section && goTo(previousStep(order, view.section)),
+			save: () => form.submit(),
+		},
+		true,
+	);
+
 	const answers = (s: IAuditSectionDef) => {
 		const evidence = evidenceOf(s);
 		if (!evidence) return null;
@@ -153,7 +186,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		// without it the reviewer fills the two fields by hand
 		evaluation: evaluation ? (
 			<>
-				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} />
+				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} active={view.section === "evaluation"} />
 				<AnswerDetails section={auditSection("evaluation")} evidence={evaluation} people={people} />
 				{EVALUATION_FLAGS.map(
 					({ field }) =>
@@ -236,6 +269,9 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 					{bodies[s.id]}
 				</AuditSection>
 			))}
+			<div className="mt-2 px-2 text-[11px] text-gray-400" data-testid="audit-shortcuts">
+				Keys: Enter take the suggestion and go on · Shift+Enter back · K keep · X exclude · n / p crops · Ctrl+S save
+			</div>
 		</>
 	);
 }

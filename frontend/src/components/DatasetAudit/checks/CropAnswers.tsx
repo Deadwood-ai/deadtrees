@@ -5,6 +5,7 @@ import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
 import { LAYER_LABELS, myAnswer, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
 import { cropCall, cropsForReview, flaggedCrops } from "../../../utils/cropCalls";
+import { typing } from "./useAuditShortcuts";
 
 interface CropAnswersProps {
 	datasetId: number;
@@ -19,11 +20,9 @@ interface CropAnswersProps {
 	active: boolean;
 }
 
-const typing = (target: EventTarget | null) =>
-	target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
-
 /** Per-crop verdicts on each layer the check judged: one person row per crop and layer.
- * n / p step through the crops, space marks every layer fine and moves on. */
+ * n / p step through the crops, space marks every layer fine and 1 to 3 give every layer that
+ * verdict, both moving on. */
 export default function CropAnswers({ datasetId, section, evidence, people, cropId, onSelectCrop, disabled, active }: CropAnswersProps) {
 	const { user } = useAuth();
 	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
@@ -63,8 +62,8 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 		if (next !== null) onSelectCrop(next);
 	};
 
-	const keys = useRef({ step, answer, disabled, cropId, layers: section.layers });
-	keys.current = { step, answer, disabled, cropId, layers: section.layers };
+	const keys = useRef({ step, answer, disabled, cropId, layers: section.layers, verdicts: section.verdicts });
+	keys.current = { step, answer, disabled, cropId, layers: section.layers, verdicts: section.verdicts };
 	useEffect(() => {
 		if (!active) return;
 		const onKey = (event: KeyboardEvent) => {
@@ -75,6 +74,10 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 			else if (event.key === " " && k.cropId !== null && !k.disabled) {
 				event.preventDefault();
 				void k.answer(k.layers, "ok").then((saved) => saved && k.step(1));
+			} else if (["1", "2", "3"].includes(event.key) && k.cropId !== null && !k.disabled) {
+				// the number on the verdict buttons: that verdict on every layer of the crop, then the next one
+				const verdict = k.verdicts[Number(event.key) - 1];
+				if (verdict) void k.answer(k.layers, verdict).then((saved) => saved && k.step(1));
 			}
 		};
 		window.addEventListener("keydown", onKey);
@@ -110,7 +113,7 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 			<div className="text-xs font-semibold">
 				Crop {index + 1} of {crops.length}
 				{call && <span className={call === "major" ? "text-red-600" : "text-gray-500"}> · the check: {call === "major" ? "major errors" : "fine"}</span>}
-				<span className="font-normal text-gray-500"> · n / p to step, space = all fine</span>
+				<span className="font-normal text-gray-500"> · n / p to step, 1 to 3 = that verdict on both layers, space = all fine</span>
 			</div>
 			{section.layers.map((layer) => {
 				const mine = myAnswer(people, user?.id, runId, target(layer));
