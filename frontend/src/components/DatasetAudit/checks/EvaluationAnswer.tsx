@@ -29,6 +29,14 @@ const SECTION = auditSection("evaluation");
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
 const keeps = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
 
+/** The two lines of a Keep or Exclude button: the call and whether it agrees with the check. */
+const CallLabel = ({ title, hint }: { title: string; hint: string }) => (
+	<span className="flex flex-col items-center leading-tight">
+		<span className="font-semibold">{title}</span>
+		<span className="text-[11px] text-gray-500">{hint}</span>
+	</span>
+);
+
 /** Step 1 asks one thing: keep the dataset or exclude it. One click answers it; picking what
  * the check said is agreeing, picking the other is disagreeing. Excluding needs the reason. A
  * kept dataset can carry two flags, a COG issue and a thumbnail issue, preset from the check.
@@ -153,19 +161,12 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 				<div>
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Your call</div>
 					<div className="flex gap-2">
-						{(["keep", "exclude"] as const).map((answer) => (
-							<Button
-								key={answer}
-								className="!h-auto flex-1 !py-1.5"
-								disabled={disabled || isPending}
-								onClick={() => (answer === "keep" ? keep(draft) : setExcluding(true))}
-							>
-								<span className="flex flex-col items-center leading-tight">
-									<span className="font-semibold">{answer === "keep" ? "Keep" : "Exclude"}</span>
-									<span className="text-[11px] text-gray-500">{hint(answer)}</span>
-								</span>
-							</Button>
-						))}
+						<Button className="!h-auto flex-1 !py-1.5" disabled={disabled || isPending} onClick={() => keep(draft)}>
+							<CallLabel title="Keep" hint={hint("keep")} />
+						</Button>
+						<Button className="!h-auto flex-1 !py-1.5" disabled={disabled || isPending} onClick={() => setExcluding(true)}>
+							<CallLabel title="Exclude" hint={hint("exclude")} />
+						</Button>
 					</div>
 				</div>
 			)}
