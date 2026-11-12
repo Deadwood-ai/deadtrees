@@ -99,3 +99,9 @@ ids = ['GHSA-vfj7-8cjw-p6xm', 'GHSA-rj75-hqrm-r3gf']
 reason = 'Build-time only (braces and postcss-selector-parser under Tailwind 3); fixed by the Tailwind 4 migration.'
 issue = 'DT-1433'
 review_by = '2027-01-31'
+
+[[accepted]]
+ids = ['CVE-2026-123158']
+reason = 'OpenSSH "SSHole" password bypass needs sshd built with musl and without PAM (Alpine). Our hosts and the sshd test images are Ubuntu: glibc with PAM, listed as not affected for 22.04 and 24.04.'
+issue = 'DT-1442'
+review_by = '2027-01-31'
