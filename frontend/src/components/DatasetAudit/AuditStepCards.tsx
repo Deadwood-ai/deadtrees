@@ -6,6 +6,8 @@ import {
 } from "@ant-design/icons";
 import { createConditionalRule } from "./auditConstants";
 import { imageFacts } from "../../utils/imageFacts";
+import type { IAuditSuggestion } from "../../types/acquisitionDate";
+import { SuggestedTag } from "./AcquisitionDateCard";
 import { IDataset } from "../../types/dataset";
 import { OrthoMetadata } from "../../hooks/useDatasetAudit";
 import { DatasetFlag, FlagStatus } from "../../types/flags";
@@ -252,13 +254,22 @@ export function PhenologyCard({ dataset, phenologyData, isPhenologyLoading, onCo
 
 // === Prediction quality: the saved per-layer ratings ===
 /** `answerOwned`: the reviewer answered that layer's check above, and the answer decides its rating. */
-export function PredictionQualityCard({ answerOwned }: { answerOwned?: { deadwood: boolean; forestCover: boolean } }) {
+export function PredictionQualityCard({
+	answerOwned,
+	suggestions,
+	prefilledFields,
+}: {
+	answerOwned?: { deadwood: boolean; forestCover: boolean };
+	suggestions: IAuditSuggestion[];
+	prefilledFields: string[];
+}) {
 	return (
 		<div>
 			{/* Deadwood cover */}
 			<div className="mb-3">
 				<div className="mb-1 flex items-center">
 					<Text className="text-xs font-medium">Deadwood cover segmentation</Text>
+					<SuggestedTag field="deadwood_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
 				</div>
 				<Form.Item
 					name="deadwood_quality"
@@ -282,6 +293,7 @@ export function PredictionQualityCard({ answerOwned }: { answerOwned?: { deadwoo
 			<div>
 				<div className="mb-1 flex items-center">
 					<Text className="text-xs font-medium">Tree cover segmentation</Text>
+					<SuggestedTag field="forest_cover_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
 				</div>
 				<Form.Item
 					name="forest_cover_quality"

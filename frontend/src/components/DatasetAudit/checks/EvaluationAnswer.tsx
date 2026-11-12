@@ -103,8 +103,10 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 	const checkSays = !verdict ? "The check made no call." : verdict === "unsure" || !rule ? "The check could not decide." : `The check says ${evaluationAnswerText({ ...rule, verdict })}.`;
 	const agrees = (answer: "keep" | "exclude") => (answer === "keep" ? keeps(verdict) : verdict === "major");
 	const decided = keeps(verdict) || verdict === "major";
+	// the check's call is preselected: saving the audit takes it over unless you pick the other
+	const suggested = (answer: "keep" | "exclude") => (decided && agrees(answer) ? ("primary" as const) : undefined);
 	const hint = (answer: "keep" | "exclude") =>
-		decided ? (agrees(answer) ? "as the check says" : "the check is wrong") : answer === "keep" ? "the orthophoto is usable" : "the orthophoto is unusable";
+		decided ? (agrees(answer) ? "suggested by the check" : "the check is wrong") : answer === "keep" ? "the orthophoto is usable" : "the orthophoto is unusable";
 	const myCall = mine ? (keeps(mine.verdict) ? "keep" : "exclude") : null;
 	const describe = (a: IAuditAssessment) => `${evaluationAnswerText(a)}${a.reason_text ? `, “${a.reason_text}”` : ""}`;
 	const modelSaid = (r: IAuditAssessment) => `${r.assessor_kind === "rule" ? "rule" : r.model}: ${evaluationAnswerText(r)}`;
@@ -161,10 +163,10 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 				<div>
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Your call</div>
 					<div className="flex gap-2">
-						<Button className="!h-auto flex-1 !py-1.5" disabled={disabled || isPending} onClick={() => keep(draft)}>
+						<Button className="!h-auto flex-1 !py-1.5" type={suggested("keep")} ghost={!!suggested("keep")} disabled={disabled || isPending} onClick={() => keep(draft)}>
 							<CallLabel title="Keep" hint={hint("keep")} />
 						</Button>
-						<Button className="!h-auto flex-1 !py-1.5" disabled={disabled || isPending} onClick={() => setExcluding(true)}>
+						<Button className="!h-auto flex-1 !py-1.5" type={suggested("exclude")} ghost={!!suggested("exclude")} danger={!!suggested("exclude")} disabled={disabled || isPending} onClick={() => setExcluding(true)}>
 							<CallLabel title="Exclude" hint={hint("exclude")} />
 						</Button>
 					</div>

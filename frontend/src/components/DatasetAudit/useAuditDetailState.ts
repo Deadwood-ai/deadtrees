@@ -26,7 +26,8 @@ import {
 } from "../../hooks/useAcquisitionDateEstimate";
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
 import { answeredFormValues } from "../../utils/auditChecks";
-import { useAuditChecks } from "../../hooks/useAuditChecks";
+import { answersWithSave, withCheckSuggestions } from "../../utils/auditPrefill";
+import { useAuditChecks, useSaveAuditAnswers } from "../../hooks/useAuditChecks";
 import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
@@ -144,6 +145,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { data: flags = [], isLoading: isFlagsLoading } = useDatasetFlags(dataset.id);
 	const { mutateAsync: updateFlagStatusWithLease, isPending: isUpdatingFlag } = useUpdateFlagStatus();
 	const { mutateAsync: saveAudit, isPending: isSavingAudit } = useSaveDatasetAudit();
+	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
 	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
@@ -155,8 +157,12 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const auditChecksQuery = useAuditChecks(dataset.id);
 	const auditChecks = auditChecksQuery.data;
 	const auditReviewItems = reviewItems ?? NO_REVIEW_ITEMS;
-	// stable fallback: a fresh [] per render would re-run the prefill effect and reset edits
-	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
+	// The stored suggestions plus the checks' calls. Memoised: a fresh list per render would re-run
+	// the prefill effect and reset edits.
+	const auditSuggestions = useMemo(
+		() => withCheckSuggestions(auditSuggestionsData ?? NO_SUGGESTIONS, auditChecks, dataset.id),
+		[auditSuggestionsData, auditChecks, dataset.id],
+	);
 
 	// Navigation context
 	const { getNextDatasetId, currentIndex, totalCount, listPath } = useAuditNavigation();
@@ -254,16 +260,16 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const prefilledForRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (prefilledForRef.current === dataset.id) return;
-		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined) return;
+		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined || auditChecksQuery.isLoading) return;
 		prefilledForRef.current = dataset.id;
 		const { values: suggested, fields } = suggestedAuditValues(
 			auditData as Record<string, unknown> | null,
-			auditSuggestionsData,
+			auditSuggestions,
 			reviewItems.flatMap((r) => r.fields),
 		);
 		form.setFieldsValue({ ...suggested, ...answered });
 		setPrefilledFields(fields);
-	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, answered, form]);
+	}, [dataset.id, auditData, auditSuggestionsData, auditSuggestions, auditChecksQuery.isLoading, reviewItems, answered, form]);
 
 	// The form follows the answers whenever they or the saved audit load or change,
 	// so an answer and its saved field cannot disagree. Declared after the two
@@ -340,6 +346,17 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 
 			const isCompletion = !auditData;
 			await saveAudit({ values: auditPayload, leaseId });
+			// Saving is your review of every step: the checks' calls you left as they are become your
+			// answers, marked as given with the save.
+			const withSave = answersWithSave(auditChecks, user?.id, values, dataset.id);
+			if (withSave.length) {
+				try {
+					await saveAnswers(withSave);
+				} catch (error) {
+					console.debug("Failed to store the answers given with the save", error);
+					message.warning("The audit is saved, but your answers on the automated checks were not. Answer them in their steps.");
+				}
+			}
 			trackAppEvent("audit_completed", {
 				dataset_id: dataset.id,
 				final_assessment: values.final_assessment || "unknown",

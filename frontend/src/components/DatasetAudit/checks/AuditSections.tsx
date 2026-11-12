@@ -174,7 +174,11 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 			<>
 				{answers(auditSection("prediction"))}
 				<div className="mb-1 text-xs font-medium">Saved audit ratings</div>
-				<PredictionQualityCard answerOwned={{ deadwood: answerOwned("deadwood_quality"), forestCover: answerOwned("forest_cover_quality") }} />
+				<PredictionQualityCard
+					answerOwned={{ deadwood: answerOwned("deadwood_quality"), forestCover: answerOwned("forest_cover_quality") }}
+					suggestions={panels.georef.suggestions}
+					prefilledFields={panels.georef.prefilledFields}
+				/>
 			</>
 		),
 	};

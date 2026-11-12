@@ -95,7 +95,7 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 				</div>
 			) : decided ? (
 				<div className="flex flex-wrap gap-2">
-					<Button disabled={disabled} loading={isPending && !wrongOpen} onClick={() => store(verdict)}>
+					<Button type="primary" ghost disabled={disabled} loading={isPending && !wrongOpen} onClick={() => store(verdict)}>
 						Agree
 					</Button>
 					<Button danger={wrongOpen} disabled={disabled} onClick={() => setWrongOpen((o) => !o)} aria-expanded={wrongOpen}>
