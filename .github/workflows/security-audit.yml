@@ -16,6 +16,7 @@ on:
       - "processor/requirements.txt"
       - "freidata/requirements.txt"
       - "scripts/requirements-analyst.txt"
+      - "labeling-service/requirements.txt"
       - "deadtrees-cli/setup.py"
       - "frontend/package.json"
       - "frontend/package-lock.json"
@@ -56,14 +57,19 @@ jobs:
 
       # Most Python requirements are unpinned, so resolve each file the way a
       # rebuild today would (Python 3.12 on linux x86_64, as in the GDAL image)
-      # and audit that exact set.
+      # and audit that exact set. Extra arguments go to uv: a file with a
+      # PyTorch --extra-index-url resolves like pip (best match across both
+      # indexes). The CUDA tag (+cu126) is dropped before the audit, because
+      # PyPI has no record of tagged builds and pip-audit would skip them.
       - name: Audit Python dependencies
         run: |
           mkdir -p "$RESULTS"
           audit() {
             local name="$1" source="$2"
+            shift 2
             if uv pip compile --quiet --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
-              "$source" -o "$RUNNER_TEMP/$name.txt"; then
+              "$@" "$source" -o "$RUNNER_TEMP/$name.txt"; then
+              sed -i -E 's/^([A-Za-z0-9_.-]+==[^ +]+)\+cu[0-9]+/\1/' "$RUNNER_TEMP/$name.txt"
               pip-audit -r "$RUNNER_TEMP/$name.txt" --no-deps --disable-pip --progress-spinner off \
                 --format json -o "$RESULTS/pip-$name.json" || true
             fi
@@ -76,6 +82,7 @@ jobs:
           audit processor processor/requirements.txt
           audit freidata freidata/requirements.txt
           audit scripts scripts/requirements-analyst.txt
+          audit labeling labeling-service/requirements.txt --index-strategy unsafe-best-match
           audit cli deadtrees-cli/setup.py
 
       - name: Audit frontend dependencies

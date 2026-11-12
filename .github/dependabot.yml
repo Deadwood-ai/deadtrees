@@ -137,6 +137,27 @@ updates:
           - "version-update:semver-minor"
           - "version-update:semver-major"
 
+  # SAM 3 labeling service on the processing server. Pinned versions were
+  # tested together on the GPU (RTX 3090, CUDA 12.6). Torch and Torchvision
+  # are held like above, security updates included (DT-1505): a new pair
+  # needs the CUDA wheel index and a SAM 3 test on the GPU.
+  - package-ecosystem: "pip"
+    directory: "/labeling-service"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      labeling-safe-updates:
+        patterns: ["*"]
+        update-types: ["patch", "minor"]
+    ignore:
+      - dependency-name: "torch"
+      - dependency-name: "torchvision"
+      - dependency-name: "transformers"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+
   # Pinned GDAL runtime images
   - package-ecosystem: "docker"
     directories:

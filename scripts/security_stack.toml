@@ -87,6 +87,13 @@ issue = 'DT-859'
 review_by = '2027-01-31'
 
 [[accepted]]
+package = 'torch'
+version = '2.7.1'
+reason = 'SAM 3 labeling service (processing server, behind data2, not public). Held pair with torchvision 0.22.1 tested on the GPU; it loads only the SAM 3 checkpoint. A new pair needs a SAM 3 test on the GPU.'
+issue = 'DT-1505'
+review_by = '2027-01-31'
+
+[[accepted]]
 package = 'transformers'
 version = '4.*'
 reason = 'Held below 5: transformers 5 renames SegFormer state-dict keys and breaks the AOI and combined-model checkpoints. We load only our own checkpoints.'
