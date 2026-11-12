@@ -32,10 +32,10 @@ const checkName = (checkKey: AuditCheckKey, layer: AuditLayer) =>
 const verdictTag = (checkKey: AuditCheckKey, verdict: AuditVerdict) => (
 	<Tag color={TAG_COLORS[VERDICT_TONE[verdict]]}>{verdictLabel(checkKey, verdict)}</Tag>
 );
-const reviewLink = (datasetId: number, checkKey: AuditCheckKey) => (
-	<Link to={`/dataset-audit/${datasetId}?section=${sectionOfCheck(checkKey)}`}>
-		<Button type="primary" size="small">
-			Review
+const reviewLink = (datasetId: number, checkKey: AuditCheckKey, finished = false) => (
+	<Link to={reviewHref(datasetId, checkKey)}>
+		<Button type={finished ? "default" : "primary"} size="small">
+			{finished ? "Open" : "Review"}
 		</Button>
 	</Link>
 );
@@ -115,13 +115,7 @@ function ToReviewList({ locationOf }: Pick<AuditCheckQueueProps, "locationOf">) 
 			title: "",
 			key: "action",
 			width: 100,
-			render: (_, r) => (
-				<Link to={reviewHref(r)}>
-					<Button type={r.finished ? "default" : "primary"} size="small">
-						{r.finished ? "Open" : "Review"}
-					</Button>
-				</Link>
-			),
+			render: (_, r) => reviewLink(r.datasetId, r.next, r.finished),
 		},
 	];
 	return (
@@ -165,7 +159,9 @@ function ResultCell({ checkKey, cell }: { checkKey: AuditCheckKey; cell: IReview
 	if (!cell) return <span className="text-xs text-gray-400">Not run</span>;
 	return (
 		<span className="inline-flex items-center gap-1 whitespace-nowrap">
-			{verdictTag(checkKey, cell.verdict)}
+			<span className={cell.needsReview ? "" : "opacity-60"} title={cell.needsReview ? undefined : "Applied without review"}>
+				{verdictTag(checkKey, cell.verdict)}
+			</span>
 			{cell.mine && (
 				<span className="text-xs text-green-700" title="You answered this result">
 					✓ you

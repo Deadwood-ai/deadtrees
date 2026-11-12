@@ -1,5 +1,5 @@
 import type { AuditCheckKey, AuditLayer, AuditVerdict, IAuditQueueRow } from "../types/auditChecks";
-import { AUDIT_SECTIONS, LAYER_LABELS, auditSection, sectionOfCheck } from "./auditChecks";
+import { AUDIT_SECTIONS, LAYER_LABELS, sectionOfCheck } from "./auditChecks";
 
 /** One column of the To review list: a check on one layer, e.g. prediction quality on deadwood. */
 export interface IReviewTarget {
@@ -12,7 +12,9 @@ export interface IReviewTarget {
 /** A check result in a dataset's row, with who answered it on the current run. */
 export interface IReviewCell {
 	verdict: AuditVerdict;
-	reviews: number;
+	/** the result goes to a person; false when its version applies it without review */
+	needsReview: boolean;
+	/** you answered it on the current run */
 	mine: boolean;
 }
 
@@ -22,7 +24,7 @@ export interface IDatasetReviewRow {
 	cells: Partial<Record<string, IReviewCell>>;
 	/** every target has a result */
 	complete: boolean;
-	/** you answered every result the dataset has */
+	/** you answered every result of the dataset that goes to a person */
 	finished: boolean;
 	/** results that are not "ok" */
 	problems: number;
@@ -30,32 +32,32 @@ export interface IDatasetReviewRow {
 	next: AuditCheckKey;
 }
 
-export const targetKey = (checkKey: string, layer: string) => `${checkKey}:${layer}`;
+const targetKey = (checkKey: string, layer: string) => `${checkKey}:${layer}`;
 
 /** A result's key in the answers lookup: "dataset:check:layer". */
 export const reviewKey = (r: { dataset_id: number; check_key: string; layer: string }) => `${r.dataset_id}:${targetKey(r.check_key, r.layer)}`;
 
 /** The targets the list has columns for, in audit page order: the layers of every check that has
- * at least one result under review. A check that runs nowhere yet gets no column. */
+ * at least one current result. A check that runs nowhere yet gets no column. */
 export function reviewTargets(rows: Pick<IAuditQueueRow, "check_key" | "layer">[]): IReviewTarget[] {
 	const present = new Set(rows.map((r) => targetKey(r.check_key, r.layer)));
-	const checks = new Set(rows.map((r) => r.check_key));
-	return AUDIT_SECTIONS.flatMap((section) =>
-		section.checkKey && checks.has(section.checkKey)
-			? section.layers
-					.filter((layer) => section.layers.length === 1 || present.has(targetKey(section.checkKey!, layer)))
+	return AUDIT_SECTIONS.flatMap(({ checkKey, layers, title }) =>
+		checkKey
+			? layers
+					.filter((layer) => present.has(targetKey(checkKey, layer)))
 					.map((layer) => ({
-						key: targetKey(section.checkKey!, layer),
-						checkKey: section.checkKey!,
+						key: targetKey(checkKey, layer),
+						checkKey,
 						layer,
-						title: section.layers.length > 1 ? (LAYER_LABELS[layer] ?? layer) : auditSection(section.id).title,
+						title: layers.length > 1 ? (LAYER_LABELS[layer] ?? layer) : title,
 					}))
 			: [],
 	);
 }
 
-/** Groups the queue's results (one per dataset, check and layer) into one row per dataset,
- * newest dataset first. `reviews` holds the answers per "dataset:check:layer". */
+/** Groups the current results (one per dataset, check and layer) into one row per dataset that
+ * has a result going to a person, newest dataset first. `reviews` holds the answers per
+ * "dataset:check:layer". */
 export function datasetReviewRows(
 	rows: IAuditQueueRow[],
 	reviews: Record<string, { count: number; mine: boolean }>,
@@ -65,25 +67,35 @@ export function datasetReviewRows(
 	for (const r of rows) {
 		const cells = byDataset.get(r.dataset_id) ?? {};
 		const answers = reviews[reviewKey(r)];
-		cells[targetKey(r.check_key, r.layer)] = { verdict: r.verdict, reviews: answers?.count ?? 0, mine: !!answers?.mine };
+		cells[targetKey(r.check_key, r.layer)] = {
+			verdict: r.verdict,
+			needsReview: r.reason !== null,
+			mine: !!answers?.mine,
+		};
 		byDataset.set(r.dataset_id, cells);
 	}
 	return [...byDataset.entries()]
 		.sort(([a], [b]) => b - a)
-		.map(([datasetId, cells]) => {
-			const results = targets.filter((t) => cells[t.key]);
-			const open = results.find((t) => !cells[t.key]!.mine);
-			return {
-				datasetId,
-				cells,
-				complete: results.length === targets.length,
-				finished: !open,
-				problems: results.filter((t) => cells[t.key]!.verdict !== "ok").length,
-				next: (open ?? results[0] ?? targets[0]).checkKey,
-			};
+		.flatMap(([datasetId, cells]) => {
+			const results = targets.flatMap((target) => {
+				const cell = cells[target.key];
+				return cell ? [{ target, cell }] : [];
+			});
+			const toReview = results.filter((r) => r.cell.needsReview);
+			if (!toReview.length) return [];
+			const open = toReview.find((r) => !r.cell.mine);
+			return [
+				{
+					datasetId,
+					cells,
+					complete: results.length === targets.length,
+					finished: !open,
+					problems: results.filter((r) => r.cell.verdict !== "ok").length,
+					next: (open ?? toReview[0]).target.checkKey,
+				},
+			];
 		});
 }
 
-/** The audit page link that opens a dataset on the check to answer next. */
-export const reviewHref = (row: Pick<IDatasetReviewRow, "datasetId" | "next">) =>
-	`/dataset-audit/${row.datasetId}?section=${sectionOfCheck(row.next)}`;
+/** The audit page link that opens a dataset on a check's section. */
+export const reviewHref = (datasetId: number, checkKey: AuditCheckKey) => `/dataset-audit/${datasetId}?section=${sectionOfCheck(checkKey)}`;
