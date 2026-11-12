@@ -349,19 +349,22 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			};
 
 			const isCompletion = !auditData;
-			await saveAudit({ values: auditPayload, leaseId });
 			// Saving is your review of every step: the checks' calls you left as they are become your
-			// answers, marked as given with the save.
-			// the whole store: it holds step 1's reprocessing draft, which has no field
+			// answers, marked as given with the save. They go first: if they fail, nothing is saved and
+			// you stay on the page to try again; if the audit then fails, the answers are already yours
+			// and a second save skips them. The whole store: it holds step 1's reprocessing draft.
 			const withSave = answersWithSave(auditChecks, user?.id, form.getFieldsValue(true), dataset.id);
 			if (withSave.length) {
 				try {
 					await saveAnswers(withSave);
 				} catch (error) {
 					console.debug("Failed to store the answers given with the save", error);
-					message.warning("The audit is saved, but your answers on the automated checks were not. Answer them in their steps.");
+					setNavigateToNext(false);
+					message.error("Your answers on the automated checks were not saved, so the audit was not saved either. Please try again.");
+					return;
 				}
 			}
+			await saveAudit({ values: auditPayload, leaseId });
 			trackAppEvent("audit_completed", {
 				dataset_id: dataset.id,
 				final_assessment: values.final_assessment || "unknown",
