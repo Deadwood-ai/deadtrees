@@ -3,12 +3,10 @@ import { Button, Input, Space, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
-import ShowNow from "./ShowNow";
 import {
 	automatedRows,
 	automatedVerdict,
 	myAnswer,
-	othersAnswers,
 	verdictLabel,
 	type IAuditSectionDef,
 } from "../../../utils/auditChecks";
@@ -25,8 +23,7 @@ interface CheckAnswerProps {
 
 /** One row of verdicts with the check's call marked as suggested: picking it agrees, picking
  * another asks for a fixed reason and a note. Left alone, saving the audit takes the
- * suggestion over. Every answer is a new person row on the current run; other reviewers'
- * answers stay hidden until you answer. */
+ * suggestion over. Every answer is a new person row on the current run. */
 export default function CheckAnswer({ datasetId, section, layer, evidence, people, disabled }: CheckAnswerProps) {
 	const { user } = useAuth();
 	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
@@ -34,7 +31,6 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 	const [reason, setReason] = useState<string | null>(null);
 	const [own, setOwn] = useState<AuditVerdict | null>(null);
 	const [note, setNote] = useState("");
-	const [showOthers, setShowOthers] = useState(false);
 
 	const checkKey = section.checkKey!;
 	const runId = evidence.run.id;
@@ -42,7 +38,6 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 	const verdict = automatedVerdict(evidence, layer);
 	const rows = automatedRows(evidence, layer);
 	const mine = myAnswer(people, user?.id, runId, target);
-	const others = othersAnswers(people, user?.id, runId, target);
 	const decided = verdict !== null && verdict !== "unsure";
 	const label = (v: AuditVerdict) => verdictLabel(checkKey, v);
 	// a verdict other than the check's decided call is a disagreement: it needs a reason
@@ -77,7 +72,6 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 			: a.verdict === verdict
 				? `Agree (${label(a.verdict)})`
 				: label(a.verdict);
-	const reveal = !!mine || showOthers;
 
 	return (
 		<div className="flex flex-col gap-2">
@@ -139,24 +133,6 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 				</div>
 			)}
 
-			<div className="text-[11px] text-gray-500">
-				{reveal ? (
-					<>
-						<div>
-							Models: {rows.map((r) => `${r.model}/${r.prompt_version} ${label(r.verdict)}`).join(" · ") || "none"}
-						</div>
-						<div>
-							Other reviewers:{" "}
-							{others.length ? others.map((a) => `${a.assessor_email ?? "a reviewer"}: ${describe(a)}`).join(" · ") : "no answers yet"}
-						</div>
-					</>
-				) : (
-					<>
-						Other reviewers' and the models' answers appear after you answer.{" "}
-						<ShowNow onClick={() => setShowOthers(true)} />
-					</>
-				)}
-			</div>
 		</div>
 	);
 }

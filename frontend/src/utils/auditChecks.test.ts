@@ -121,10 +121,11 @@ describe("legacySectionStatus", () => {
   const inputs = { hasAOI: false, phenology: undefined, georefCheck: null, dateEstimate: null, reviewItems: [] };
   const georefCheck = { decision: "poor", evidence_level: "gross", reason: "gross_offset", p90_m: 40, reference_evidence: [] } as unknown as IGeorefCheck;
 
-  it("says not run yet for a check without any result", () => {
-    for (const id of ["evaluation", "georef", "date", "prediction"] as const) {
+  it("says not run yet for a check without any result, and manual for a date without an estimate", () => {
+    for (const id of ["evaluation", "georef", "prediction"] as const) {
       expect(legacySectionStatus(id, inputs)).toEqual({ label: "Not run yet", tone: "todo", needsYou: false });
     }
+    expect(legacySectionStatus("date", inputs)).toEqual({ label: "Manual", tone: "todo", needsYou: false });
   });
 
   it("reads the AOI and the manual phenology answer", () => {

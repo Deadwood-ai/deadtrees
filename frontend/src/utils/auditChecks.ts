@@ -280,7 +280,8 @@ export function legacySectionStatus(id: AuditSectionId, inputs: ILegacySectionIn
       return { label: summary.verdict.split(",")[0], tone: GEOREF_TONES[summary.tone], needsYou: false };
     }
     case "date":
-      if (!inputs.dateEstimate) return NOT_RUN;
+      // no estimate: the reviewer judges the date by hand
+      if (!inputs.dateEstimate) return { label: "Manual", tone: "todo", needsYou: false };
       if (underReview("acquisition_date")) return needsYou;
       if (inputs.dateEstimate.is_mismatch) return { label: "Mismatch", tone: "bad", needsYou: false };
       return reportedOutsideLikelyRange(inputs.dateEstimate) ? { label: "Uncertain", tone: "warn", needsYou: true } : { label: "Valid", tone: "ok", needsYou: false };

@@ -1,4 +1,5 @@
-import { Alert, Form, Input, Radio, Space, Tag, Tooltip, Typography } from "antd";
+import { Alert, Form, Radio, Space, Tag, Tooltip, Typography } from "antd";
+import NoteField from "./checks/NoteField";
 import { RobotOutlined } from "@ant-design/icons";
 import { createConditionalRule, formatAcquisitionDate } from "./auditConstants";
 import type { IDataset } from "../../types/dataset";
@@ -19,7 +20,6 @@ import AcquisitionDateDistribution from "../AcquisitionDate/AcquisitionDateDistr
 import { ReviewTag } from "./AuditReviewNotice";
 
 const { Text } = Typography;
-const { TextArea } = Input;
 
 interface AcquisitionDateCardProps {
 	dataset: IDataset;
@@ -201,9 +201,7 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 				</div>
 			)}
 
-			<Form.Item name="acquisition_date_notes" className="mb-0">
-				<TextArea rows={2} placeholder="Date notes..." className="text-xs" />
-			</Form.Item>
+			<NoteField name="acquisition_date_notes" placeholder="Date notes..." label="Add a date note" />
 		</div>
 	);
 }

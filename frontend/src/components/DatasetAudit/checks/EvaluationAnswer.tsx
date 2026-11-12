@@ -11,10 +11,8 @@ import {
 	evaluationAnswerText,
 	evaluationFlags,
 	myAnswer,
-	othersAnswers,
 	type EvaluationFlag,
 } from "../../../utils/auditChecks";
-import ShowNow from "./ShowNow";
 
 interface EvaluationAnswerProps {
 	datasetId: number;
@@ -50,7 +48,6 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 	const rows = automatedRows(evidence, LAYER);
 	const rule = rows[0];
 	const mine = myAnswer(people, user?.id, runId, target);
-	const others = othersAnswers(people, user?.id, runId, target);
 
 	const [changing, setChanging] = useState(false);
 	const [excluding, setExcluding] = useState(false);
@@ -58,7 +55,6 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 	const [note, setNote] = useState("");
 	// the flags before an answer: what the check names, and what a saved audit already holds
 	const [draftFlags, setDraftFlags] = useState<EvaluationFlag[] | null>(null);
-	const [showOthers, setShowOthers] = useState(false);
 	const form = Form.useFormInstance();
 	const savedCog = Form.useWatch("has_cog_issue", { form, preserve: true });
 	const savedThumbnail = Form.useWatch("has_thumbnail_issue", { form, preserve: true });
@@ -109,7 +105,6 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 		decided ? (agrees(answer) ? "suggested by the check" : "the check is wrong") : answer === "keep" ? "the orthophoto is usable" : "the orthophoto is unusable";
 	const myCall = mine ? (keeps(mine.verdict) ? "keep" : "exclude") : null;
 	const describe = (a: IAuditAssessment) => `${evaluationAnswerText(a)}${a.reason_text ? `, “${a.reason_text}”` : ""}`;
-	const modelSaid = (r: IAuditAssessment) => `${r.assessor_kind === "rule" ? "rule" : r.model}: ${evaluationAnswerText(r)}`;
 
 	return (
 		<div className="mb-3 flex flex-col gap-3" data-testid="audit-evaluation-answer">
@@ -191,19 +186,6 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 				</div>
 			)}
 
-			<div className="text-[11px] text-gray-500">
-				{answered || showOthers ? (
-					<>
-						<div>Models: {rows.map(modelSaid).join(" · ") || "none"}</div>
-						<div>Other reviewers: {others.length ? others.map((a) => `${a.assessor_email ?? "a reviewer"}: ${describe(a)}`).join(" · ") : "no answers yet"}</div>
-					</>
-				) : (
-					<>
-						The models' and other reviewers' answers appear after yours.{" "}
-						<ShowNow onClick={() => setShowOthers(true)} />
-					</>
-				)}
-			</div>
 		</div>
 	);
 }

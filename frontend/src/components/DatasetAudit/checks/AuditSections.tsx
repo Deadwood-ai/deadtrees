@@ -23,6 +23,7 @@ import { COGQualityCard, OrthoFilePanel, PhenologyCard, PredictionQualityCard, T
 import { GeoreferencingCard } from "../GeoreferencingCard";
 import { createConditionalRule } from "../auditConstants";
 import { InlineLoadError } from "../../SectionStates";
+import AnswerDetails from "./AnswerDetails";
 import AuditSection from "./AuditSection";
 import CheckAnswer from "./CheckAnswer";
 import CheckSummary from "./CheckSummary";
@@ -125,6 +126,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 						/>
 					</div>
 				))}
+				<AnswerDetails section={s} evidence={evidence} people={people} />
 				{s.cropAnswers && (
 					<CropAnswers
 						datasetId={datasetId}
@@ -152,6 +154,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		evaluation: evaluation ? (
 			<>
 				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} />
+				<AnswerDetails section={auditSection("evaluation")} evidence={evaluation} people={people} />
 				{EVALUATION_FLAGS.map(
 					({ field }) =>
 						field && (
