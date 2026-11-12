@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { IAcquisitionDateDecision, IAcquisitionDateEstimate, IAuditSuggestion } from "../types/acquisitionDate";
 import {
   binToDate,
+  reportedOutsideLikelyRange,
+  withoutUncertainDate,
   dateToYearFraction,
   datasetDateSuggestion,
   isEstimateCurrent,
@@ -152,3 +154,37 @@ function decision(over: Partial<IAcquisitionDateDecision>): IAcquisitionDateDeci
     ...over,
   };
 }
+
+describe("reportedOutsideLikelyRange", () => {
+  const estimate = (month: number | null, day: number | null) => ({
+    hdi: { "80": [["2026-04-08", "2026-05-16"], ["2026-06-06", "2026-09-27"]] as [string, string][] },
+    recorded_year: 2026,
+    recorded_month: month,
+    recorded_day: day,
+  });
+
+  it("is true for a full date between or outside the 80% ranges", () => {
+    // the 17 May case: one day after the first range ends
+    expect(reportedOutsideLikelyRange(estimate(5, 17))).toBe(true);
+    expect(reportedOutsideLikelyRange(estimate(12, 1))).toBe(true);
+  });
+
+  it("is false for a date inside a range, and for a month that touches one", () => {
+    expect(reportedOutsideLikelyRange(estimate(7, 22))).toBe(false);
+    expect(reportedOutsideLikelyRange(estimate(5, null))).toBe(false);
+    expect(reportedOutsideLikelyRange(estimate(11, null))).toBe(true);
+  });
+
+  it("says nothing without a month", () => {
+    expect(reportedOutsideLikelyRange(estimate(null, null))).toBeNull();
+  });
+
+  it("drops only the 'valid' suggestion outside the range", () => {
+    const suggestions = [
+      { field: "has_valid_acquisition_date", value: true },
+      { field: "acquisition_date_notes", value: "x" },
+    ] as IAuditSuggestion[];
+    expect(withoutUncertainDate(suggestions, estimate(5, 17)).map((s) => s.field)).toEqual(["acquisition_date_notes"]);
+    expect(withoutUncertainDate(suggestions, estimate(7, 22))).toBe(suggestions);
+  });
+});

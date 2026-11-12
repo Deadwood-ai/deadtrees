@@ -1,16 +1,13 @@
 import { useState } from "react";
-import { Button, Input, Tag, message } from "antd";
+import { Button, Input, Space, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
-import ShowNow from "./ShowNow";
 import {
 	automatedRows,
 	automatedVerdict,
 	myAnswer,
-	othersAnswers,
 	verdictLabel,
-	wrongVerdict,
 	type IAuditSectionDef,
 } from "../../../utils/auditChecks";
 
@@ -24,17 +21,16 @@ interface CheckAnswerProps {
 	disabled: boolean;
 }
 
-/** Agree with a check, or mark it wrong with a fixed reason and a note. Every answer is a
- * new person row on the current run; other reviewers' answers stay hidden until you answer. */
+/** One row of verdicts with the check's call marked as suggested: picking it agrees, picking
+ * another asks for a fixed reason and a note. Left alone, saving the audit takes the
+ * suggestion over. Every answer is a new person row on the current run. */
 export default function CheckAnswer({ datasetId, section, layer, evidence, people, disabled }: CheckAnswerProps) {
 	const { user } = useAuth();
 	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
 	const [changing, setChanging] = useState(false);
-	const [wrongOpen, setWrongOpen] = useState(false);
 	const [reason, setReason] = useState<string | null>(null);
 	const [own, setOwn] = useState<AuditVerdict | null>(null);
 	const [note, setNote] = useState("");
-	const [showOthers, setShowOthers] = useState(false);
 
 	const checkKey = section.checkKey!;
 	const runId = evidence.run.id;
@@ -42,13 +38,10 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 	const verdict = automatedVerdict(evidence, layer);
 	const rows = automatedRows(evidence, layer);
 	const mine = myAnswer(people, user?.id, runId, target);
-	const others = othersAnswers(people, user?.id, runId, target);
 	const decided = verdict !== null && verdict !== "unsure";
-	const flipped = decided ? wrongVerdict(verdict) : null;
-	const choices = section.verdicts;
-	const twoWay = choices.length === 2;
-	const wrongTo = twoWay ? flipped : own;
 	const label = (v: AuditVerdict) => verdictLabel(checkKey, v);
+	// a verdict other than the check's decided call is a disagreement: it needs a reason
+	const pick = (choice: AuditVerdict) => (decided && choice !== verdict ? setOwn(choice) : void store(choice));
 
 	const store = async (answer: AuditVerdict, reasonCode: string | null = null, reasonText: string | null = null) => {
 		try {
@@ -65,7 +58,6 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 				},
 			]);
 			setChanging(false);
-			setWrongOpen(false);
 			setReason(null);
 			setOwn(null);
 			setNote("");
@@ -80,7 +72,6 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 			: a.verdict === verdict
 				? `Agree (${label(a.verdict)})`
 				: label(a.verdict);
-	const reveal = !!mine || showOthers;
 
 	return (
 		<div className="flex flex-col gap-2">
@@ -93,27 +84,28 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 						Change
 					</Button>
 				</div>
-			) : decided ? (
-				<div className="flex flex-wrap gap-2">
-					<Button disabled={disabled} loading={isPending && !wrongOpen} onClick={() => store(verdict)}>
-						Agree
-					</Button>
-					<Button danger={wrongOpen} disabled={disabled} onClick={() => setWrongOpen((o) => !o)} aria-expanded={wrongOpen}>
-						Check wrong
-					</Button>
-				</div>
 			) : (
-				<div className="flex flex-wrap items-center gap-2 text-xs">
-					<span className="text-gray-600">The check could not decide. Your call:</span>
-					{choices.map((c) => (
-						<Button key={c} size="small" disabled={disabled} onClick={() => store(c)}>
-							{label(c)}
-						</Button>
-					))}
+				<div className="flex flex-wrap items-center gap-2">
+					<Space.Compact>
+						{section.verdicts.map((choice) => (
+							<Button
+								key={choice}
+								type={choice === own || (decided && choice === verdict && !own) ? "primary" : "default"}
+								ghost={decided && choice === verdict && !own}
+								danger={choice === own}
+								disabled={disabled}
+								loading={isPending && choice === verdict && !own}
+								onClick={() => pick(choice)}
+							>
+								{label(choice)}
+							</Button>
+						))}
+					</Space.Compact>
+					<span className="text-[11px] text-gray-500">{decided ? (own ? "the check is wrong" : "suggested by the check") : "the check could not decide"}</span>
 				</div>
 			)}
 
-			{wrongOpen && (!mine || changing) && (
+			{own && (!mine || changing) && (
 				<div className="flex flex-col gap-2 rounded-md border border-red-100 bg-white p-2">
 					<div className="flex flex-wrap gap-1.5">
 						{section.reasons.map((r) => (
@@ -122,18 +114,6 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 							</Tag.CheckableTag>
 						))}
 					</div>
-					{!twoWay && (
-						<div className="flex flex-wrap items-center gap-1.5 text-xs">
-							<span className="text-gray-600">Your verdict:</span>
-							{choices
-								.filter((c) => c !== verdict)
-								.map((c) => (
-									<Tag.CheckableTag key={c} checked={own === c} onChange={() => setOwn(c)}>
-										{label(c)}
-									</Tag.CheckableTag>
-								))}
-						</div>
-					)}
 					<Input
 						size="small"
 						placeholder="What did the check get wrong?"
@@ -142,38 +122,17 @@ export default function CheckAnswer({ datasetId, section, layer, evidence, peopl
 						maxLength={2000}
 						onChange={(e) => setNote(e.target.value)}
 					/>
-					<div>
-						<Button
-							size="small"
-							type="primary"
-							disabled={disabled || !reason || !wrongTo}
-							loading={isPending}
-							onClick={() => wrongTo && store(wrongTo, reason, note)}
-						>
-							Save answer{wrongTo ? `: ${label(wrongTo)}` : ""}
+					<div className="flex items-center gap-3">
+						<Button size="small" type="primary" disabled={disabled || !reason} loading={isPending} onClick={() => store(own, reason, note)}>
+							Save answer: {label(own)}
+						</Button>
+						<Button size="small" type="link" className="p-0 text-xs" onClick={() => setOwn(null)}>
+							Back
 						</Button>
 					</div>
 				</div>
 			)}
 
-			<div className="text-[11px] text-gray-500">
-				{reveal ? (
-					<>
-						<div>
-							Models: {rows.map((r) => `${r.model}/${r.prompt_version} ${label(r.verdict)}`).join(" · ") || "none"}
-						</div>
-						<div>
-							Other reviewers:{" "}
-							{others.length ? others.map((a) => `${a.assessor_email ?? "a reviewer"}: ${describe(a)}`).join(" · ") : "no answers yet"}
-						</div>
-					</>
-				) : (
-					<>
-						Other reviewers' and the models' answers appear after you answer.{" "}
-						<ShowNow onClick={() => setShowOthers(true)} />
-					</>
-				)}
-			</div>
 		</div>
 	);
 }

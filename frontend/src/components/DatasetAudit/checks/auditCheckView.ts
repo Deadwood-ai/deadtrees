@@ -17,3 +17,14 @@ export function modelViewImage(evidence: IAuditCheckEvidence | undefined, cropId
 	}
 	return images.find((i) => i.kind === "overview") ?? images.find((i) => i.kind === "thumbnail") ?? null;
 }
+
+/** The step after `current`, or null after the last one. The audit goes through every step
+ * in order, the ones without a check too: they are answered by hand. */
+export function nextStep(order: AuditSectionId[], current: AuditSectionId): AuditSectionId | null {
+	return order[order.indexOf(current) + 1] ?? null;
+}
+
+/** The step before `current`, or null at the first one. */
+export function previousStep(order: AuditSectionId[], current: AuditSectionId): AuditSectionId | null {
+	return order[order.indexOf(current) - 1] ?? null;
+}

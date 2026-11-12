@@ -20,6 +20,8 @@ export interface IAuditAssessment {
   /** user id, or model/prompt_version */
   assessor: string;
   verdict: AuditVerdict;
+  /** a model's likelihood (0-100) that the target has major errors; null for people and rules */
+  major_likelihood?: number | null;
   reason_code: string | null;
   reason_text: string | null;
   details: Record<string, unknown>;
@@ -45,6 +47,8 @@ export interface IAuditRun {
   inputs: Record<string, unknown>;
   /** what the run found; `judged` names its own crops and the image files that differ from the stored rows */
   evidence: Record<string, unknown>;
+  /** the check version the run ran with: its config holds the rule's cut-offs */
+  version?: { config: Record<string, unknown> } | null;
 }
 
 export interface IAuditCrop {

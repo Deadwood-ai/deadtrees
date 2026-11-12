@@ -7,11 +7,12 @@ import { auditImageUrl } from "../../../api/auditImages";
 import { useAuditImageAccess } from "../../../hooks/useAuditChecks";
 import type { IAuditCheckEvidence, IAuditImage } from "../../../types/auditChecks";
 import type { IGeorefCheck } from "../../../types/georefCheck";
-import { cropModelVerdict, orderedCrops, stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { cropCalls, cropsForReview } from "../../../utils/cropCalls";
 import { InlineLoadError, InlineSkeleton } from "../../SectionStates";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
-import { CROP_COLOR, useCropSquares, zoomToCrop } from "./useCropSquares";
-import { useOrthoOnlyLayers } from "./useOrthoOnlyLayers";
+import { useCropSquares, zoomToCrop } from "./useCropSquares";
+import { useSectionLayers } from "./useSectionLayers";
 import { modelViewImage } from "./auditCheckView";
 
 /** What the audit map needs to show the open section's check. */
@@ -29,7 +30,6 @@ interface AuditCheckMapProps extends IAuditCheckMapProps {
 	orthoLayer: BaseLayer | null;
 }
 
-const VERDICT_COLORS = { major: "#ff9a3c", unsure: "#ffd27a", minor: "#ffd27a", ok: CROP_COLOR };
 const IMAGE_LABELS: Record<CropImageKind, string> = { raw: "Raw", deadwood_overlay: "Deadwood", forest_cover_overlay: "Forest" };
 
 /** Puts the audit map into the open section's mode (reference and match lines, or the
@@ -41,7 +41,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const [provider, setProvider] = useState<string>();
 	const [showMatches, setShowMatches] = useState(true);
 	const [droneOpacity, setDroneOpacity] = useState(60);
-	const [colorByVerdict, setColorByVerdict] = useState(false);
+	const [colorByVerdict, setColorByVerdict] = useState(true);
 	const [showModelView, setShowModelView] = useState(false);
 	const [imageKind, setImageKind] = useState<CropImageKind>("raw");
 
@@ -51,16 +51,22 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	// keyed on the rows, not the evidence object: an answer must not rebuild the squares or move the map
 	const cropRows = evidence?.crops;
 	const automated = evidence?.automated;
-	const crops = useMemo(() => (cropMode && cropRows?.length ? orderedCrops({ crops: cropRows }) : null), [cropMode, cropRows]);
+	const run = evidence?.run;
 	const colorLayers = cropMode?.colorLayers;
-	const colors = useMemo(() => {
-		if (!crops || !colorByVerdict || !colorLayers?.length) return undefined;
-		return Object.fromEntries(crops.map((c) => [c.id, VERDICT_COLORS[cropModelVerdict({ automated: automated ?? [] }, c.id, colorLayers) ?? "ok"]]));
-	}, [crops, colorByVerdict, colorLayers, automated]);
+	// the same calls and order the crop answers use: the crops the check counted major first
+	const calls = useMemo(
+		() => (cropMode && run && cropRows?.length ? cropCalls({ run, automated: automated ?? [], crops: cropRows }, colorLayers ?? []) : null),
+		[cropMode, run, automated, cropRows, colorLayers],
+	);
+	const crops = useMemo(() => (calls && cropRows ? cropsForReview({ crops: cropRows }, calls) : null), [calls, cropRows]);
+	const flagged = useMemo(
+		() => (calls && colorByVerdict ? new Set([...calls].filter(([, call]) => call === "major").map(([id]) => id)) : undefined),
+		[calls, colorByVerdict],
+	);
 
-	useOrthoOnlyLayers(!!cropMode?.orthoOnly);
+	useSectionLayers(section?.shows ?? null);
 	useGeorefLayers({ map, orthoLayer, check: georef, provider: shownProvider, showMatches, droneOpacity });
-	useCropSquares({ map, crops, selectedId: cropId, colors, onSelect: onSelectCrop });
+	useCropSquares({ map, crops, selectedId: cropId, flagged, onSelect: onSelectCrop });
 
 	const index = crops ? crops.findIndex((c) => c.id === cropId) : -1;
 	useEffect(() => {
@@ -114,7 +120,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 					</div>
 					{cropMode.colorLayers.length > 0 && (
 						<Checkbox checked={colorByVerdict} onChange={(e) => setColorByVerdict(e.target.checked)}>
-							Colour squares by model verdict
+							Mark the crops the check counted major (orange, dashed, "!")
 						</Checkbox>
 					)}
 				</>

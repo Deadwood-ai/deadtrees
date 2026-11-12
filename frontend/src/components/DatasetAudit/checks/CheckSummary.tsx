@@ -1,5 +1,5 @@
 import type { IAuditCheckEvidence } from "../../../types/auditChecks";
-import { LAYER_LABELS, QUEUE_REASONS, automatedRows, automatedVerdict, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { LAYER_LABELS, automatedRows, automatedVerdict, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
 
 const words = (value: unknown) => (typeof value === "string" ? value.replace(/_/g, " ") : null);
 
@@ -8,7 +8,7 @@ const FIX_LABELS: Record<string, string> = { cog_issue: "COG issue", thumbnail_i
 const fixes = (value: unknown) =>
 	Array.isArray(value) && value.length ? value.map((flag) => FIX_LABELS[String(flag)] ?? words(flag)).join(", ") : null;
 
-/** One line per layer on the check's call, with what it rests on and why a person sees it. */
+/** One line per layer on the check's call and what it rests on; why a person sees it is in the step's details. */
 export default function CheckSummary({ section, evidence }: { section: IAuditSectionDef; evidence: IAuditCheckEvidence }) {
 	const checkKey = section.checkKey!;
 	return (
@@ -23,7 +23,6 @@ export default function CheckSummary({ section, evidence }: { section: IAuditSec
 						: null;
 				const toFix = verdict === "minor" ? fixes(details.fix_flags) : null;
 				const because = [words(details.reason), crops, words(details.summary)].filter(Boolean).join("; ");
-				const queued = evidence.queue.find((q) => q.layer === layer);
 				return (
 					<div key={layer}>
 						{section.layers.length > 1 && <span>{LAYER_LABELS[layer]}: </span>}
@@ -32,7 +31,6 @@ export default function CheckSummary({ section, evidence }: { section: IAuditSec
 							{toFix && `: ${toFix}`}
 						</b>
 						{because && <span>. {because.charAt(0).toUpperCase() + because.slice(1)}</span>}
-						{queued?.reason && <span className="text-gray-500"> · Here because {QUEUE_REASONS[queued.reason].because}.</span>}
 					</div>
 				);
 			})}

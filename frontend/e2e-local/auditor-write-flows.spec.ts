@@ -121,18 +121,21 @@ test.describe("auditor local write flows", () => {
 
     const phenologyCard = await section(page, "Phenology");
     await phenologyCard.getByText(/In Season/).click();
+    await phenologyCard.getByRole("button", { name: "Add a phenology note" }).click();
     await phenologyCard
       .getByPlaceholder("Seasonal observations...")
       .fill("Local write suite confirms phenology.");
 
     const predictionCard = await section(page, "Prediction quality");
     await predictionCard.getByText(/Great/).nth(0).click();
+    await predictionCard.getByRole("button", { name: "Add a deadwood note" }).click();
     await predictionCard
-      .getByPlaceholder("Deadwood cover notes...")
+      .getByPlaceholder("Deadwood notes...")
       .fill("Deadwood prediction is fit for audit.");
     await predictionCard.getByText(/OK/).nth(1).click();
+    await predictionCard.getByRole("button", { name: "Add a tree cover note" }).click();
     await predictionCard
-      .getByPlaceholder("Forest cover notes...")
+      .getByPlaceholder("Tree cover notes...")
       .fill("Tree cover is usable.");
 
     const cogCard = (await section(page, "Dataset evaluation")).getByTestId("audit-cog");
@@ -198,6 +201,7 @@ test.describe("auditor local write flows", () => {
     // every section is answered, so the derived decision is Ready; confirm it
     await expect(finalAssessmentCard.getByText("Ready", { exact: true }).first()).toBeVisible();
     await finalAssessmentCard.getByRole("button", { name: "Confirm" }).click();
+    await finalAssessmentCard.getByRole("button", { name: "Add a note" }).click();
     await finalAssessmentCard
       .getByPlaceholder("Notes on the decision...")
       .fill("Auditor local write integration completed.");

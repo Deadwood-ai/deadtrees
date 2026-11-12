@@ -9,20 +9,23 @@ import { Fill, Stroke, Style, Text } from "ol/style";
 import type { IAuditCrop } from "../../../types/auditChecks";
 
 const format = new GeoJSON({ dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" });
-export const CROP_COLOR = "#7fd3e6";
+const CROP_COLOR = "#7fd3e6";
+/** A crop the check counted major: orange and dashed, so it does not rest on colour alone
+ * (red and green look alike to many people). */
+const FLAGGED_COLOR = "#ff8a00";
 
 interface UseCropSquaresOptions {
 	map: OLMap | null;
 	/** the crops in display order; their number is the position + 1 */
 	crops: IAuditCrop[] | null;
 	selectedId: number | null;
-	/** outline colour per crop id; CROP_COLOR when missing */
-	colors?: Record<number, string>;
+	/** crops the check counted major: drawn orange, thicker and dashed */
+	flagged?: Set<number>;
 	onSelect: (cropId: number) => void;
 }
 
 /** The crops a check judged as numbered squares on the audit map; a click selects one. */
-export function useCropSquares({ map, crops, selectedId, colors, onSelect }: UseCropSquaresOptions) {
+export function useCropSquares({ map, crops, selectedId, flagged, onSelect }: UseCropSquaresOptions) {
 	const layerRef = useRef<VectorLayer<VectorSource> | null>(null);
 	const [epoch, setEpoch] = useState(0);
 	const onSelectRef = useRef(onSelect);
@@ -57,15 +60,16 @@ export function useCropSquares({ map, crops, selectedId, colors, onSelect }: Use
 			crops.map((crop, i) => {
 				const feature = format.readFeature(crop.geometry) as Feature;
 				const selected = crop.id === selectedId;
-				const color = selected ? "#ffffff" : (colors?.[crop.id] ?? CROP_COLOR);
+				const marked = !!flagged?.has(crop.id);
+				const color = selected ? "#ffffff" : marked ? FLAGGED_COLOR : CROP_COLOR;
 				feature.set("cropId", crop.id);
 				feature.setStyle(
 					new Style({
 						// a near-transparent fill keeps the whole square clickable
 						fill: new Fill({ color: selected ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.01)" }),
-						stroke: new Stroke({ color, width: selected ? 4 : 2 }),
+						stroke: new Stroke({ color, width: selected ? 4 : marked ? 3 : 2, lineDash: marked && !selected ? [10, 6] : undefined }),
 						text: new Text({
-							text: String(i + 1),
+							text: marked ? `${i + 1} !` : String(i + 1),
 							font: "bold 14px system-ui, sans-serif",
 							fill: new Fill({ color: "#fff" }),
 							stroke: new Stroke({ color: "rgba(0,0,0,0.6)", width: 3 }),
@@ -75,7 +79,7 @@ export function useCropSquares({ map, crops, selectedId, colors, onSelect }: Use
 				return feature;
 			}),
 		);
-	}, [epoch, crops, selectedId, colors]);
+	}, [epoch, crops, selectedId, flagged]);
 }
 
 /** Zoom the map to one crop, keeping some context around it. */

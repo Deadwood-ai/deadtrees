@@ -1,8 +1,9 @@
 import type { ComponentProps, ReactNode } from "react";
+import type { IAuditSuggestion } from "../../../types/acquisitionDate";
 import { Form } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
-import type { IAuditChecks } from "../../../types/auditChecks";
+import type { AuditCheckKey, AuditLayer, IAuditChecks } from "../../../types/auditChecks";
 import {
 	AUDIT_SECTIONS,
 	EVALUATION_FLAGS,
@@ -23,6 +24,7 @@ import { COGQualityCard, OrthoFilePanel, PhenologyCard, PredictionQualityCard, T
 import { GeoreferencingCard } from "../GeoreferencingCard";
 import { createConditionalRule } from "../auditConstants";
 import { InlineLoadError } from "../../SectionStates";
+import AnswerDetails from "./AnswerDetails";
 import AuditSection from "./AuditSection";
 import CheckAnswer from "./CheckAnswer";
 import CheckSummary from "./CheckSummary";
@@ -30,6 +32,7 @@ import CropAnswers from "./CropAnswers";
 import EvaluationAnswer from "./EvaluationAnswer";
 import DerivedDecision from "./DerivedDecision";
 import type { IAuditCheckView } from "./auditCheckView";
+import { useAuditStepper } from "./useAuditStepper";
 
 /** A saved-audit field the reviewer's answer sets: it takes part in the form, and so in its
  * validation and saving, without a control of its own. */
@@ -41,6 +44,8 @@ interface AuditSectionsProps {
 	/** the check results failed to load: say so instead of showing "Not run yet" */
 	checksFailed: boolean;
 	onRetryChecks: () => void;
+	/** the audit suggestions and the fields the form took from them, for the steps' "suggested" tags */
+	prefill: { suggestions: IAuditSuggestion[]; prefilledFields: string[] };
 	/** the existing evidence panels, each section's body */
 	panels: {
 		georef: ComponentProps<typeof GeoreferencingCard>;
@@ -61,7 +66,7 @@ interface AuditSectionsProps {
 
 /** The audit sidebar: the derived decision, user reports and the six checks in order.
  * Opening a section puts the map into that check's mode. */
-export default function AuditSections({ datasetId, checks, checksFailed, onRetryChecks, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
+export default function AuditSections({ datasetId, checks, checksFailed, onRetryChecks, prefill, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
 	const { user } = useAuth();
 	const form = Form.useFormInstance<AuditFormValues>();
 	const phenology = Form.useWatch("has_valid_phenology", { form, preserve: true });
@@ -89,6 +94,14 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const evaluation = checks?.checks.dataset_evaluation;
 	const myEvaluation = evaluation ? myAnswer(people, user?.id, evaluation.run.id, { checkKey: "dataset_evaluation", layer: "image" }) : null;
 	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null });
+	const { goTo, next, back } = useAuditStepper({
+		datasetId,
+		checks,
+		view,
+		setView,
+		disabled,
+		openAnswered: view.section ? answeredAll(auditSection(view.section)) : false,
+	});
 
 	const answers = (s: IAuditSectionDef) => {
 		const evidence = evidenceOf(s);
@@ -109,6 +122,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 						/>
 					</div>
 				))}
+				<AnswerDetails section={s} evidence={evidence} people={people} />
 				{s.cropAnswers && (
 					<CropAnswers
 						datasetId={datasetId}
@@ -127,13 +141,16 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	// once the reviewer has answered a check, the answer decides its saved-audit field
 	const owned = answeredFormValues(checks, user?.id);
 	const answerOwned = (field: keyof AuditFormValues) => field in owned;
+	// the audit check made a call on the layer: its answer row is the step's answer
+	const ranOn = (checkKey: AuditCheckKey, layer: AuditLayer) => automatedVerdict(checks?.checks[checkKey], layer) !== null;
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
 		// where the check has run, one answer decides the step and sets the two saved-audit fields;
 		// without it the reviewer fills the two fields by hand
 		evaluation: evaluation ? (
 			<>
-				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} />
+				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} active={view.section === "evaluation"} />
+				<AnswerDetails section={auditSection("evaluation")} evidence={evaluation} people={people} />
 				{EVALUATION_FLAGS.map(
 					({ field }) =>
 						field && (
@@ -160,7 +177,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		georef: (
 			<>
 				{answers(auditSection("georef"))}
-				<GeoreferencingCard {...panels.georef} answerOwned={answerOwned("is_georeferenced")} />
+				<GeoreferencingCard {...panels.georef} byCheck={ranOn("georef", "georef")} />
 			</>
 		),
 		date: (
@@ -173,8 +190,11 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		prediction: (
 			<>
 				{answers(auditSection("prediction"))}
-				<div className="mb-1 text-xs font-medium">Saved audit ratings</div>
-				<PredictionQualityCard answerOwned={{ deadwood: answerOwned("deadwood_quality"), forestCover: answerOwned("forest_cover_quality") }} />
+				<PredictionQualityCard
+					suggestions={prefill.suggestions}
+					prefilledFields={prefill.prefilledFields}
+					byCheck={{ deadwood: ranOn("prediction_quality", "deadwood"), forestCover: ranOn("prediction_quality", "forest_cover") }}
+				/>
 			</>
 		),
 	};
@@ -197,10 +217,23 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				</div>
 			)}
 			{AUDIT_SECTIONS.map((s, i) => (
-				<AuditSection key={s.id} number={i + 1} title={s.title} status={statuses[s.id]} open={view.section === s.id} onToggle={() => open(s.id)}>
+				<AuditSection
+					key={s.id}
+					number={i + 1}
+					title={s.title}
+					status={statuses[s.id]}
+					open={view.section === s.id}
+					onToggle={() => open(s.id)}
+					onBack={back(s.id)}
+					onNext={() => goTo(next(s.id))}
+					nextLabel={next(s.id) ? "Next step" : "Done: review and save"}
+				>
 					{bodies[s.id]}
 				</AuditSection>
 			))}
+			<div className="mt-2 px-2 text-[11px] text-gray-400" data-testid="audit-shortcuts">
+				Keys: Enter take the suggestion and go on · Shift+Enter back · K keep · X exclude · n / p crops · Ctrl+S save
+			</div>
 		</>
 	);
 }

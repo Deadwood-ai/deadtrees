@@ -20,9 +20,10 @@ export const audit = () => supabase.schema("audit");
 /** PostgREST answers this while the audit schema is not in its exposed schemas. */
 export const SCHEMA_NOT_EXPOSED = "PGRST106";
 
-/** The columns the page reads of an assessment; the model's raw reply and likelihoods stay on the server. */
+/** The columns the page reads of an assessment; the model's raw reply stays on the server. The major
+ * likelihood comes along so the page can mark the crops the check counted major (utils/cropCalls). */
 const ASSESSMENT_COLUMNS =
-  "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, reason_code, reason_text, details";
+  "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, major_likelihood, reason_code, reason_text, details";
 export const QUEUE_COLUMNS = "dataset_id, check_key, layer, run_id, verdict, reason";
 
 export const auditChecksKey = (datasetId: number | undefined) => ["audit-checks", datasetId];
@@ -39,7 +40,7 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
   // most datasets have no check yet: one request tells
   if (!runIds.length) return { available: true, checks: {}, people: [] };
   const [runs, automated, queue, people, crops, images] = await Promise.all([
-    audit().from("runs").select("id, check_key, inputs, evidence").in("id", runIds),
+    audit().from("runs").select("id, check_key, inputs, evidence, version:check_versions(config)").in("id", runIds),
     audit().from("current_assessments").select(ASSESSMENT_COLUMNS).eq("dataset_id", datasetId),
     audit().from("review_queue").select(QUEUE_COLUMNS).eq("dataset_id", datasetId),
     audit()
@@ -58,7 +59,8 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
     images: unwrap(images) as IAuditImage[],
   };
   const checks: IAuditChecks["checks"] = {};
-  for (const run of unwrap(runs) as IAuditRun[]) checks[run.check_key] = runEvidence(run, dataset);
+  // the embedded check version is one row (many-to-one), typed as a list by the client
+  for (const run of unwrap(runs) as unknown as IAuditRun[]) checks[run.check_key] = runEvidence(run, dataset);
   return { available: true, checks, people: await withEmails(unwrap(people) as IAuditAssessment[]) };
 }
 

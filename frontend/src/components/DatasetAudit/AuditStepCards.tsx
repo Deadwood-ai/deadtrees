@@ -6,6 +6,9 @@ import {
 } from "@ant-design/icons";
 import { createConditionalRule } from "./auditConstants";
 import { imageFacts } from "../../utils/imageFacts";
+import NoteField from "./checks/NoteField";
+import type { IAuditSuggestion } from "../../types/acquisitionDate";
+import { SuggestedTag } from "./AcquisitionDateCard";
 import { IDataset } from "../../types/dataset";
 import { OrthoMetadata } from "../../hooks/useDatasetAudit";
 import { DatasetFlag, FlagStatus } from "../../types/flags";
@@ -149,6 +152,9 @@ export function UserFlagsCard({ flags, isFlagsLoading, isUpdatingFlag, datasetId
 		);
 	};
 
+	// nothing reported: no box; it appears as soon as a user reports something
+	if (!isFlagsLoading && flags.length === 0) return null;
+
 	return (
 		<Card size="small" className="mb-3 shadow-sm">
 			<div className="mb-2 flex items-center justify-between">
@@ -243,29 +249,38 @@ export function PhenologyCard({ dataset, phenologyData, isPhenologyLoading, onCo
 				</Radio.Group>
 			</Form.Item>
 
-			<Form.Item name="phenology_notes" className="mb-0">
-				<TextArea rows={2} placeholder="Seasonal observations..." className="text-xs" />
-			</Form.Item>
+			<NoteField name="phenology_notes" placeholder="Seasonal observations..." label="Add a phenology note" />
 		</div>
 	);
 }
 
 // === Prediction quality: the saved per-layer ratings ===
-/** `answerOwned`: the reviewer answered that layer's check above, and the answer decides its rating. */
-export function PredictionQualityCard({ answerOwned }: { answerOwned?: { deadwood: boolean; forestCover: boolean } }) {
+/** `byCheck`: the audit check ran on that layer; its answer row above decides the rating. */
+export function PredictionQualityCard({
+	suggestions,
+	prefilledFields,
+	byCheck,
+}: {
+	suggestions: IAuditSuggestion[];
+	prefilledFields: string[];
+	/** the audit check ran on that layer: its answer row above replaces the rating radio */
+	byCheck?: { deadwood: boolean; forestCover: boolean };
+}) {
 	return (
 		<div>
 			{/* Deadwood cover */}
 			<div className="mb-3">
-				<div className="mb-1 flex items-center">
+				<div className={byCheck?.deadwood ? "hidden" : "mb-1 flex items-center"}>
 					<Text className="text-xs font-medium">Deadwood cover segmentation</Text>
+					<SuggestedTag field="deadwood_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
 				</div>
 				<Form.Item
 					name="deadwood_quality"
 					className="mb-1"
+					hidden={byCheck?.deadwood}
 					rules={createConditionalRule("Please rate deadwood quality")}
 				>
-					<Radio.Group disabled={answerOwned?.deadwood || undefined}>
+					<Radio.Group>
 						<Space size="large">
 							<Radio value="great">🟢 Great</Radio>
 							<Radio value="sentinel_ok">🟡 OK</Radio>
@@ -273,22 +288,22 @@ export function PredictionQualityCard({ answerOwned }: { answerOwned?: { deadwoo
 						</Space>
 					</Radio.Group>
 				</Form.Item>
-				<Form.Item name="deadwood_notes" className="mb-0">
-					<TextArea rows={1} placeholder="Deadwood cover notes..." className="text-xs" />
-				</Form.Item>
+				<NoteField name="deadwood_notes" placeholder="Deadwood notes..." label="Add a deadwood note" />
 			</div>
 
 			{/* Tree cover */}
 			<div>
-				<div className="mb-1 flex items-center">
+				<div className={byCheck?.forestCover ? "hidden" : "mb-1 flex items-center"}>
 					<Text className="text-xs font-medium">Tree cover segmentation</Text>
+					<SuggestedTag field="forest_cover_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
 				</div>
 				<Form.Item
 					name="forest_cover_quality"
 					className="mb-1"
+					hidden={byCheck?.forestCover}
 					rules={[{ required: false, message: "Please rate tree cover quality" }]}
 				>
-					<Radio.Group disabled={answerOwned?.forestCover || undefined}>
+					<Radio.Group>
 						<Space size="large">
 							<Radio value="great">🟢 Great</Radio>
 							<Radio value="sentinel_ok">🟡 OK</Radio>
@@ -296,9 +311,7 @@ export function PredictionQualityCard({ answerOwned }: { answerOwned?: { deadwoo
 						</Space>
 					</Radio.Group>
 				</Form.Item>
-				<Form.Item name="forest_cover_notes" className="mb-0">
-					<TextArea rows={1} placeholder="Forest cover notes..." className="text-xs" />
-				</Form.Item>
+				<NoteField name="forest_cover_notes" placeholder="Tree cover notes..." label="Add a tree cover note" />
 			</div>
 		</div>
 	);
@@ -405,59 +418,75 @@ export function OrthoFilePanel({
 	const isViewOnlyDataset = dataset.data_access === "viewonly";
 	const facts = imageFacts(orthoMetadata?.ortho_info);
 
+	// one line to read at a glance; the table, the raw metadata and the download behind "File details"
+	const glance = facts.filter((f) => ["Size", "Resolution", "Bands", "File"].includes(f.label)).map((f) => f.value);
+	const warnings = facts.filter((f) => f.tone === "warn");
+
 	return (
-		<div className="flex flex-col gap-2">
+		<div className="flex flex-col gap-1">
 			{isOrthoLoading ? (
 				<InlineSkeleton label="Loading technical metadata" className="h-8 w-full" />
 			) : (
-				<div className="flex items-start gap-3 rounded-md bg-white p-2" data-testid="audit-image-facts">
+				<div className="flex items-center gap-2 text-xs" data-testid="audit-image-facts">
 					{thumbnailUrl && (
-						<Image src={thumbnailUrl} alt="Dataset thumbnail" width={76} height={76} style={{ objectFit: "cover" }} className="rounded border" />
+						<Image src={thumbnailUrl} alt="Dataset thumbnail" width={40} height={40} style={{ objectFit: "cover" }} className="rounded border" />
 					)}
-					{facts.length ? (
-						<dl className="m-0 grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-							{facts.map((fact, i) => (
-								<Fragment key={i}>
-									<dt className="text-gray-500">{fact.label}</dt>
-									<dd className={`m-0 tabular-nums ${fact.tone === "warn" ? "font-medium text-amber-800" : fact.tone === "ok" ? "text-green-800" : ""}`}>
-										{fact.value}
-									</dd>
-								</Fragment>
-							))}
-						</dl>
-					) : (
-						<div className="text-xs text-gray-500">No technical metadata available</div>
-					)}
+					<div className="min-w-0 flex-1">
+						<div className="text-gray-700">{glance.length ? glance.join(" · ") : "No technical metadata available"}</div>
+						{warnings.map((w, i) => (
+							<div key={i} className="font-medium text-amber-800">
+								{w.label}: {w.value}
+							</div>
+						))}
+					</div>
 				</div>
 			)}
-			{orthoMetadata?.ortho_info && (
-				<Collapse size="small" ghost>
-					<Panel header={<span className="text-xs">All technical metadata</span>} key="1">
-						<div className="max-h-64 overflow-y-auto">
-							<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">{JSON.stringify(orthoMetadata.ortho_info, null, 2)}</pre>
+			<Collapse size="small" ghost className="-mx-3">
+				<Panel header={<span className="text-xs text-gray-500">File details</span>} key="details">
+					<div className="flex flex-col gap-2">
+						{facts.length > 0 && (
+							<dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+								{facts.map((fact, i) => (
+									<Fragment key={i}>
+										<dt className="text-gray-500">{fact.label}</dt>
+										<dd className={`m-0 tabular-nums ${fact.tone === "warn" ? "font-medium text-amber-800" : fact.tone === "ok" ? "text-green-800" : ""}`}>
+											{fact.value}
+										</dd>
+									</Fragment>
+								))}
+							</dl>
+						)}
+						{orthoMetadata?.ortho_info && (
+							<Collapse size="small" ghost>
+								<Panel header={<span className="text-xs">All technical metadata</span>} key="1">
+									<div className="max-h-64 overflow-y-auto">
+										<pre className="whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">{JSON.stringify(orthoMetadata.ortho_info, null, 2)}</pre>
+									</div>
+								</Panel>
+							</Collapse>
+						)}
+						<div>
+							<Tooltip
+								title={
+									isViewOnlyDataset
+										? "View-only dataset: orthophoto download is restricted"
+										: "Download orthophoto for local testing"
+								}
+							>
+								<Button
+									size="small"
+									icon={<DownloadOutlined />}
+									disabled={isDownloading || isViewOnlyDataset}
+									loading={isDownloading && currentDownloadId === `${dataset.id}-ortho`}
+									onClick={() => onStartDownload(dataset)}
+								>
+									Download Orthophoto
+								</Button>
+							</Tooltip>
 						</div>
-					</Panel>
-				</Collapse>
-			)}
-			<div>
-				<Tooltip
-					title={
-						isViewOnlyDataset
-							? "View-only dataset: orthophoto download is restricted"
-							: "Download orthophoto for local testing"
-					}
-				>
-					<Button
-						size="small"
-						icon={<DownloadOutlined />}
-						disabled={isDownloading || isViewOnlyDataset}
-						loading={isDownloading && currentDownloadId === `${dataset.id}-ortho`}
-						onClick={() => onStartDownload(dataset)}
-					>
-						Download Orthophoto
-					</Button>
-				</Tooltip>
-			</div>
+					</div>
+				</Panel>
+			</Collapse>
 		</div>
 	);
 }
