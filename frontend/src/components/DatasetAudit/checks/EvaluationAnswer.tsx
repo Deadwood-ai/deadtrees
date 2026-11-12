@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Form, Input, message } from "antd";
+import { Button, Checkbox, Form, Input, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
@@ -14,6 +14,7 @@ import {
 	othersAnswers,
 	type EvaluationFlag,
 } from "../../../utils/auditChecks";
+import ShowNow from "./ShowNow";
 
 interface EvaluationAnswerProps {
 	datasetId: number;
@@ -27,23 +28,6 @@ const LAYER = "image" as const;
 const SECTION = auditSection("evaluation");
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
 const keeps = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
-
-const call = (on: boolean, tone: "keep" | "exclude") =>
-	`flex min-h-[52px] flex-1 cursor-pointer flex-col items-center justify-center rounded-lg border px-2 py-1.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
-		on
-			? tone === "keep"
-				? "border-green-700 bg-green-50 text-green-800"
-				: "border-red-600 bg-red-50 text-red-700"
-			: "border-gray-300 bg-white text-gray-900 hover:border-gray-500"
-	}`;
-const chip = (on: boolean, tone: "bad" | "warn") =>
-	`min-h-[28px] cursor-pointer rounded-full border px-2.5 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
-		on
-			? tone === "bad"
-				? "border-red-600 bg-red-50 font-medium text-red-700"
-				: "border-amber-600 bg-amber-50 font-medium text-amber-800"
-			: "border-gray-300 bg-white text-gray-800 hover:border-gray-500"
-	}`;
 
 /** Step 1 asks one thing: keep the dataset or exclude it. One click answers it; picking what
  * the check said is agreeing, picking the other is disagreeing. Excluding needs the reason. A
@@ -150,9 +134,9 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 					<div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Why exclude</div>
 					<div className="flex flex-wrap gap-1.5">
 						{SECTION.reasons.map((r) => (
-							<button key={r.code} type="button" className={chip(reason === r.code, "bad")} aria-pressed={reason === r.code} onClick={() => setReason(r.code)}>
+							<Tag.CheckableTag key={r.code} checked={reason === r.code} onChange={() => setReason(r.code)}>
 								{r.label}
-							</button>
+							</Tag.CheckableTag>
 						))}
 					</div>
 					<Input size="small" placeholder="Note (optional)" aria-label="Note" value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} />
@@ -169,14 +153,19 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 				<div>
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Your call</div>
 					<div className="flex gap-2">
-						<button type="button" className={call(false, "keep")} disabled={disabled || isPending} onClick={() => keep(draft)}>
-							Keep
-							<span className="text-[11px] font-normal text-gray-500">{hint("keep")}</span>
-						</button>
-						<button type="button" className={call(false, "exclude")} disabled={disabled || isPending} onClick={() => setExcluding(true)}>
-							Exclude
-							<span className="text-[11px] font-normal text-gray-500">{hint("exclude")}</span>
-						</button>
+						{(["keep", "exclude"] as const).map((answer) => (
+							<Button
+								key={answer}
+								className="!h-auto flex-1 !py-1.5"
+								disabled={disabled || isPending}
+								onClick={() => (answer === "keep" ? keep(draft) : setExcluding(true))}
+							>
+								<span className="flex flex-col items-center leading-tight">
+									<span className="font-semibold">{answer === "keep" ? "Keep" : "Exclude"}</span>
+									<span className="text-[11px] text-gray-500">{hint(answer)}</span>
+								</span>
+							</Button>
+						))}
 					</div>
 				</div>
 			)}
@@ -186,16 +175,9 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Problems to fix, if any</div>
 					<div className="flex flex-wrap gap-1.5">
 						{EVALUATION_FLAGS.map(({ flag, label }) => (
-							<button
-								key={flag}
-								type="button"
-								className={chip(flags.includes(flag), "warn")}
-								aria-pressed={flags.includes(flag)}
-								disabled={disabled || isPending}
-								onClick={() => toggle(flag)}
-							>
+							<Checkbox key={flag} checked={flags.includes(flag)} disabled={disabled || isPending} onChange={() => toggle(flag)}>
 								{label}
-							</button>
+							</Checkbox>
 						))}
 					</div>
 					{EVALUATION_FLAGS.filter((f) => f.notes && flags.includes(f.flag)).map(({ flag, notes, inText }) => (
@@ -215,9 +197,7 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 				) : (
 					<>
 						The models' and other reviewers' answers appear after yours.{" "}
-						<button type="button" className="cursor-pointer border-0 bg-transparent p-0 text-[11px] text-blue-700 underline" onClick={() => setShowOthers(true)}>
-							Show now
-						</button>
+						<ShowNow onClick={() => setShowOthers(true)} />
 					</>
 				)}
 			</div>

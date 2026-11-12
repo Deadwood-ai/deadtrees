@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { message } from "antd";
+import { Button, Radio, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
@@ -81,9 +81,9 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	if (!crops.length) return <div className="text-xs text-gray-500">This check stored no crops.</div>;
 	if (cropId === null || index < 0) {
 		return (
-			<button type="button" className="cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-xs" onClick={() => step(1)}>
+			<Button block onClick={() => step(1)}>
 				Start with crop 1 of {crops.length} (or click a square on the map)
-			</button>
+			</Button>
 		);
 	}
 
@@ -98,17 +98,16 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 					<div key={layer} className="flex flex-col gap-1">
 						<div className="flex flex-wrap items-center gap-1.5">
 							<span className="w-20 text-xs">{LAYER_LABELS[layer]}</span>
-							{section.verdicts.map((v, i) => (
-								<button
-									key={v}
-									type="button"
-									disabled={disabled || isPending}
-									onClick={() => answer([layer], v)}
-									className={`min-h-[32px] cursor-pointer rounded-md border px-2 text-xs disabled:cursor-not-allowed disabled:opacity-60 ${mine?.verdict === v ? "border-gray-900 bg-gray-900 text-white" : "border-gray-300 bg-white"}`}
-								>
-									{i + 1} {verdictLabel(checkKey, v)}
-								</button>
-							))}
+							<Radio.Group
+								size="small"
+								optionType="button"
+								buttonStyle="solid"
+								value={mine?.verdict}
+								disabled={disabled || isPending}
+								aria-label={`${LAYER_LABELS[layer]} on this crop`}
+								onChange={(e) => void answer([layer], e.target.value as AuditVerdict)}
+								options={section.verdicts.map((v, i) => ({ value: v, label: `${i + 1} ${verdictLabel(checkKey, v)}` }))}
+							/>
 						</div>
 						{mine && (
 							<div className="pl-20 text-[11px] text-gray-500">
