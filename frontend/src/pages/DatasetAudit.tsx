@@ -58,7 +58,7 @@ const CHECK_TABS: readonly AuditTab[] = ["to-review", "disagreements"];
 
 // one line under the tabs saying what each list holds
 const TAB_DESCRIPTIONS: Record<AuditTab, string> = {
-	"to-review": "Automated check results waiting for a person. Answer each one: agree, or mark the check wrong with a reason.",
+	"to-review": "Datasets whose automated check results wait for a person, one row per dataset. Open one and answer each check: agree, or say the check is wrong.",
 	disagreements: "Reviewers disagree with each other or with the models. These go to adjudication and become benchmark cases.",
 	pending: "Datasets that finished processing and have not been audited yet.",
 	completed: "Datasets with a saved audit. Use the filters to find earlier decisions by status, auditor or outputs.",

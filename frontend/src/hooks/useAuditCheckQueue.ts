@@ -3,6 +3,7 @@ import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { QUEUE_COLUMNS, SCHEMA_NOT_EXPOSED, audit } from "./useAuditChecks";
 import type { AuditCheckKey, AuditLayer, AuditVerdict, IAuditQueueRow } from "../types/auditChecks";
+import { reviewKey } from "../utils/auditReviewList";
 
 /** One row of audit.disagreements: a target where people, or people and the models, disagree. */
 export interface IAuditDisagreement {
@@ -29,7 +30,6 @@ export interface IAuditReviewList extends IAuditList<IAuditQueueRow> {
   reviews: Record<string, { count: number; mine: boolean }>;
 }
 
-export const reviewKey = (r: { dataset_id: number; check_key: string; layer: string }) => `${r.dataset_id}:${r.check_key}:${r.layer}`;
 
 const NOT_AVAILABLE = { available: false, rows: [], total: 0 };
 const ANSWER_PAGE = 1000;
