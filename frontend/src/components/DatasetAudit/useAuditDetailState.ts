@@ -26,7 +26,9 @@ import {
 } from "../../hooks/useAcquisitionDateEstimate";
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
 import { answeredFormValues } from "../../utils/auditChecks";
-import { useAuditChecks } from "../../hooks/useAuditChecks";
+import { REPROCESS_DRAFT, answersWithSave, withCheckSuggestions } from "../../utils/auditPrefill";
+import { withoutUncertainDate } from "../../utils/acquisitionDate";
+import { useAuditChecks, useSaveAuditAnswers } from "../../hooks/useAuditChecks";
 import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
 import { supabase } from "../../hooks/useSupabase";
@@ -144,10 +146,11 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { data: flags = [], isLoading: isFlagsLoading } = useDatasetFlags(dataset.id);
 	const { mutateAsync: updateFlagStatusWithLease, isPending: isUpdatingFlag } = useUpdateFlagStatus();
 	const { mutateAsync: saveAudit, isPending: isSavingAudit } = useSaveDatasetAudit();
+	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
 	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
-	const { data: acquisitionDateEstimate } = useAcquisitionDateEstimate(dataset.id);
+	const { data: acquisitionDateEstimate, isLoading: isEstimateLoading } = useAcquisitionDateEstimate(dataset.id);
 	const { data: georefCheck } = useGeorefCheck(dataset.id);
 	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
 	const { data: auditSuggestionsData } = useAuditSuggestions(dataset.id);
@@ -155,8 +158,12 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const auditChecksQuery = useAuditChecks(dataset.id);
 	const auditChecks = auditChecksQuery.data;
 	const auditReviewItems = reviewItems ?? NO_REVIEW_ITEMS;
-	// stable fallback: a fresh [] per render would re-run the prefill effect and reset edits
-	const auditSuggestions = auditSuggestionsData ?? NO_SUGGESTIONS;
+	// The stored suggestions plus the checks' calls. Memoised: a fresh list per render would re-run
+	// the prefill effect and reset edits.
+	const auditSuggestions = useMemo(
+		() => withCheckSuggestions(withoutUncertainDate(auditSuggestionsData ?? NO_SUGGESTIONS, acquisitionDateEstimate), auditChecks, dataset.id),
+		[auditSuggestionsData, acquisitionDateEstimate, auditChecks, dataset.id],
+	);
 
 	// Navigation context
 	const { getNextDatasetId, currentIndex, totalCount, listPath } = useAuditNavigation();
@@ -254,16 +261,16 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const prefilledForRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (prefilledForRef.current === dataset.id) return;
-		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined) return;
+		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined || auditChecksQuery.isLoading || isEstimateLoading) return;
 		prefilledForRef.current = dataset.id;
 		const { values: suggested, fields } = suggestedAuditValues(
 			auditData as Record<string, unknown> | null,
-			auditSuggestionsData,
+			auditSuggestions,
 			reviewItems.flatMap((r) => r.fields),
 		);
 		form.setFieldsValue({ ...suggested, ...answered });
 		setPrefilledFields(fields);
-	}, [dataset.id, auditData, auditSuggestionsData, reviewItems, answered, form]);
+	}, [dataset.id, auditData, auditSuggestionsData, auditSuggestions, auditChecksQuery.isLoading, isEstimateLoading, reviewItems, answered, form]);
 
 	// The form follows the answers whenever they or the saved audit load or change,
 	// so an answer and its saved field cannot disagree. Declared after the two
@@ -332,13 +339,31 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		try {
 			setIsSubmitting(true);
 
+			// the form's store also holds drafts that have no column (step 1's reprocessing draft)
+			const auditValues: Record<string, unknown> = { ...values };
+			delete auditValues[REPROCESS_DRAFT];
 			const auditPayload = {
-				...values,
+				...auditValues,
 				dataset_id: dataset.id,
 				aoi_done: !!currentAOIGeometry.current,
 			};
 
 			const isCompletion = !auditData;
+			// Saving is your review of every step: the checks' calls you left as they are become your
+			// answers, marked as given with the save. They go first: if they fail, nothing is saved and
+			// you stay on the page to try again; if the audit then fails, the answers are already yours
+			// and a second save skips them. The whole store: it holds step 1's reprocessing draft.
+			const withSave = answersWithSave(auditChecks, user?.id, form.getFieldsValue(true), dataset.id);
+			if (withSave.length) {
+				try {
+					await saveAnswers(withSave);
+				} catch (error) {
+					console.debug("Failed to store the answers given with the save", error);
+					setNavigateToNext(false);
+					message.error("Your answers on the automated checks were not saved, so the audit was not saved either. Please try again.");
+					return;
+				}
+			}
 			await saveAudit({ values: auditPayload, leaseId });
 			trackAppEvent("audit_completed", {
 				dataset_id: dataset.id,

@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
-import { message } from "antd";
+import { useMemo } from "react";
+import { Button, Radio, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
-import { LAYER_LABELS, myAnswer, orderedCrops, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { LAYER_LABELS, myAnswer, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { cropCalls, cropsForReview } from "../../../utils/cropCalls";
+import { useAuditShortcuts } from "./useAuditShortcuts";
 
 interface CropAnswersProps {
 	datasetId: number;
@@ -18,16 +20,17 @@ interface CropAnswersProps {
 	active: boolean;
 }
 
-const typing = (target: EventTarget | null) =>
-	target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
-
 /** Per-crop verdicts on each layer the check judged: one person row per crop and layer.
- * n / p step through the crops, space marks every layer fine and moves on. */
+ * n / p step through the crops, space marks every layer fine and 1 to 3 give every layer that
+ * verdict, both moving on. */
 export default function CropAnswers({ datasetId, section, evidence, people, cropId, onSelectCrop, disabled, active }: CropAnswersProps) {
 	const { user } = useAuth();
 	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
 	const checkKey = section.checkKey!;
-	const crops = orderedCrops(evidence);
+	// the order the map numbers them: the crops the check counted major first
+	const calls = useMemo(() => cropCalls(evidence, section.layers), [evidence, section.layers]);
+	const crops = cropsForReview(evidence, calls);
+	const flagged = crops.filter((c) => calls.get(c.id) === "major");
 	const index = crops.findIndex((c) => c.id === cropId);
 	const runId = evidence.run.id;
 	const target = (layer: AuditLayer) => ({ checkKey, layer, cropId });
@@ -60,37 +63,53 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 		if (next !== null) onSelectCrop(next);
 	};
 
-	const keys = useRef({ step, answer, disabled, cropId, layers: section.layers });
-	keys.current = { step, answer, disabled, cropId, layers: section.layers };
-	useEffect(() => {
-		if (!active) return;
-		const onKey = (event: KeyboardEvent) => {
-			if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
-			const k = keys.current;
-			if (event.key === "n") k.step(1);
-			else if (event.key === "p") k.step(-1);
-			else if (event.key === " " && k.cropId !== null && !k.disabled) {
-				event.preventDefault();
-				void k.answer(k.layers, "ok").then((saved) => saved && k.step(1));
-			}
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [active]);
+	// n / p step; space marks every layer fine and 1 to 3 give every layer that verdict, both moving on
+	const answerAndStep = (verdict: AuditVerdict | undefined) => {
+		if (cropId === null || disabled || !verdict) return;
+		void answer(section.layers, verdict).then((saved) => saved && step(1));
+	};
+	useAuditShortcuts(
+		{
+			n: () => step(1),
+			p: () => step(-1),
+			" ": () => answerAndStep("ok"),
+			"1": () => answerAndStep(section.verdicts[0]),
+			"2": () => answerAndStep(section.verdicts[1]),
+			"3": () => answerAndStep(section.verdicts[2]),
+		},
+		active,
+	);
 
 	if (!crops.length) return <div className="text-xs text-gray-500">This check stored no crops.</div>;
+	const flaggedLine = flagged.length > 0 && (
+		<div className="flex flex-wrap items-center gap-1 text-xs">
+			<span className="text-gray-600">Counted major by the check:</span>
+			{flagged.map((c) => (
+				<Button key={c.id} size="small" danger type={c.id === cropId ? "primary" : "default"} onClick={() => onSelectCrop(c.id)}>
+					Crop {crops.findIndex((o) => o.id === c.id) + 1}
+				</Button>
+			))}
+		</div>
+	);
 	if (cropId === null || index < 0) {
 		return (
-			<button type="button" className="cursor-pointer rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-xs" onClick={() => step(1)}>
-				Start with crop 1 of {crops.length} (or click a square on the map)
-			</button>
+			<div className="flex flex-col gap-2">
+				{flaggedLine}
+				<Button block onClick={() => step(1)}>
+					Start with crop 1 of {crops.length} (or click a square on the map)
+				</Button>
+			</div>
 		);
 	}
+	const call = calls.get(cropId) ?? null;
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg bg-white p-2.5">
+			{flaggedLine}
 			<div className="text-xs font-semibold">
-				Crop {index + 1} of {crops.length} · n / p to step, space = all fine
+				Crop {index + 1} of {crops.length}
+				{call && <span className={call === "major" ? "text-red-600" : "text-gray-500"}> · the check: {call === "major" ? "major errors" : "fine"}</span>}
+				<span className="font-normal text-gray-500"> · n / p to step, 1 to 3 = that verdict on both layers, space = all fine</span>
 			</div>
 			{section.layers.map((layer) => {
 				const mine = myAnswer(people, user?.id, runId, target(layer));
@@ -98,17 +117,16 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 					<div key={layer} className="flex flex-col gap-1">
 						<div className="flex flex-wrap items-center gap-1.5">
 							<span className="w-20 text-xs">{LAYER_LABELS[layer]}</span>
-							{section.verdicts.map((v, i) => (
-								<button
-									key={v}
-									type="button"
-									disabled={disabled || isPending}
-									onClick={() => answer([layer], v)}
-									className={`min-h-[32px] cursor-pointer rounded-md border px-2 text-xs disabled:cursor-not-allowed disabled:opacity-60 ${mine?.verdict === v ? "border-gray-900 bg-gray-900 text-white" : "border-gray-300 bg-white"}`}
-								>
-									{i + 1} {verdictLabel(checkKey, v)}
-								</button>
-							))}
+							<Radio.Group
+								size="small"
+								optionType="button"
+								buttonStyle="solid"
+								value={mine?.verdict}
+								disabled={disabled || isPending}
+								aria-label={`${LAYER_LABELS[layer]} on this crop`}
+								onChange={(e) => void answer([layer], e.target.value as AuditVerdict)}
+								options={section.verdicts.map((v, i) => ({ value: v, label: `${i + 1} ${verdictLabel(checkKey, v)}` }))}
+							/>
 						</div>
 						{mine && (
 							<div className="pl-20 text-[11px] text-gray-500">

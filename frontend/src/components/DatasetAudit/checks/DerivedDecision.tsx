@@ -1,9 +1,9 @@
-import { Button, Form, Input, Radio } from "antd";
+import { Button, Form, Radio } from "antd";
+import NoteField from "./NoteField";
 import type { AuditFormValues, DatasetDisposition } from "../../../hooks/useDatasetAudit";
 import type { AuditVerdict } from "../../../types/auditChecks";
 import { DISPOSITION_LABELS, deriveDecision } from "../../../utils/auditChecks";
 
-const { TextArea } = Input;
 
 interface DerivedDecisionProps {
 	/** the dataset evaluation's call: the reviewer's answer, else the check's */
@@ -33,6 +33,9 @@ export default function DerivedDecision({ evaluation, needsYou }: DerivedDecisio
 		.filter(Boolean)
 		.join(" · ");
 
+	// Fix, Exclude and overriding the derived decision need a note; otherwise it is optional
+	const needsNotes = chosen === "fixable_issues" || chosen === "exclude_completely" || (!!chosen && !!disposition && chosen !== disposition);
+
 	return (
 		<div className={`mb-3 rounded-lg px-3 py-2.5 ${BOX[disposition ?? "open"]}`} data-testid="audit-decision">
 			<div className="text-[11px] uppercase tracking-wide opacity-80">Decision, derived from the checks</div>
@@ -61,9 +64,14 @@ export default function DerivedDecision({ evaluation, needsYou }: DerivedDecisio
 			{chosen && disposition && chosen !== disposition && (
 				<div className="mt-1 text-xs">You override the derived decision ({DISPOSITION_LABELS[disposition]}). Say why in the notes.</div>
 			)}
-			<Form.Item name="notes" className="mb-0 mt-2">
-				<TextArea rows={1} placeholder={chosen === "fixable_issues" || chosen === "exclude_completely" ? "Notes (required for Fix and Exclude): what needs fixing or why it goes" : "Notes on the decision..."} className="text-xs" />
-			</Form.Item>
+			<div className="mt-2">
+				<NoteField
+					name="notes"
+					required={needsNotes}
+					label="Add a note"
+					placeholder={needsNotes ? "Notes (required for Fix, Exclude and an override): what needs fixing or why it goes" : "Notes on the decision..."}
+				/>
+			</div>
 		</div>
 	);
 }

@@ -5,7 +5,6 @@ import {
   answeredFormValues,
   auditSection,
   automatedVerdict,
-  cropModelVerdict,
   deriveDecision,
   evaluationAnswerText,
   evaluationFlags,
@@ -19,7 +18,6 @@ import {
   sectionOfField,
   sectionStatus,
   stepCrop,
-  wrongVerdict,
 } from "./auditChecks";
 
 const row = (overrides: Partial<IAuditAssessment>): IAuditAssessment => ({
@@ -123,10 +121,11 @@ describe("legacySectionStatus", () => {
   const inputs = { hasAOI: false, phenology: undefined, georefCheck: null, dateEstimate: null, reviewItems: [] };
   const georefCheck = { decision: "poor", evidence_level: "gross", reason: "gross_offset", p90_m: 40, reference_evidence: [] } as unknown as IGeorefCheck;
 
-  it("says not run yet for a check without any result", () => {
-    for (const id of ["evaluation", "georef", "date", "prediction"] as const) {
+  it("says not run yet for a check without any result, and manual for a date without an estimate", () => {
+    for (const id of ["evaluation", "georef", "prediction"] as const) {
       expect(legacySectionStatus(id, inputs)).toEqual({ label: "Not run yet", tone: "todo", needsYou: false });
     }
+    expect(legacySectionStatus("date", inputs)).toEqual({ label: "Manual", tone: "todo", needsYou: false });
   });
 
   it("reads the AOI and the manual phenology answer", () => {
@@ -144,9 +143,6 @@ describe("legacySectionStatus", () => {
 });
 
 describe("verdicts and the saved audit", () => {
-  it("flips a two-way call and refuses an unsure one", () => {
-    expect([wrongVerdict("ok"), wrongVerdict("major"), wrongVerdict("minor"), wrongVerdict("unsure")]).toEqual(["major", "ok", "ok", null]);
-  });
 
   it("maps an answer onto the saved-audit field it decides", () => {
     expect(formValuesForVerdict("georef", "georef", "major")).toEqual({ is_georeferenced: false });
@@ -326,16 +322,6 @@ describe("crops", () => {
   it("numbers the exclude set first", () => {
     const ordered = orderedCrops({ crops: [crop(5, ["training"]), crop(9, ["exclude"]), crop(2, ["training", "exclude"])] });
     expect(ordered.map((c) => c.id)).toEqual([2, 9, 5]);
-  });
-
-  it("takes the models' worst call on a crop", () => {
-    const automated = [
-      row({ crop_id: 2, layer: "deadwood", verdict: "minor" }),
-      row({ crop_id: 2, layer: "forest_cover", verdict: "major" }),
-      row({ crop_id: 3, layer: "deadwood", verdict: "major" }),
-    ];
-    expect(cropModelVerdict({ automated }, 2, ["deadwood"])).toBe("minor");
-    expect(cropModelVerdict({ automated }, 2, ["deadwood", "forest_cover"])).toBe("major");
   });
 
   it("steps through the crops and wraps around", () => {

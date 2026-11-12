@@ -17,6 +17,7 @@ import type {
   IAuditRun,
 } from "../types/auditChecks";
 import type { IGeorefCheck } from "../types/georefCheck";
+import { reportedOutsideLikelyRange } from "./acquisitionDate";
 import { summarizeGeorefCheck } from "./georefCheck";
 
 export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "prediction";
@@ -31,9 +32,16 @@ export type IAuditSectionMap =
       images: CropImageKind[];
       /** layers whose model verdict can colour the squares */
       colorLayers: AuditLayer[];
-      /** the check judges the orthophoto alone: the AOI outline and the prediction layers are hidden while its section is open */
-      orthoOnly?: boolean;
     };
+
+/** Map layers a step switches on (true) or off (false) while its section is open. */
+export interface ISectionLayers {
+  aoi: boolean;
+  predictions: boolean;
+}
+
+const ORTHO_ONLY: ISectionLayers = { aoi: false, predictions: false };
+const ALL_LAYERS: ISectionLayers = { aoi: true, predictions: true };
 
 export interface IAuditReason {
   code: string;
@@ -47,6 +55,8 @@ export interface IAuditSectionDef {
   /** dataset-level layers a person answers */
   layers: AuditLayer[];
   map: IAuditSectionMap | null;
+  /** the map layers the step needs: shown while its section is open, the others hidden */
+  shows: ISectionLayers;
   /** reviewers also answer per crop and layer */
   cropAnswers?: boolean;
   /** the fixed "Check wrong" reasons; "other" always comes last */
@@ -65,7 +75,8 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Dataset evaluation",
     checkKey: "dataset_evaluation",
     layers: ["image"],
-    map: { kind: "crops", images: ["raw"], colorLayers: [], orthoOnly: true },
+    map: { kind: "crops", images: ["raw"], colorLayers: [] },
+    shows: ORTHO_ONLY,
     // why a dataset is excluded: the reviewer answers Keep or Exclude, not "check wrong"
     reasons: [
       { code: "blurry", label: "Blurry" },
@@ -79,13 +90,14 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     verdicts: ["ok", "minor", "major"],
     fields: ["has_cog_issue", "has_thumbnail_issue"],
   },
-  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], map: null, reasons: [], verdicts: [], fields: [] },
+  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], map: null, shows: ALL_LAYERS, reasons: [], verdicts: [], fields: [] },
   {
     id: "georef",
     title: "Georeferencing",
     checkKey: "georef",
     layers: ["georef"],
     map: { kind: "georef" },
+    shows: ORTHO_ONLY,
     reasons: [
       { code: "offset_misjudged", label: "Offset misjudged" },
       { code: "reference_wrong_or_outdated", label: "Reference wrong or outdated" },
@@ -101,6 +113,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     checkKey: "acquisition_date",
     layers: ["acquisition_date"],
     map: null,
+    shows: ORTHO_ONLY,
     reasons: [
       { code: "estimate_wrong", label: "Estimate wrong" },
       { code: "reported_date_right", label: "Reported date is right" },
@@ -115,6 +128,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     checkKey: null,
     layers: [],
     map: null,
+    shows: ORTHO_ONLY,
     reasons: [],
     verdicts: [],
     fields: ["has_valid_phenology"],
@@ -125,6 +139,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     checkKey: "prediction_quality",
     layers: ["deadwood", "forest_cover"],
     map: { kind: "crops", images: ["raw", "deadwood_overlay", "forest_cover_overlay"], colorLayers: ["deadwood", "forest_cover"] },
+    shows: ALL_LAYERS,
     cropAnswers: true,
     reasons: [
       { code: "errors_missed", label: "Model missed errors" },
@@ -265,19 +280,14 @@ export function legacySectionStatus(id: AuditSectionId, inputs: ILegacySectionIn
       return { label: summary.verdict.split(",")[0], tone: GEOREF_TONES[summary.tone], needsYou: false };
     }
     case "date":
-      if (!inputs.dateEstimate) return NOT_RUN;
+      // no estimate: the reviewer judges the date by hand
+      if (!inputs.dateEstimate) return { label: "Manual", tone: "todo", needsYou: false };
       if (underReview("acquisition_date")) return needsYou;
-      return inputs.dateEstimate.is_mismatch ? { label: "Mismatch", tone: "bad", needsYou: false } : { label: "Valid", tone: "ok", needsYou: false };
+      if (inputs.dateEstimate.is_mismatch) return { label: "Mismatch", tone: "bad", needsYou: false };
+      return reportedOutsideLikelyRange(inputs.dateEstimate) ? { label: "Uncertain", tone: "warn", needsYou: true } : { label: "Valid", tone: "ok", needsYou: false };
     default:
       return NOT_RUN;
   }
-}
-
-/** The verdict "Check wrong" stores for a two-way call; null where the reviewer must pick one. */
-export function wrongVerdict(verdict: AuditVerdict): AuditVerdict | null {
-  if (verdict === "ok") return "major";
-  if (verdict === "major" || verdict === "minor") return "ok";
-  return null;
 }
 
 const VERDICT_QUALITY: Partial<Record<AuditVerdict, PredictionQuality>> = { ok: "great", minor: "sentinel_ok", major: "bad" };
@@ -326,7 +336,8 @@ export function evaluationFlags(row: Pick<IAuditAssessment, "details"> | null | 
   return EVALUATION_FLAGS.map((f) => f.flag).filter((flag) => named.includes(flag));
 }
 
-const keepsDataset = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
+/** A dataset evaluation verdict that keeps the dataset (ok, or keep with something to fix). */
+export const keepsDataset = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
 
 /** A dataset evaluation answer in a few words, the check's or a person's: "Keep", "Keep (COG issue)", "Exclude (blurry)". */
 export function evaluationAnswerText(row: Pick<IAuditAssessment, "verdict" | "details" | "reason_code">): string {
@@ -464,13 +475,6 @@ const firstSet = (sets: string[]) => Math.min(...sets.map((s) => (CROP_SET_ORDER
 /** The crops a check judged, in the order the page numbers them: the exclude set first. */
 export function orderedCrops(evidence: Pick<IAuditCheckEvidence, "crops"> | undefined): IAuditCheckEvidence["crops"] {
   return [...(evidence?.crops ?? [])].sort((a, b) => firstSet(a.crop_sets) - firstSet(b.crop_sets) || a.id - b.id);
-}
-
-/** The models' worst call on one crop and layer (or on any of the given layers). */
-export function cropModelVerdict(evidence: Pick<IAuditCheckEvidence, "automated"> | undefined, cropId: number, layers: AuditLayer[]): AuditVerdict | null {
-  return worst(
-    (evidence?.automated ?? []).filter((a) => a.crop_id === cropId && layers.includes(a.layer)).map((a) => a.verdict),
-  );
 }
 
 /** The crop before or after the selected one, wrapping around; the first (or last) when none is selected. */

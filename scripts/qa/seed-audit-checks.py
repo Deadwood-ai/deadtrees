@@ -119,8 +119,11 @@ select internal.store_georef_audit_run({ds}, 'upload');
 """)
 
 # --- check versions -------------------------------------------------------------------
-def version(check, name):
-	return int(psql(f"""insert into audit.check_versions (check_key, version, is_active) values ('{check}', '{name}', true)
+def version(check, name, config=None):
+	conf = json.dumps(config or {})
+	# one version of a check is active: a stack seeded with an older version name switches over
+	psql(f"update audit.check_versions set is_active = false where check_key = '{check}' and version <> '{name}' and is_active")
+	return int(psql(f"""insert into audit.check_versions (check_key, version, config, is_active) values ('{check}', '{name}', '{conf}', true)
 		on conflict (check_key, version) do update set is_active = true returning id"""))
 
 
@@ -146,10 +149,10 @@ def image(crop_id, kind, col, row, size, label_id=None, bands=(1, 2, 3)):
 		values ({ds}, '{SHA}', {crop_id or 'null'}, {label_id or 'null'}, '{kind}', '{rel}', 'image/jpeg', 512, 512)""")
 
 
-def assess(check, rid, layer, kind, model, verdict, crop_id=None, label_id=None, modes=None, details=None):
-	psql(f"""insert into audit.assessments (check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, model, prompt_version, verdict, modes, details)
+def assess(check, rid, layer, kind, model, verdict, crop_id=None, label_id=None, modes=None, details=None, likelihood=None):
+	psql(f"""insert into audit.assessments (check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, model, prompt_version, verdict, major_likelihood, modes, details)
 		values ('{check}', {ds}, {crop_id or 'null'}, {rid}, '{layer}', {label_id or 'null'}, '{kind}', '{model}', 'v1', '{verdict}',
-		'{json.dumps(modes or {})}', '{json.dumps(details or {})}')""")
+		{'null' if likelihood is None else likelihood}, '{json.dumps(modes or {})}', '{json.dumps(details or {})}')""")
 
 
 # --- dataset evaluation: keep, fix (COG issue), four native crops ---------------------
@@ -165,7 +168,9 @@ assess('dataset_evaluation', ev, 'image', 'model', 'luna', 'minor', modes=modes,
 assess('dataset_evaluation', ev, 'image', 'model', 'haiku', 'minor', modes=modes, details={'summary': 'Sharp RGB forest image with a COG edge artifact'})
 
 # --- prediction quality: deadwood major on 3 of 10 crops ------------------------------
-pq = run('prediction_quality', version('prediction_quality', 'pq-v1-qa'))
+# the rule's cut-offs, as the version stores them: a crop is major at a mean likelihood of 52 (deadwood).
+# A version's config never changes, so a seed with other cut-offs needs another version name.
+pq = run('prediction_quality', version('prediction_quality', 'pq-v1-qa-rule', {'rule_config': {'crop_major_cut': {'deadwood': 52, 'forest': 69}, 'min_major_crops': 2}}))
 DW, FC = 9001, 9002
 major = {3, 4, 8}
 for n in range(10):
@@ -176,8 +181,10 @@ for n in range(10):
 	image(cid, 'forest_cover_overlay', c, r, 640, FC, (2, 2, 2))
 	for judge in ('luna', 'haiku'):
 		assess('prediction_quality', pq, 'image', 'model', judge, 'ok', crop_id=cid, modes={'m0_not_assessable': {'likelihood': 0}})
-		assess('prediction_quality', pq, 'deadwood', 'model', judge, 'major' if n + 1 in major else 'ok', crop_id=cid, label_id=DW)
-		assess('prediction_quality', pq, 'forest_cover', 'model', judge, 'minor' if n == 6 else 'ok', crop_id=cid, label_id=FC)
+		assess('prediction_quality', pq, 'deadwood', 'model', judge, 'major' if n + 1 in major else 'ok', crop_id=cid, label_id=DW,
+		       likelihood=90 if n + 1 in major else 5)
+		assess('prediction_quality', pq, 'forest_cover', 'model', judge, 'minor' if n == 6 else 'ok', crop_id=cid, label_id=FC,
+		       likelihood=30 if n == 6 else 5)
 assess('prediction_quality', pq, 'deadwood', 'rule', 'pq-rule', 'major', label_id=DW,
        details={'rule': 'pq-rule-v1', 'verdict': 'bad', 'major_crops': 3, 'judged_crops': 10})
 assess('prediction_quality', pq, 'forest_cover', 'rule', 'pq-rule', 'ok', label_id=FC,

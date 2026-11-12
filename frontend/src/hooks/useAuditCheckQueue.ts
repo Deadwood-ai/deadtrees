@@ -3,6 +3,7 @@ import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { QUEUE_COLUMNS, SCHEMA_NOT_EXPOSED, audit } from "./useAuditChecks";
 import type { AuditCheckKey, AuditLayer, AuditVerdict, IAuditQueueRow } from "../types/auditChecks";
+import { reviewKey } from "../utils/auditReviewList";
 
 /** One row of audit.disagreements: a target where people, or people and the models, disagree. */
 export interface IAuditDisagreement {
@@ -29,21 +30,28 @@ export interface IAuditReviewList extends IAuditList<IAuditQueueRow> {
   reviews: Record<string, { count: number; mine: boolean }>;
 }
 
-export const reviewKey = (r: { dataset_id: number; check_key: string; layer: string }) => `${r.dataset_id}:${r.check_key}:${r.layer}`;
-
 const NOT_AVAILABLE = { available: false, rows: [], total: 0 };
+/** rows per request: the server returns at most 1000 */
 const ANSWER_PAGE = 1000;
 
 async function loadToReview(userId: string): Promise<IAuditReviewList> {
-  // every result under review, answered or not: each reviewer answers on their own
-  const queue = await audit()
-    .from("review_queue")
-    .select(QUEUE_COLUMNS, { count: "exact" })
-    .not("reason", "is", null)
-    .order("dataset_id", { ascending: false });
-  if (queue.error?.code === SCHEMA_NOT_EXPOSED) return { ...NOT_AVAILABLE, reviews: {} };
-  if (queue.error) throw queue.error;
-  const rows = (queue.data ?? []) as IAuditQueueRow[];
+  // Every current result, under review or not: a result without a reason ran and needs nobody,
+  // which still tells the list that its check is done. Each reviewer answers on their own.
+  // Read page by page, so that no dataset loses part of its results to the server's row cap.
+  const rows: IAuditQueueRow[] = [];
+  for (let from = 0; ; from += ANSWER_PAGE) {
+    const queue = await audit()
+      .from("review_queue")
+      .select(QUEUE_COLUMNS)
+      .order("dataset_id", { ascending: false })
+      .order("check_key")
+      .order("layer")
+      .range(from, from + ANSWER_PAGE - 1);
+    if (queue.error?.code === SCHEMA_NOT_EXPOSED) return { ...NOT_AVAILABLE, reviews: {} };
+    if (queue.error) throw queue.error;
+    rows.push(...((queue.data ?? []) as IAuditQueueRow[]));
+    if ((queue.data ?? []).length < ANSWER_PAGE) break;
+  }
   const reviews: IAuditReviewList["reviews"] = {};
   if (rows.length) {
     const runs = new Map(rows.map((r) => [reviewKey(r), r.run_id]));
@@ -71,7 +79,7 @@ async function loadToReview(userId: string): Promise<IAuditReviewList> {
       if ((people.data ?? []).length < ANSWER_PAGE) break;
     }
   }
-  return { available: true, rows, total: queue.count ?? rows.length, reviews };
+  return { available: true, rows, total: rows.length, reviews };
 }
 
 async function loadDisagreements(): Promise<IAuditList<IAuditDisagreement>> {

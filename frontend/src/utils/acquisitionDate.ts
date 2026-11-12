@@ -36,6 +36,34 @@ export function datasetDateSuggestion(
   return { date: estimate.suggested_date, reason: estimate.suggestion_reason };
 }
 
+/** Whether the reported date lies outside the model's 80% range: a full date outside every
+ * range, a month that touches none. Null when there is nothing to compare (no month, or no
+ * ranges). Outside the range the model is not sure the date is right, so the audit step says
+ * "Uncertain" and prefills nothing, even when the date is not unlikely enough to call it wrong. */
+export function reportedOutsideLikelyRange(
+  estimate: Pick<IAcquisitionDateEstimate, "hdi" | "recorded_year" | "recorded_month" | "recorded_day">,
+): boolean | null {
+  const ranges = estimate.hdi?.["80"];
+  const { recorded_year: y, recorded_month: m, recorded_day: d } = estimate;
+  if (!ranges?.length || !y || !m) return null;
+  const pad = (v: number) => String(v).padStart(2, "0");
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  // ranges are ISO dates in the flight year, so plain string comparison orders them
+  const from = `${y}-${pad(m)}-${pad(d ?? 1)}`;
+  const to = `${y}-${pad(m)}-${pad(d ?? lastDay)}`;
+  return !ranges.some(([start, end]) => from <= end && to >= start);
+}
+
+/** The stored suggestions without "the date is valid" where the reported date lies outside the
+ * model's 80% range: there the reviewer decides. */
+export function withoutUncertainDate(
+  suggestions: IAuditSuggestion[],
+  estimate: Parameters<typeof reportedOutsideLikelyRange>[0] | null | undefined,
+): IAuditSuggestion[] {
+  if (!estimate || !reportedOutsideLikelyRange(estimate)) return suggestions;
+  return suggestions.filter((s) => !(s.field === "has_valid_acquisition_date" && s.value === true));
+}
+
 /** The audit fields a date decision is made from. */
 export const DATE_DECISION_FIELDS = ["has_valid_acquisition_date", "accept_suggested_acquisition_date"];
 

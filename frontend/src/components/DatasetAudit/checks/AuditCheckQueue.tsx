@@ -3,9 +3,17 @@ import { CheckCircleOutlined } from "@ant-design/icons";
 import { Alert, Button, Checkbox, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Link } from "react-router-dom";
-import { reviewKey, useAuditDisagreements, useAuditReviewList, type IAuditDisagreement } from "../../../hooks/useAuditCheckQueue";
-import type { AuditCheckKey, AuditLayer, AuditVerdict, IAuditQueueRow } from "../../../types/auditChecks";
-import { LAYER_LABELS, QUEUE_REASONS, VERDICT_TONE, auditSection, sectionOfCheck, verdictLabel } from "../../../utils/auditChecks";
+import { useAuditDisagreements, useAuditReviewList, type IAuditDisagreement } from "../../../hooks/useAuditCheckQueue";
+import type { AuditCheckKey, AuditLayer, AuditVerdict } from "../../../types/auditChecks";
+import { LAYER_LABELS, VERDICT_TONE, auditSection, sectionOfCheck, verdictLabel } from "../../../utils/auditChecks";
+import {
+	datasetReviewRows,
+	reviewHref,
+	reviewKey,
+	reviewTargets,
+	type IDatasetReviewRow,
+	type IReviewCell,
+} from "../../../utils/auditReviewList";
 import EmptyStatePanel from "../../EmptyStatePanel";
 import { SectionLoadError, TableSkeleton } from "../../SectionStates";
 
@@ -24,10 +32,10 @@ const checkName = (checkKey: AuditCheckKey, layer: AuditLayer) =>
 const verdictTag = (checkKey: AuditCheckKey, verdict: AuditVerdict) => (
 	<Tag color={TAG_COLORS[VERDICT_TONE[verdict]]}>{verdictLabel(checkKey, verdict)}</Tag>
 );
-const reviewLink = (datasetId: number, checkKey: AuditCheckKey) => (
-	<Link to={`/dataset-audit/${datasetId}?section=${sectionOfCheck(checkKey)}`}>
-		<Button type="primary" size="small">
-			Review
+const reviewLink = (datasetId: number, checkKey: AuditCheckKey, finished = false) => (
+	<Link to={reviewHref(datasetId, checkKey)}>
+		<Button type={finished ? "default" : "primary"} size="small">
+			{finished ? "Open" : "Review"}
 		</Button>
 	</Link>
 );
@@ -81,38 +89,85 @@ const idColumn = { title: "ID", dataIndex: "dataset_id", key: "id", width: 80 };
 
 function ToReviewList({ locationOf }: Pick<AuditCheckQueueProps, "locationOf">) {
 	const list = useAuditReviewList();
-	const [onlyMine, setOnlyMine] = useState(true);
-	const reviews = list.data?.reviews ?? {};
-	const all = list.data?.rows ?? [];
-	const rows = onlyMine ? all.filter((r) => !reviews[reviewKey(r)]?.mine) : all;
-	const columns: ColumnsType<IAuditQueueRow> = [
-		idColumn,
-		{ title: "Location", key: "location", render: (_, r) => locationOf(r.dataset_id), width: 180 },
-		{ title: "Check", key: "check", render: (_, r) => checkName(r.check_key, r.layer) },
-		{ title: "Automated result", key: "result", render: (_, r) => verdictTag(r.check_key, r.verdict) },
-		{ title: "Why it needs a person", key: "why", render: (_, r) => (r.reason ? QUEUE_REASONS[r.reason].label : "") },
-		{ title: "Reviews", key: "reviews", render: (_, r) => reviews[reviewKey(r)]?.count ?? 0, width: 90 },
-		{ title: "", key: "action", render: (_, r) => reviewLink(r.dataset_id, r.check_key), width: 100 },
+	const [onlyComplete, setOnlyComplete] = useState(true);
+	const [onlyOpen, setOnlyOpen] = useState(true);
+	const queue = list.data?.rows ?? [];
+	const targets = reviewTargets(queue);
+	const all = datasetReviewRows(queue, list.data?.reviews ?? {}, targets);
+	const waiting = all.filter((r) => !r.complete).length;
+	const rows = all.filter((r) => (!onlyComplete || r.complete) && (!onlyOpen || !r.finished));
+	const columns: ColumnsType<IDatasetReviewRow> = [
+		{ title: "ID", dataIndex: "datasetId", key: "id", width: 80, sorter: (a, b) => a.datasetId - b.datasetId },
+		{ title: "Location", key: "location", render: (_, r) => locationOf(r.datasetId), width: 170 },
+		...targets.map((t) => ({
+			title: t.title,
+			key: t.key,
+			render: (_: unknown, r: IDatasetReviewRow) => <ResultCell checkKey={t.checkKey} cell={r.cells[t.key]} />,
+		})),
+		{
+			title: "Problems",
+			key: "problems",
+			width: 100,
+			render: (_, r) => r.problems || "",
+			sorter: (a, b) => a.problems - b.problems,
+		},
+		{
+			title: "",
+			key: "action",
+			width: 100,
+			render: (_, r) => reviewLink(r.datasetId, r.next, r.finished),
+		},
 	];
 	return (
 		<ListFrame list={list}>
-			<Checkbox className="mb-3" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)}>
-				Only results I haven't answered
-			</Checkbox>
+			<div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1">
+				<Checkbox checked={onlyComplete} onChange={(e) => setOnlyComplete(e.target.checked)}>
+					Only datasets where every check ran
+				</Checkbox>
+				<Checkbox checked={onlyOpen} onChange={(e) => setOnlyOpen(e.target.checked)}>
+					Only datasets I haven't finished
+				</Checkbox>
+				<span className="text-xs text-gray-500" data-testid="audit-review-count">
+					{rows.length} of {all.length} datasets{waiting ? ` · ${waiting} still wait for a check to run` : ""}
+				</span>
+			</div>
 			{rows.length ? (
-				<Table dataSource={rows} columns={columns} rowKey={reviewKey} pagination={{ pageSize: 20 }} scroll={{ x: 900 }} />
+				<Table
+					dataSource={rows}
+					columns={columns}
+					rowKey="datasetId"
+					pagination={{ pageSize: 20, showSizeChanger: false }}
+					scroll={{ x: 900 }}
+				/>
 			) : (
 				<EmptyStatePanel
 					icon={<CheckCircleOutlined />}
 					title="Nothing to review"
 					description={
-						all.length < (list.data?.total ?? 0)
-							? "You answered every result this list can show. More are waiting, but cannot be listed here yet."
+						onlyComplete && waiting
+							? `No dataset with every check done is waiting for you. ${waiting} datasets still wait for a check to run.`
 							: "No check result is waiting for you."
 					}
 				/>
 			)}
 		</ListFrame>
+	);
+}
+
+/** A check's result in the list: its verdict, a mark when you answered it, or "Not run". */
+function ResultCell({ checkKey, cell }: { checkKey: AuditCheckKey; cell: IReviewCell | undefined }) {
+	if (!cell) return <span className="text-xs text-gray-400">Not run</span>;
+	return (
+		<span className="inline-flex items-center gap-1 whitespace-nowrap">
+			<span className={cell.needsReview ? "" : "opacity-60"} title={cell.needsReview ? undefined : "Applied without review"}>
+				{verdictTag(checkKey, cell.verdict)}
+			</span>
+			{cell.mine && (
+				<span className="text-xs text-green-700" title="You answered this result">
+					✓ you
+				</span>
+			)}
+		</span>
 	);
 }
 
@@ -154,8 +209,8 @@ function DisagreementList({ locationOf }: Pick<AuditCheckQueueProps, "locationOf
 	);
 }
 
-/** The automated check results under review, or their disagreements: one row per check
- * result, not per dataset. */
+/** The automated check results under review, one row per dataset with a column per check,
+ * or their disagreements, one row per check result. */
 export default function AuditCheckQueue({ kind, locationOf }: AuditCheckQueueProps) {
 	return kind === "to-review" ? <ToReviewList locationOf={locationOf} /> : <DisagreementList locationOf={locationOf} />;
 }
