@@ -17,6 +17,7 @@ import type {
   IAuditRun,
 } from "../types/auditChecks";
 import type { IGeorefCheck } from "../types/georefCheck";
+import { reportedOutsideLikelyRange } from "./acquisitionDate";
 import { summarizeGeorefCheck } from "./georefCheck";
 
 export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "prediction";
@@ -281,7 +282,8 @@ export function legacySectionStatus(id: AuditSectionId, inputs: ILegacySectionIn
     case "date":
       if (!inputs.dateEstimate) return NOT_RUN;
       if (underReview("acquisition_date")) return needsYou;
-      return inputs.dateEstimate.is_mismatch ? { label: "Mismatch", tone: "bad", needsYou: false } : { label: "Valid", tone: "ok", needsYou: false };
+      if (inputs.dateEstimate.is_mismatch) return { label: "Mismatch", tone: "bad", needsYou: false };
+      return reportedOutsideLikelyRange(inputs.dateEstimate) ? { label: "Uncertain", tone: "warn", needsYou: true } : { label: "Valid", tone: "ok", needsYou: false };
     default:
       return NOT_RUN;
   }

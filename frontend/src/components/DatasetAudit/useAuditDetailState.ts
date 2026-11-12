@@ -27,6 +27,7 @@ import {
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
 import { answeredFormValues } from "../../utils/auditChecks";
 import { answersWithSave, withCheckSuggestions } from "../../utils/auditPrefill";
+import { withoutUncertainDate } from "../../utils/acquisitionDate";
 import { useAuditChecks, useSaveAuditAnswers } from "../../hooks/useAuditChecks";
 import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
 import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
@@ -149,7 +150,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
 	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
 	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
-	const { data: acquisitionDateEstimate } = useAcquisitionDateEstimate(dataset.id);
+	const { data: acquisitionDateEstimate, isLoading: isEstimateLoading } = useAcquisitionDateEstimate(dataset.id);
 	const { data: georefCheck } = useGeorefCheck(dataset.id);
 	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
 	const { data: auditSuggestionsData } = useAuditSuggestions(dataset.id);
@@ -160,8 +161,8 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	// The stored suggestions plus the checks' calls. Memoised: a fresh list per render would re-run
 	// the prefill effect and reset edits.
 	const auditSuggestions = useMemo(
-		() => withCheckSuggestions(auditSuggestionsData ?? NO_SUGGESTIONS, auditChecks, dataset.id),
-		[auditSuggestionsData, auditChecks, dataset.id],
+		() => withCheckSuggestions(withoutUncertainDate(auditSuggestionsData ?? NO_SUGGESTIONS, acquisitionDateEstimate), auditChecks, dataset.id),
+		[auditSuggestionsData, acquisitionDateEstimate, auditChecks, dataset.id],
 	);
 
 	// Navigation context
@@ -260,7 +261,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 	const prefilledForRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (prefilledForRef.current === dataset.id) return;
-		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined || auditChecksQuery.isLoading) return;
+		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined || auditChecksQuery.isLoading || isEstimateLoading) return;
 		prefilledForRef.current = dataset.id;
 		const { values: suggested, fields } = suggestedAuditValues(
 			auditData as Record<string, unknown> | null,
@@ -269,7 +270,7 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		);
 		form.setFieldsValue({ ...suggested, ...answered });
 		setPrefilledFields(fields);
-	}, [dataset.id, auditData, auditSuggestionsData, auditSuggestions, auditChecksQuery.isLoading, reviewItems, answered, form]);
+	}, [dataset.id, auditData, auditSuggestionsData, auditSuggestions, auditChecksQuery.isLoading, isEstimateLoading, reviewItems, answered, form]);
 
 	// The form follows the answers whenever they or the saved audit load or change,
 	// so an answer and its saved field cannot disagree. Declared after the two

@@ -13,6 +13,7 @@ import {
 	isEstimateCurrent,
 	joinYearWrap,
 	modelSuggestedDecision,
+  reportedOutsideLikelyRange,
 } from "../../utils/acquisitionDate";
 import AcquisitionDateDistribution from "../AcquisitionDate/AcquisitionDateDistribution";
 import { ReviewTag } from "./AuditReviewNotice";
@@ -141,6 +142,15 @@ export function AcquisitionDateCard({ dataset, estimate, suggestions, prefilledF
 				</>
 			) : (
 				<div className="mb-2 text-xs text-gray-500">No date estimate yet (processing stage doy_estimation_v1).</div>
+			)}
+
+			{estimate && current && !estimate.is_mismatch && reportedOutsideLikelyRange(estimate) && (
+				<Alert
+					type="info"
+					showIcon
+					className="mb-2 py-1 text-xs"
+					message={`Reported date is outside the model's 80% range (${Math.round(estimate.recorded_offset_days ?? 0)} days from the estimate). Not unlikely enough to call it wrong: decide yourself.`}
+				/>
 			)}
 
 			{estimate && current && estimate.is_mismatch && (
