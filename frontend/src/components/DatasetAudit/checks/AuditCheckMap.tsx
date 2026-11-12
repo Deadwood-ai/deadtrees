@@ -11,7 +11,7 @@ import { cropModelVerdict, orderedCrops, stepCrop, type CropImageKind, type IAud
 import { InlineLoadError, InlineSkeleton } from "../../SectionStates";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
 import { CROP_COLOR, useCropSquares, zoomToCrop } from "./useCropSquares";
-import { useOrthoOnlyLayers } from "./useOrthoOnlyLayers";
+import { useSectionLayers } from "./useSectionLayers";
 import { modelViewImage } from "./auditCheckView";
 
 /** What the audit map needs to show the open section's check. */
@@ -58,7 +58,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 		return Object.fromEntries(crops.map((c) => [c.id, VERDICT_COLORS[cropModelVerdict({ automated: automated ?? [] }, c.id, colorLayers) ?? "ok"]]));
 	}, [crops, colorByVerdict, colorLayers, automated]);
 
-	useOrthoOnlyLayers(!!cropMode?.orthoOnly);
+	useSectionLayers(section?.shows ?? null);
 	useGeorefLayers({ map, orthoLayer, check: georef, provider: shownProvider, showMatches, droneOpacity });
 	useCropSquares({ map, crops, selectedId: cropId, colors, onSelect: onSelectCrop });
 

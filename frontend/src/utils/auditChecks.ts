@@ -31,9 +31,16 @@ export type IAuditSectionMap =
       images: CropImageKind[];
       /** layers whose model verdict can colour the squares */
       colorLayers: AuditLayer[];
-      /** the check judges the orthophoto alone: the AOI outline and the prediction layers are hidden while its section is open */
-      orthoOnly?: boolean;
     };
+
+/** Map layers a step switches on (true) or off (false) while its section is open. */
+export interface ISectionLayers {
+  aoi: boolean;
+  predictions: boolean;
+}
+
+const ORTHO_ONLY: ISectionLayers = { aoi: false, predictions: false };
+const ALL_LAYERS: ISectionLayers = { aoi: true, predictions: true };
 
 export interface IAuditReason {
   code: string;
@@ -47,6 +54,8 @@ export interface IAuditSectionDef {
   /** dataset-level layers a person answers */
   layers: AuditLayer[];
   map: IAuditSectionMap | null;
+  /** the map layers the step needs: shown while its section is open, the others hidden */
+  shows: ISectionLayers;
   /** reviewers also answer per crop and layer */
   cropAnswers?: boolean;
   /** the fixed "Check wrong" reasons; "other" always comes last */
@@ -65,7 +74,8 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     title: "Dataset evaluation",
     checkKey: "dataset_evaluation",
     layers: ["image"],
-    map: { kind: "crops", images: ["raw"], colorLayers: [], orthoOnly: true },
+    map: { kind: "crops", images: ["raw"], colorLayers: [] },
+    shows: ORTHO_ONLY,
     // why a dataset is excluded: the reviewer answers Keep or Exclude, not "check wrong"
     reasons: [
       { code: "blurry", label: "Blurry" },
@@ -79,13 +89,14 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     verdicts: ["ok", "minor", "major"],
     fields: ["has_cog_issue", "has_thumbnail_issue"],
   },
-  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], map: null, reasons: [], verdicts: [], fields: [] },
+  { id: "aoi", title: "Area of interest", checkKey: null, layers: [], map: null, shows: ALL_LAYERS, reasons: [], verdicts: [], fields: [] },
   {
     id: "georef",
     title: "Georeferencing",
     checkKey: "georef",
     layers: ["georef"],
     map: { kind: "georef" },
+    shows: ORTHO_ONLY,
     reasons: [
       { code: "offset_misjudged", label: "Offset misjudged" },
       { code: "reference_wrong_or_outdated", label: "Reference wrong or outdated" },
@@ -101,6 +112,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     checkKey: "acquisition_date",
     layers: ["acquisition_date"],
     map: null,
+    shows: ORTHO_ONLY,
     reasons: [
       { code: "estimate_wrong", label: "Estimate wrong" },
       { code: "reported_date_right", label: "Reported date is right" },
@@ -115,6 +127,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     checkKey: null,
     layers: [],
     map: null,
+    shows: ORTHO_ONLY,
     reasons: [],
     verdicts: [],
     fields: ["has_valid_phenology"],
@@ -125,6 +138,7 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     checkKey: "prediction_quality",
     layers: ["deadwood", "forest_cover"],
     map: { kind: "crops", images: ["raw", "deadwood_overlay", "forest_cover_overlay"], colorLayers: ["deadwood", "forest_cover"] },
+    shows: ALL_LAYERS,
     cropAnswers: true,
     reasons: [
       { code: "errors_missed", label: "Model missed errors" },

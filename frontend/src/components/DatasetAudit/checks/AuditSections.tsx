@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import { useEffect, useRef, type ComponentProps, type ReactNode } from "react";
 import { Form } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
@@ -29,7 +29,7 @@ import CheckSummary from "./CheckSummary";
 import CropAnswers from "./CropAnswers";
 import EvaluationAnswer from "./EvaluationAnswer";
 import DerivedDecision from "./DerivedDecision";
-import type { IAuditCheckView } from "./auditCheckView";
+import { nextStep, previousStep, type IAuditCheckView } from "./auditCheckView";
 
 /** A saved-audit field the reviewer's answer sets: it takes part in the form, and so in its
  * validation and saving, without a control of its own. */
@@ -89,6 +89,22 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const evaluation = checks?.checks.dataset_evaluation;
 	const myEvaluation = evaluation ? myAnswer(people, user?.id, evaluation.run.id, { checkKey: "dataset_evaluation", layer: "image" }) : null;
 	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null });
+	const goTo = (id: AuditSectionId | null) => {
+		setView({ section: id, cropId: null });
+		// past the last step: back to the decision at the top, where the audit is saved
+		if (id === null) document.querySelector('[data-testid="audit-decision"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+	};
+	const order = AUDIT_SECTIONS.map((s) => s.id);
+	const next = (id: AuditSectionId) => nextStep(order, id);
+
+	// answering the open step's check moves on to the next step
+	const openAnswered = view.section ? answeredAll(auditSection(view.section)) : false;
+	const answeredBefore = useRef({ section: view.section, answered: openAnswered });
+	useEffect(() => {
+		const before = answeredBefore.current;
+		answeredBefore.current = { section: view.section, answered: openAnswered };
+		if (view.section && before.section === view.section && !before.answered && openAnswered) goTo(next(view.section));
+	});
 
 	const answers = (s: IAuditSectionDef) => {
 		const evidence = evidenceOf(s);
@@ -201,7 +217,17 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				</div>
 			)}
 			{AUDIT_SECTIONS.map((s, i) => (
-				<AuditSection key={s.id} number={i + 1} title={s.title} status={statuses[s.id]} open={view.section === s.id} onToggle={() => open(s.id)}>
+				<AuditSection
+					key={s.id}
+					number={i + 1}
+					title={s.title}
+					status={statuses[s.id]}
+					open={view.section === s.id}
+					onToggle={() => open(s.id)}
+					onBack={previousStep(order, s.id) ? () => goTo(previousStep(order, s.id)) : undefined}
+					onNext={() => goTo(next(s.id))}
+					nextLabel={next(s.id) ? "Next step" : "Done: review and save"}
+				>
 					{bodies[s.id]}
 				</AuditSection>
 			))}

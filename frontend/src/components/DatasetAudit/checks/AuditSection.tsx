@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Button } from "antd";
 import { DownOutlined, RightOutlined } from "@ant-design/icons";
 import type { AuditTone } from "../../../utils/auditChecks";
 
@@ -15,12 +16,17 @@ interface AuditSectionProps {
 	status: { label: string; tone: AuditTone };
 	open: boolean;
 	onToggle: () => void;
+	/** step back and forward through the sections; absent at the first or past the last */
+	onBack?: () => void;
+	onNext?: () => void;
+	nextLabel: string;
 	children: ReactNode;
 }
 
-/** One check in the audit sidebar: a header with its status, opened one at a time.
+/** One check in the audit sidebar: a header with its status, opened one at a time, with Back
+ * and Next to step through the audit.
  * Closed sections stay mounted so their form fields keep validating and saving. */
-export default function AuditSection({ number, title, status, open, onToggle, children }: AuditSectionProps) {
+export default function AuditSection({ number, title, status, open, onToggle, onBack, onNext, nextLabel, children }: AuditSectionProps) {
 	const tone = TONE_CLASSES[status.tone];
 	return (
 		<section className={`mb-1 rounded-lg ${open ? "bg-slate-50" : ""}`}>
@@ -37,7 +43,23 @@ export default function AuditSection({ number, title, status, open, onToggle, ch
 				<span className={`rounded-full px-2 py-0.5 text-[11px] ${tone.badge}`}>{status.label}</span>
 				{open ? <DownOutlined className="text-[10px] text-gray-400" /> : <RightOutlined className="text-[10px] text-gray-400" />}
 			</button>
-			<div className={open ? "px-2 pb-3 pl-6" : "hidden"}>{children}</div>
+			<div className={open ? "px-2 pb-3 pl-6" : "hidden"}>
+				{children}
+				<div className="mt-3 flex items-center justify-between gap-2">
+					{onBack ? (
+						<Button size="small" onClick={onBack}>
+							Back
+						</Button>
+					) : (
+						<span />
+					)}
+					{onNext && (
+						<Button size="small" type="primary" onClick={onNext}>
+							{nextLabel}
+						</Button>
+					)}
+				</div>
+			</div>
 		</section>
 	);
 }
