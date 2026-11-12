@@ -258,22 +258,26 @@ export function PredictionQualityCard({
 	answerOwned,
 	suggestions,
 	prefilledFields,
+	byCheck,
 }: {
 	answerOwned?: { deadwood: boolean; forestCover: boolean };
 	suggestions: IAuditSuggestion[];
 	prefilledFields: string[];
+	/** the audit check ran on that layer: its answer row above replaces the rating radio */
+	byCheck?: { deadwood: boolean; forestCover: boolean };
 }) {
 	return (
 		<div>
 			{/* Deadwood cover */}
 			<div className="mb-3">
-				<div className="mb-1 flex items-center">
+				<div className={byCheck?.deadwood ? "hidden" : "mb-1 flex items-center"}>
 					<Text className="text-xs font-medium">Deadwood cover segmentation</Text>
 					<SuggestedTag field="deadwood_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
 				</div>
 				<Form.Item
 					name="deadwood_quality"
 					className="mb-1"
+					hidden={byCheck?.deadwood}
 					rules={createConditionalRule("Please rate deadwood quality")}
 				>
 					<Radio.Group disabled={answerOwned?.deadwood || undefined}>
@@ -285,19 +289,20 @@ export function PredictionQualityCard({
 					</Radio.Group>
 				</Form.Item>
 				<Form.Item name="deadwood_notes" className="mb-0">
-					<TextArea rows={1} placeholder="Deadwood cover notes..." className="text-xs" />
+					<TextArea rows={1} placeholder="Deadwood notes..." className="text-xs" />
 				</Form.Item>
 			</div>
 
 			{/* Tree cover */}
 			<div>
-				<div className="mb-1 flex items-center">
+				<div className={byCheck?.forestCover ? "hidden" : "mb-1 flex items-center"}>
 					<Text className="text-xs font-medium">Tree cover segmentation</Text>
 					<SuggestedTag field="forest_cover_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
 				</div>
 				<Form.Item
 					name="forest_cover_quality"
 					className="mb-1"
+					hidden={byCheck?.forestCover}
 					rules={[{ required: false, message: "Please rate tree cover quality" }]}
 				>
 					<Radio.Group disabled={answerOwned?.forestCover || undefined}>
@@ -309,7 +314,7 @@ export function PredictionQualityCard({
 					</Radio.Group>
 				</Form.Item>
 				<Form.Item name="forest_cover_notes" className="mb-0">
-					<TextArea rows={1} placeholder="Forest cover notes..." className="text-xs" />
+					<TextArea rows={1} placeholder="Tree cover notes..." className="text-xs" />
 				</Form.Item>
 			</div>
 		</div>

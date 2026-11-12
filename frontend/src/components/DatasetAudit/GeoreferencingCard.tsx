@@ -17,6 +17,8 @@ interface GeoreferencingCardProps {
 	saved: Record<string, unknown> | null | undefined;
 	/** the reviewer answered the check above: that answer decides this field */
 	answerOwned?: boolean;
+	/** the audit check ran: its call and answer row above replace this card's check box and radio */
+	byCheck?: boolean;
 }
 
 const TONE_BOX = {
@@ -26,12 +28,14 @@ const TONE_BOX = {
 } as const;
 
 /** The georeferencing check's call and the saved answer; the map shows the matching while the section is open. */
-export function GeoreferencingCard({ check, suggestions, prefilledFields, reviewItems, saved, answerOwned }: GeoreferencingCardProps) {
+export function GeoreferencingCard({ check, suggestions, prefilledFields, reviewItems, saved, answerOwned, byCheck }: GeoreferencingCardProps) {
 	const summary = check ? summarizeGeorefCheck(check) : null;
 	const underReview = reviewItems.some((i) => i.item === "is_georeferenced");
 	return (
 		<div>
 			<ReviewChange field="is_georeferenced" items={reviewItems} suggestions={suggestions} saved={saved} />
+			{!byCheck && (
+				<>
 			{check && summary ? (
 				<div className={`mb-2 rounded border px-2 py-1 ${TONE_BOX[summary.tone]}`}>
 					<div className="flex items-center justify-between gap-2 text-xs">
@@ -53,7 +57,9 @@ export function GeoreferencingCard({ check, suggestions, prefilledFields, review
 					<SuggestedTag field="is_georeferenced" suggestions={suggestions} prefilledFields={prefilledFields} />
 				)}
 			</div>
-			<Form.Item name="is_georeferenced" className="mb-0" rules={createConditionalRule("Please assess georeferencing")}>
+				</>
+			)}
+			<Form.Item name="is_georeferenced" className="mb-0" hidden={byCheck} rules={createConditionalRule("Please assess georeferencing")}>
 				<Radio.Group disabled={answerOwned || undefined}>
 					<Space size="large">
 						<Radio value={true}>🟢 Good (&lt;15m)</Radio>

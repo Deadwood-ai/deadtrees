@@ -287,13 +287,6 @@ export function legacySectionStatus(id: AuditSectionId, inputs: ILegacySectionIn
   }
 }
 
-/** The verdict "Check wrong" stores for a two-way call; null where the reviewer must pick one. */
-export function wrongVerdict(verdict: AuditVerdict): AuditVerdict | null {
-  if (verdict === "ok") return "major";
-  if (verdict === "major" || verdict === "minor") return "ok";
-  return null;
-}
-
 const VERDICT_QUALITY: Partial<Record<AuditVerdict, PredictionQuality>> = { ok: "great", minor: "sentinel_ok", major: "bad" };
 const QUALITY_FIELD: Partial<Record<AuditLayer, "deadwood_quality" | "forest_cover_quality">> = {
   deadwood: "deadwood_quality",
@@ -478,13 +471,6 @@ const firstSet = (sets: string[]) => Math.min(...sets.map((s) => (CROP_SET_ORDER
 /** The crops a check judged, in the order the page numbers them: the exclude set first. */
 export function orderedCrops(evidence: Pick<IAuditCheckEvidence, "crops"> | undefined): IAuditCheckEvidence["crops"] {
   return [...(evidence?.crops ?? [])].sort((a, b) => firstSet(a.crop_sets) - firstSet(b.crop_sets) || a.id - b.id);
-}
-
-/** The models' worst call on one crop and layer (or on any of the given layers). */
-export function cropModelVerdict(evidence: Pick<IAuditCheckEvidence, "automated"> | undefined, cropId: number, layers: AuditLayer[]): AuditVerdict | null {
-  return worst(
-    (evidence?.automated ?? []).filter((a) => a.crop_id === cropId && layers.includes(a.layer)).map((a) => a.verdict),
-  );
 }
 
 /** The crop before or after the selected one, wrapping around; the first (or last) when none is selected. */

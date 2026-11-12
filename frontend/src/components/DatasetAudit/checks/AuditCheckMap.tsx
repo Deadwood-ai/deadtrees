@@ -7,7 +7,8 @@ import { auditImageUrl } from "../../../api/auditImages";
 import { useAuditImageAccess } from "../../../hooks/useAuditChecks";
 import type { IAuditCheckEvidence, IAuditImage } from "../../../types/auditChecks";
 import type { IGeorefCheck } from "../../../types/georefCheck";
-import { cropModelVerdict, orderedCrops, stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { orderedCrops, stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { cropCall, cropsForReview } from "../../../utils/cropCalls";
 import { InlineLoadError, InlineSkeleton } from "../../SectionStates";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
 import { CROP_COLOR, useCropSquares, zoomToCrop } from "./useCropSquares";
@@ -29,7 +30,7 @@ interface AuditCheckMapProps extends IAuditCheckMapProps {
 	orthoLayer: BaseLayer | null;
 }
 
-const VERDICT_COLORS = { major: "#ff9a3c", unsure: "#ffd27a", minor: "#ffd27a", ok: CROP_COLOR };
+const MAJOR_COLOR = "#ff4d4f";
 const IMAGE_LABELS: Record<CropImageKind, string> = { raw: "Raw", deadwood_overlay: "Deadwood", forest_cover_overlay: "Forest" };
 
 /** Puts the audit map into the open section's mode (reference and match lines, or the
@@ -41,7 +42,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const [provider, setProvider] = useState<string>();
 	const [showMatches, setShowMatches] = useState(true);
 	const [droneOpacity, setDroneOpacity] = useState(60);
-	const [colorByVerdict, setColorByVerdict] = useState(false);
+	const [colorByVerdict, setColorByVerdict] = useState(true);
 	const [showModelView, setShowModelView] = useState(false);
 	const [imageKind, setImageKind] = useState<CropImageKind>("raw");
 
@@ -51,12 +52,17 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	// keyed on the rows, not the evidence object: an answer must not rebuild the squares or move the map
 	const cropRows = evidence?.crops;
 	const automated = evidence?.automated;
-	const crops = useMemo(() => (cropMode && cropRows?.length ? orderedCrops({ crops: cropRows }) : null), [cropMode, cropRows]);
+	const run = evidence?.run;
 	const colorLayers = cropMode?.colorLayers;
+	// the same order the crop answers step through: the crops the check counted major first
+	const crops = useMemo(() => {
+		if (!cropMode || !cropRows?.length) return null;
+		return run && automated && colorLayers?.length ? cropsForReview({ run, automated, crops: cropRows }, colorLayers) : orderedCrops({ crops: cropRows });
+	}, [cropMode, cropRows, run, automated, colorLayers]);
 	const colors = useMemo(() => {
-		if (!crops || !colorByVerdict || !colorLayers?.length) return undefined;
-		return Object.fromEntries(crops.map((c) => [c.id, VERDICT_COLORS[cropModelVerdict({ automated: automated ?? [] }, c.id, colorLayers) ?? "ok"]]));
-	}, [crops, colorByVerdict, colorLayers, automated]);
+		if (!crops || !run || !colorByVerdict || !colorLayers?.length) return undefined;
+		return Object.fromEntries(crops.map((c) => [c.id, cropCall({ run, automated: automated ?? [] }, c.id, colorLayers) === "major" ? MAJOR_COLOR : CROP_COLOR]));
+	}, [crops, run, colorByVerdict, colorLayers, automated]);
 
 	useSectionLayers(section?.shows ?? null);
 	useGeorefLayers({ map, orthoLayer, check: georef, provider: shownProvider, showMatches, droneOpacity });
@@ -114,7 +120,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 					</div>
 					{cropMode.colorLayers.length > 0 && (
 						<Checkbox checked={colorByVerdict} onChange={(e) => setColorByVerdict(e.target.checked)}>
-							Colour squares by model verdict
+							Mark the crops the check counted major (red)
 						</Checkbox>
 					)}
 				</>

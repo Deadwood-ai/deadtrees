@@ -2,7 +2,7 @@ import { useEffect, useRef, type ComponentProps, type ReactNode } from "react";
 import { Form } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
-import type { IAuditChecks } from "../../../types/auditChecks";
+import type { AuditCheckKey, AuditLayer, IAuditChecks } from "../../../types/auditChecks";
 import {
 	AUDIT_SECTIONS,
 	EVALUATION_FLAGS,
@@ -143,6 +143,8 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	// once the reviewer has answered a check, the answer decides its saved-audit field
 	const owned = answeredFormValues(checks, user?.id);
 	const answerOwned = (field: keyof AuditFormValues) => field in owned;
+	// the audit check made a call on the layer: its answer row is the step's answer
+	const ranOn = (checkKey: AuditCheckKey, layer: AuditLayer) => automatedVerdict(checks?.checks[checkKey], layer) !== null;
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
 		// where the check has run, one answer decides the step and sets the two saved-audit fields;
@@ -176,7 +178,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		georef: (
 			<>
 				{answers(auditSection("georef"))}
-				<GeoreferencingCard {...panels.georef} answerOwned={answerOwned("is_georeferenced")} />
+				<GeoreferencingCard {...panels.georef} answerOwned={answerOwned("is_georeferenced")} byCheck={ranOn("georef", "georef")} />
 			</>
 		),
 		date: (
@@ -189,11 +191,11 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		prediction: (
 			<>
 				{answers(auditSection("prediction"))}
-				<div className="mb-1 text-xs font-medium">Saved audit ratings</div>
 				<PredictionQualityCard
 					answerOwned={{ deadwood: answerOwned("deadwood_quality"), forestCover: answerOwned("forest_cover_quality") }}
 					suggestions={panels.georef.suggestions}
 					prefilledFields={panels.georef.prefilledFields}
+					byCheck={{ deadwood: ranOn("prediction_quality", "deadwood"), forestCover: ranOn("prediction_quality", "forest_cover") }}
 				/>
 			</>
 		),

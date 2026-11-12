@@ -3,7 +3,8 @@ import { Button, Radio, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
-import { LAYER_LABELS, myAnswer, orderedCrops, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { LAYER_LABELS, myAnswer, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { cropCall, cropsForReview, flaggedCrops } from "../../../utils/cropCalls";
 
 interface CropAnswersProps {
 	datasetId: number;
@@ -27,7 +28,9 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	const { user } = useAuth();
 	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
 	const checkKey = section.checkKey!;
-	const crops = orderedCrops(evidence);
+	// the order the map numbers them: the crops the check counted major first
+	const crops = cropsForReview(evidence, section.layers);
+	const flagged = flaggedCrops(evidence, section.layers);
 	const index = crops.findIndex((c) => c.id === cropId);
 	const runId = evidence.run.id;
 	const target = (layer: AuditLayer) => ({ checkKey, layer, cropId });
@@ -79,18 +82,35 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	}, [active]);
 
 	if (!crops.length) return <div className="text-xs text-gray-500">This check stored no crops.</div>;
+	const flaggedLine = flagged.length > 0 && (
+		<div className="flex flex-wrap items-center gap-1 text-xs">
+			<span className="text-gray-600">Counted major by the check:</span>
+			{flagged.map((c) => (
+				<Button key={c.id} size="small" danger type={c.id === cropId ? "primary" : "default"} onClick={() => onSelectCrop(c.id)}>
+					Crop {crops.findIndex((o) => o.id === c.id) + 1}
+				</Button>
+			))}
+		</div>
+	);
 	if (cropId === null || index < 0) {
 		return (
-			<Button block onClick={() => step(1)}>
-				Start with crop 1 of {crops.length} (or click a square on the map)
-			</Button>
+			<div className="flex flex-col gap-2">
+				{flaggedLine}
+				<Button block onClick={() => step(1)}>
+					Start with crop 1 of {crops.length} (or click a square on the map)
+				</Button>
+			</div>
 		);
 	}
+	const call = cropCall(evidence, cropId, section.layers);
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg bg-white p-2.5">
+			{flaggedLine}
 			<div className="text-xs font-semibold">
-				Crop {index + 1} of {crops.length} · n / p to step, space = all fine
+				Crop {index + 1} of {crops.length}
+				{call && <span className={call === "major" ? "text-red-600" : "text-gray-500"}> · the check: {call === "major" ? "major errors" : "fine"}</span>}
+				<span className="font-normal text-gray-500"> · n / p to step, space = all fine</span>
 			</div>
 			{section.layers.map((layer) => {
 				const mine = myAnswer(people, user?.id, runId, target(layer));
