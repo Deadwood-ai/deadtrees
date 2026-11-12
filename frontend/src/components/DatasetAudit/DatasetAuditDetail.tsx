@@ -359,6 +359,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 									onUpdateFlag={updateFlagStatus}
 								/>
 							}
+							prefill={{ suggestions: auditSuggestions, prefilledFields }}
 							panels={{
 								georef: {
 									check: georefCheck,

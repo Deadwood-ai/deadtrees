@@ -7,8 +7,8 @@ import { auditImageUrl } from "../../../api/auditImages";
 import { useAuditImageAccess } from "../../../hooks/useAuditChecks";
 import type { IAuditCheckEvidence, IAuditImage } from "../../../types/auditChecks";
 import type { IGeorefCheck } from "../../../types/georefCheck";
-import { orderedCrops, stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
-import { cropCall, cropsForReview } from "../../../utils/cropCalls";
+import { stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { cropCalls, cropsForReview } from "../../../utils/cropCalls";
 import { InlineLoadError, InlineSkeleton } from "../../SectionStates";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
 import { useCropSquares, zoomToCrop } from "./useCropSquares";
@@ -53,15 +53,16 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const automated = evidence?.automated;
 	const run = evidence?.run;
 	const colorLayers = cropMode?.colorLayers;
-	// the same order the crop answers step through: the crops the check counted major first
-	const crops = useMemo(() => {
-		if (!cropMode || !cropRows?.length) return null;
-		return run && automated && colorLayers?.length ? cropsForReview({ run, automated, crops: cropRows }, colorLayers) : orderedCrops({ crops: cropRows });
-	}, [cropMode, cropRows, run, automated, colorLayers]);
-	const flagged = useMemo(() => {
-		if (!crops || !run || !colorByVerdict || !colorLayers?.length) return undefined;
-		return new Set(crops.filter((c) => cropCall({ run, automated: automated ?? [] }, c.id, colorLayers) === "major").map((c) => c.id));
-	}, [crops, run, colorByVerdict, colorLayers, automated]);
+	// the same calls and order the crop answers use: the crops the check counted major first
+	const calls = useMemo(
+		() => (cropMode && run && cropRows?.length ? cropCalls({ run, automated: automated ?? [], crops: cropRows }, colorLayers ?? []) : null),
+		[cropMode, run, automated, cropRows, colorLayers],
+	);
+	const crops = useMemo(() => (calls && cropRows ? cropsForReview({ crops: cropRows }, calls) : null), [calls, cropRows]);
+	const flagged = useMemo(
+		() => (calls && colorByVerdict ? new Set([...calls].filter(([, call]) => call === "major").map(([id]) => id)) : undefined),
+		[calls, colorByVerdict],
+	);
 
 	useSectionLayers(section?.shows ?? null);
 	useGeorefLayers({ map, orthoLayer, check: georef, provider: shownProvider, showMatches, droneOpacity });

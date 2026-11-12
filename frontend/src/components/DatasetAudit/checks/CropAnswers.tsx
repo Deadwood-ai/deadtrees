@@ -1,11 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useMemo } from "react";
 import { Button, Radio, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
 import { LAYER_LABELS, myAnswer, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
-import { cropCall, cropsForReview, flaggedCrops } from "../../../utils/cropCalls";
-import { typing } from "./useAuditShortcuts";
+import { cropCalls, cropsForReview } from "../../../utils/cropCalls";
+import { useAuditShortcuts } from "./useAuditShortcuts";
 
 interface CropAnswersProps {
 	datasetId: number;
@@ -28,8 +28,9 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	const { mutateAsync: save, isPending } = useSaveAuditAnswers();
 	const checkKey = section.checkKey!;
 	// the order the map numbers them: the crops the check counted major first
-	const crops = cropsForReview(evidence, section.layers);
-	const flagged = flaggedCrops(evidence, section.layers);
+	const calls = useMemo(() => cropCalls(evidence, section.layers), [evidence, section.layers]);
+	const crops = cropsForReview(evidence, calls);
+	const flagged = crops.filter((c) => calls.get(c.id) === "major");
 	const index = crops.findIndex((c) => c.id === cropId);
 	const runId = evidence.run.id;
 	const target = (layer: AuditLayer) => ({ checkKey, layer, cropId });
@@ -62,27 +63,22 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 		if (next !== null) onSelectCrop(next);
 	};
 
-	const keys = useRef({ step, answer, disabled, cropId, layers: section.layers, verdicts: section.verdicts });
-	keys.current = { step, answer, disabled, cropId, layers: section.layers, verdicts: section.verdicts };
-	useEffect(() => {
-		if (!active) return;
-		const onKey = (event: KeyboardEvent) => {
-			if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
-			const k = keys.current;
-			if (event.key === "n") k.step(1);
-			else if (event.key === "p") k.step(-1);
-			else if (event.key === " " && k.cropId !== null && !k.disabled) {
-				event.preventDefault();
-				void k.answer(k.layers, "ok").then((saved) => saved && k.step(1));
-			} else if (["1", "2", "3"].includes(event.key) && k.cropId !== null && !k.disabled) {
-				// the number on the verdict buttons: that verdict on every layer of the crop, then the next one
-				const verdict = k.verdicts[Number(event.key) - 1];
-				if (verdict) void k.answer(k.layers, verdict).then((saved) => saved && k.step(1));
-			}
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [active]);
+	// n / p step; space marks every layer fine and 1 to 3 give every layer that verdict, both moving on
+	const answerAndStep = (verdict: AuditVerdict | undefined) => {
+		if (cropId === null || disabled || !verdict) return;
+		void answer(section.layers, verdict).then((saved) => saved && step(1));
+	};
+	useAuditShortcuts(
+		{
+			n: () => step(1),
+			p: () => step(-1),
+			" ": () => answerAndStep("ok"),
+			"1": () => answerAndStep(section.verdicts[0]),
+			"2": () => answerAndStep(section.verdicts[1]),
+			"3": () => answerAndStep(section.verdicts[2]),
+		},
+		active,
+	);
 
 	if (!crops.length) return <div className="text-xs text-gray-500">This check stored no crops.</div>;
 	const flaggedLine = flagged.length > 0 && (
@@ -105,7 +101,7 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 			</div>
 		);
 	}
-	const call = cropCall(evidence, cropId, section.layers);
+	const call = calls.get(cropId) ?? null;
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg bg-white p-2.5">

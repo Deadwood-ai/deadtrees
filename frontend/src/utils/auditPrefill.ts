@@ -1,5 +1,5 @@
 import type { IAuditSuggestion } from "../types/acquisitionDate";
-import type { AuditVerdict, IAuditAnswerInput, IAuditChecks } from "../types/auditChecks";
+import type { AuditCheckKey, AuditLayer, AuditVerdict, IAuditAnswerInput, IAuditChecks } from "../types/auditChecks";
 import type { AuditFormValues } from "../hooks/useDatasetAudit";
 import {
 	AUDIT_SECTIONS,
@@ -8,21 +8,20 @@ import {
 	automatedVerdict,
 	evaluationFlags,
 	formValuesForVerdict,
+	keepsDataset,
 	myAnswer,
 } from "./auditChecks";
 
 /** A check's call that a reviewer can take over: the section's check and layer, with its run. */
 interface ICheckCall {
-	checkKey: NonNullable<(typeof AUDIT_SECTIONS)[number]["checkKey"]>;
-	layer: (typeof AUDIT_SECTIONS)[number]["layers"][number];
+	checkKey: AuditCheckKey;
+	layer: AuditLayer;
 	runId: number;
 	verdict: AuditVerdict;
 	labelId: number | null;
 	/** the rule row's details: the dataset evaluation's fix flags and exclude reason */
 	details: Record<string, unknown>;
 }
-
-const keeps = (verdict: AuditVerdict) => verdict === "ok" || verdict === "minor";
 
 /** Every decided call (not unsure) of the checks that ran on the dataset, in audit page order. */
 function checkCalls(checks: IAuditChecks | undefined): ICheckCall[] {
@@ -43,7 +42,7 @@ function checkCalls(checks: IAuditChecks | undefined): ICheckCall[] {
  * thumbnail flags the check named. */
 function callFields(call: ICheckCall): Partial<AuditFormValues> {
 	const values = formValuesForVerdict(call.checkKey, call.layer, call.verdict);
-	if (call.checkKey === "dataset_evaluation" && keeps(call.verdict)) {
+	if (call.checkKey === "dataset_evaluation" && keepsDataset(call.verdict)) {
 		const flags = evaluationFlags({ details: call.details });
 		for (const { flag, field } of EVALUATION_FLAGS) if (field) values[field] = flags.includes(flag);
 	}
@@ -91,14 +90,14 @@ function formVerdict(call: ICheckCall, values: Partial<AuditFormValues>): AuditV
 
 /** Saving the audit answers every call you have not answered yet: with the check's verdict where
  * the form still holds its suggestion, with your own where you changed the field. Each answer is
- * marked (`mark`, by default `with_save`), so it can be told apart from one you gave in its step.
- * `only` limits it to one check, e.g. the open step's when you accept it with Enter. */
+ * marked `with_save`, so it can be told apart from one you gave in its step. `only` limits it to
+ * one check, e.g. the open step's when you accept it with Enter (`withSave: false`). */
 export function answersWithSave(
 	checks: IAuditChecks | undefined,
 	userId: string | undefined,
 	values: Partial<AuditFormValues>,
 	datasetId: number,
-	{ only, mark = { with_save: true } }: { only?: string; mark?: Record<string, unknown> } = {},
+	{ only, withSave = true }: { only?: AuditCheckKey; withSave?: boolean } = {},
 ): IAuditAnswerInput[] {
 	if (!checks || !userId) return [];
 	return checkCalls(checks).flatMap((call) => {
@@ -110,7 +109,7 @@ export function answersWithSave(
 		// a kept dataset's flags: COG and thumbnail as the form holds them, reprocessing as the check said
 		const ruleFlags = evaluationFlags({ details: call.details });
 		const fixFlags =
-			evaluation && keeps(verdict)
+			evaluation && keepsDataset(verdict)
 				? EVALUATION_FLAGS.filter((f) => (f.field ? values[f.field] === true : ruleFlags.includes(f.flag))).map((f) => f.flag)
 				: [];
 		return [
@@ -120,9 +119,9 @@ export function answersWithSave(
 				run_id: call.runId,
 				layer: call.layer,
 				label_id: call.labelId,
-				verdict: evaluation && keeps(verdict) ? (fixFlags.length ? "minor" : "ok") : verdict,
-				reason_code: evaluation && !keeps(verdict) && typeof call.details.reason === "string" ? call.details.reason : null,
-				details: { ...mark, ...(evaluation ? { fix_flags: fixFlags } : {}) },
+				verdict: evaluation && keepsDataset(verdict) ? (fixFlags.length ? "minor" : "ok") : verdict,
+				reason_code: evaluation && !keepsDataset(verdict) && typeof call.details.reason === "string" ? call.details.reason : null,
+				details: { ...(withSave ? { with_save: true } : {}), ...(evaluation ? { fix_flags: fixFlags } : {}) },
 			},
 		];
 	});

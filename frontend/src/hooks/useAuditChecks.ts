@@ -20,7 +20,8 @@ export const audit = () => supabase.schema("audit");
 /** PostgREST answers this while the audit schema is not in its exposed schemas. */
 export const SCHEMA_NOT_EXPOSED = "PGRST106";
 
-/** The columns the page reads of an assessment; the model's raw reply and likelihoods stay on the server. */
+/** The columns the page reads of an assessment; the model's raw reply stays on the server. The major
+ * likelihood comes along so the page can mark the crops the check counted major (utils/cropCalls). */
 const ASSESSMENT_COLUMNS =
   "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, major_likelihood, reason_code, reason_text, details";
 export const QUEUE_COLUMNS = "dataset_id, check_key, layer, run_id, verdict, reason";

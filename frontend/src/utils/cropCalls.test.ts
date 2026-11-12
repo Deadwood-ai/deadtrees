@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditAssessment, IAuditCheckEvidence } from "../types/auditChecks";
-import { cropCall, cropsForReview, flaggedCrops } from "./cropCalls";
+import { cropCall, cropCalls, cropsForReview } from "./cropCalls";
 
 const model = (crop_id: number, layer: IAuditAssessment["layer"], modelName: string, major_likelihood: number, verdict: IAuditAssessment["verdict"] = "ok") =>
 	({ crop_id, layer, model: modelName, major_likelihood, verdict, assessor_kind: "model" }) as IAuditAssessment;
@@ -38,7 +38,8 @@ describe("cropCall", () => {
 describe("cropsForReview", () => {
 	it("puts the crops the check counted major first and lists them", () => {
 		const e = evidence([model(3, "deadwood", "a", 90, "major"), model(1, "deadwood", "a", 10)]);
-		expect(cropsForReview(e, ["deadwood"]).map((c) => c.id)).toEqual([3, 1, 2, 4]);
-		expect(flaggedCrops(e, ["deadwood"]).map((c) => c.id)).toEqual([3]);
+		const calls = cropCalls(e, ["deadwood"]);
+		expect(cropsForReview(e, calls).map((c) => c.id)).toEqual([3, 1, 2, 4]);
+		expect([...calls].filter(([, call]) => call === "major").map(([id]) => id)).toEqual([3]);
 	});
 });

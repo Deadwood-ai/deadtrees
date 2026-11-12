@@ -100,8 +100,8 @@ describe("answersWithSave", () => {
 });
 
 describe("answersWithSave for one step", () => {
-	it("answers only the given check, with the mark it is given", () => {
-		const answers = answersWithSave(checks(), "me", { is_georeferenced: false }, 7, { only: "georef", mark: {} });
+	it("answers only the given check, unmarked when not given with the save", () => {
+		const answers = answersWithSave(checks(), "me", { is_georeferenced: false }, 7, { only: "georef", withSave: false });
 		expect(answers).toHaveLength(1);
 		expect(answers[0]).toMatchObject({ check_key: "georef", verdict: "major", details: {} });
 	});

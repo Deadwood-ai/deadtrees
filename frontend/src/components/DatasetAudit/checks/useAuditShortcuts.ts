@@ -1,42 +1,36 @@
 import { useEffect, useRef } from "react";
 
-/** What the audit's keys do; an absent action leaves its key alone. */
-export interface IAuditShortcuts {
-	/** Enter: take the open step's suggestion and move on */
-	accept?: () => void;
-	/** Shift+Enter: the step before */
-	back?: () => void;
-	/** Ctrl+S or Cmd+S: save the audit */
-	save?: () => void;
-}
+/** Keys and what they do: a plain key ("k", "Enter", " "), "shift+Enter", or "mod+s" for Ctrl or
+ * Cmd with S. An absent key is left alone. */
+export type AuditKeyMap = Partial<Record<string, () => void>>;
 
-/** A key pressed while typing in a field (or on a focused button, for Enter) belongs to it. */
-export const typing = (target: EventTarget | null) =>
-	target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName));
+/** A key pressed while typing in a field belongs to the field. */
+const typing = (target: EventTarget | null) =>
+	target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-/** The audit's step keys: go through the steps with the keyboard, the mouse only to dig deeper.
- * Step 1 adds K and X, the crops n, p, space and 1 to 3. Keys are ignored while you type in a
- * field; Enter on a focused button presses that button. */
-export function useAuditShortcuts(shortcuts: IAuditShortcuts, enabled: boolean) {
-	const current = useRef(shortcuts);
-	current.current = shortcuts;
+/** Enter and Space on a focused button press that button. */
+const onButton = (target: EventTarget | null) => target instanceof HTMLElement && !!target.closest("button");
+
+/** The audit's keyboard: go through the steps with the keys, the mouse only to dig deeper. Each
+ * part of the page passes the keys it answers while it is active: the steps Enter, Shift+Enter
+ * and Ctrl+S, step 1 K and X, the crops n, p, Space and 1 to 3. Keys are ignored while you type
+ * in a field (except Ctrl+S), and Enter or Space on a focused button press that button. */
+export function useAuditShortcuts(keys: AuditKeyMap, active: boolean) {
+	const current = useRef(keys);
+	current.current = keys;
 	useEffect(() => {
-		if (!enabled) return;
+		if (!active) return;
 		const onKey = (event: KeyboardEvent) => {
-			const s = current.current;
-			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-				if (!s.save) return;
-				event.preventDefault();
-				s.save();
-				return;
-			}
-			if (event.ctrlKey || event.metaKey || event.altKey || typing(event.target)) return;
-			const action = event.key === "Enter" ? (event.shiftKey ? s.back : s.accept) : undefined;
+			const mod = event.ctrlKey || event.metaKey;
+			const name = mod ? `mod+${event.key.toLowerCase()}` : event.shiftKey && event.key === "Enter" ? "shift+Enter" : event.key;
+			if (!mod && (event.altKey || typing(event.target))) return;
+			if ((event.key === "Enter" || event.key === " ") && onButton(event.target)) return;
+			const action = current.current[name];
 			if (!action) return;
 			event.preventDefault();
 			action();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [enabled]);
+	}, [active]);
 }

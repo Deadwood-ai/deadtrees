@@ -34,15 +34,17 @@ export function cropCall(evidence: Pick<IAuditCheckEvidence, "run" | "automated"
 	return calls.some(Boolean) ? "major" : "ok";
 }
 
-/** The crops in review order: the ones the check counted major first, then the page's usual order. */
-export function cropsForReview(evidence: Pick<IAuditCheckEvidence, "run" | "automated" | "crops">, layers: AuditLayer[]): IAuditCheckEvidence["crops"] {
-	const crops = orderedCrops(evidence);
-	if (!layers.length) return crops;
-	const major = (id: number) => (cropCall(evidence, id, layers) === "major" ? 0 : 1);
-	return crops.map((crop, i) => ({ crop, i })).sort((a, b) => major(a.crop.id) - major(b.crop.id) || a.i - b.i).map(({ crop }) => crop);
+/** The check's call on every crop, worked out once: the map's marks, the review order and the
+ * flagged list all read it. */
+export function cropCalls(evidence: Pick<IAuditCheckEvidence, "run" | "automated" | "crops">, layers: AuditLayer[]): Map<number, AuditVerdict | null> {
+	const byCrop = new Map<number, IAuditCheckEvidence["automated"]>();
+	for (const row of evidence.automated) if (row.crop_id !== null) byCrop.set(row.crop_id, [...(byCrop.get(row.crop_id) ?? []), row]);
+	return new Map(evidence.crops.map((c) => [c.id, layers.length ? cropCall({ run: evidence.run, automated: byCrop.get(c.id) ?? [] }, c.id, layers) : null]));
 }
 
-/** The crops the check counted major, in review order. */
-export function flaggedCrops(evidence: Pick<IAuditCheckEvidence, "run" | "automated" | "crops">, layers: AuditLayer[]): IAuditCheckEvidence["crops"] {
-	return cropsForReview(evidence, layers).filter((c) => cropCall(evidence, c.id, layers) === "major");
+/** The crops in review order: the ones the check counted major first, then the page's usual
+ * order (the sort is stable). */
+export function cropsForReview(evidence: Pick<IAuditCheckEvidence, "crops">, calls: Map<number, AuditVerdict | null>): IAuditCheckEvidence["crops"] {
+	const major = (id: number) => (calls.get(id) === "major" ? 0 : 1);
+	return orderedCrops(evidence).sort((a, b) => major(a.id) - major(b.id));
 }

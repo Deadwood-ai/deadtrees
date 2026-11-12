@@ -336,7 +336,8 @@ export function evaluationFlags(row: Pick<IAuditAssessment, "details"> | null | 
   return EVALUATION_FLAGS.map((f) => f.flag).filter((flag) => named.includes(flag));
 }
 
-const keepsDataset = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
+/** A dataset evaluation verdict that keeps the dataset (ok, or keep with something to fix). */
+export const keepsDataset = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
 
 /** A dataset evaluation answer in a few words, the check's or a person's: "Keep", "Keep (COG issue)", "Exclude (blurry)". */
 export function evaluationAnswerText(row: Pick<IAuditAssessment, "verdict" | "details" | "reason_code">): string {

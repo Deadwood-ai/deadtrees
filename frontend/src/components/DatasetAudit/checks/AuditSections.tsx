@@ -1,8 +1,7 @@
-import { useEffect, useRef, type ComponentProps, type ReactNode } from "react";
-import { Form, message } from "antd";
+import type { ComponentProps, ReactNode } from "react";
+import type { IAuditSuggestion } from "../../../types/acquisitionDate";
+import { Form } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
-import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
-import { answersWithSave } from "../../../utils/auditPrefill";
 import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
 import type { AuditCheckKey, AuditLayer, IAuditChecks } from "../../../types/auditChecks";
 import {
@@ -26,14 +25,14 @@ import { GeoreferencingCard } from "../GeoreferencingCard";
 import { createConditionalRule } from "../auditConstants";
 import { InlineLoadError } from "../../SectionStates";
 import AnswerDetails from "./AnswerDetails";
-import { useAuditShortcuts } from "./useAuditShortcuts";
 import AuditSection from "./AuditSection";
 import CheckAnswer from "./CheckAnswer";
 import CheckSummary from "./CheckSummary";
 import CropAnswers from "./CropAnswers";
 import EvaluationAnswer from "./EvaluationAnswer";
 import DerivedDecision from "./DerivedDecision";
-import { nextStep, previousStep, type IAuditCheckView } from "./auditCheckView";
+import type { IAuditCheckView } from "./auditCheckView";
+import { useAuditStepper } from "./useAuditStepper";
 
 /** A saved-audit field the reviewer's answer sets: it takes part in the form, and so in its
  * validation and saving, without a control of its own. */
@@ -45,6 +44,8 @@ interface AuditSectionsProps {
 	/** the check results failed to load: say so instead of showing "Not run yet" */
 	checksFailed: boolean;
 	onRetryChecks: () => void;
+	/** the audit suggestions and the fields the form took from them, for the steps' "suggested" tags */
+	prefill: { suggestions: IAuditSuggestion[]; prefilledFields: string[] };
 	/** the existing evidence panels, each section's body */
 	panels: {
 		georef: ComponentProps<typeof GeoreferencingCard>;
@@ -65,7 +66,7 @@ interface AuditSectionsProps {
 
 /** The audit sidebar: the derived decision, user reports and the six checks in order.
  * Opening a section puts the map into that check's mode. */
-export default function AuditSections({ datasetId, checks, checksFailed, onRetryChecks, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
+export default function AuditSections({ datasetId, checks, checksFailed, onRetryChecks, prefill, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
 	const { user } = useAuth();
 	const form = Form.useFormInstance<AuditFormValues>();
 	const phenology = Form.useWatch("has_valid_phenology", { form, preserve: true });
@@ -93,52 +94,14 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const evaluation = checks?.checks.dataset_evaluation;
 	const myEvaluation = evaluation ? myAnswer(people, user?.id, evaluation.run.id, { checkKey: "dataset_evaluation", layer: "image" }) : null;
 	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null });
-	const goTo = (id: AuditSectionId | null) => {
-		setView({ section: id, cropId: null });
-		// past the last step: back to the decision at the top, where the audit is saved
-		if (id === null) document.querySelector('[data-testid="audit-decision"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-	};
-	const order = AUDIT_SECTIONS.map((s) => s.id);
-	const next = (id: AuditSectionId) => nextStep(order, id);
-
-	// answering the open step's check moves on to the next step
-	const openAnswered = view.section ? answeredAll(auditSection(view.section)) : false;
-	const answeredBefore = useRef({ section: view.section, answered: openAnswered });
-	useEffect(() => {
-		const before = answeredBefore.current;
-		answeredBefore.current = { section: view.section, answered: openAnswered };
-		if (view.section && before.section === view.section && !before.answered && openAnswered) goTo(next(view.section));
+	const { goTo, next, back } = useAuditStepper({
+		datasetId,
+		checks,
+		view,
+		setView,
+		disabled,
+		openAnswered: view.section ? answeredAll(auditSection(view.section)) : false,
 	});
-
-	// Enter takes the open step's suggestions as your answers (checks you have not answered yet) and
-	// moves on; a step without a check just moves on. Shift+Enter goes back, Ctrl+S saves the audit.
-	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
-	const accept = async () => {
-		const id = view.section;
-		if (!id) return goTo(order[0]);
-		const section = auditSection(id);
-		const answers = section.checkKey
-			? answersWithSave(checks, user?.id, form.getFieldsValue(true), datasetId, { only: section.checkKey, mark: {} })
-			: [];
-		if (answers.length) {
-			try {
-				await saveAnswers(answers);
-			} catch {
-				message.error("Your answer was not saved. Please try again.");
-				return;
-			}
-		}
-		// a stored answer moves on by itself (above); otherwise move on here
-		if (!answers.length) goTo(next(id));
-	};
-	useAuditShortcuts(
-		{
-			accept: disabled ? undefined : () => void accept(),
-			back: () => view.section && goTo(previousStep(order, view.section)),
-			save: () => form.submit(),
-		},
-		true,
-	);
 
 	const answers = (s: IAuditSectionDef) => {
 		const evidence = evidenceOf(s);
@@ -214,7 +177,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		georef: (
 			<>
 				{answers(auditSection("georef"))}
-				<GeoreferencingCard {...panels.georef} answerOwned={answerOwned("is_georeferenced")} byCheck={ranOn("georef", "georef")} />
+				<GeoreferencingCard {...panels.georef} byCheck={ranOn("georef", "georef")} />
 			</>
 		),
 		date: (
@@ -228,9 +191,8 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 			<>
 				{answers(auditSection("prediction"))}
 				<PredictionQualityCard
-					answerOwned={{ deadwood: answerOwned("deadwood_quality"), forestCover: answerOwned("forest_cover_quality") }}
-					suggestions={panels.georef.suggestions}
-					prefilledFields={panels.georef.prefilledFields}
+					suggestions={prefill.suggestions}
+					prefilledFields={prefill.prefilledFields}
 					byCheck={{ deadwood: ranOn("prediction_quality", "deadwood"), forestCover: ranOn("prediction_quality", "forest_cover") }}
 				/>
 			</>
@@ -262,7 +224,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 					status={statuses[s.id]}
 					open={view.section === s.id}
 					onToggle={() => open(s.id)}
-					onBack={previousStep(order, s.id) ? () => goTo(previousStep(order, s.id)) : undefined}
+					onBack={back(s.id)}
 					onNext={() => goTo(next(s.id))}
 					nextLabel={next(s.id) ? "Next step" : "Done: review and save"}
 				>

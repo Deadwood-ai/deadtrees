@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Button, Checkbox, Form, Input, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
@@ -10,10 +10,11 @@ import {
 	automatedVerdict,
 	evaluationAnswerText,
 	evaluationFlags,
+	keepsDataset,
 	myAnswer,
 	type EvaluationFlag,
 } from "../../../utils/auditChecks";
-import { typing } from "./useAuditShortcuts";
+import { useAuditShortcuts } from "./useAuditShortcuts";
 
 interface EvaluationAnswerProps {
 	datasetId: number;
@@ -28,7 +29,6 @@ interface EvaluationAnswerProps {
 const LAYER = "image" as const;
 const SECTION = auditSection("evaluation");
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
-const keeps = (verdict: AuditVerdict | null | undefined) => verdict === "ok" || verdict === "minor";
 
 /** The two lines of a Keep or Exclude button: the call and whether it agrees with the check. */
 const CallLabel = ({ title, hint }: { title: string; hint: string }) => (
@@ -93,18 +93,8 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 	};
 	const keep = (fixFlags: EvaluationFlag[]) => store(fixFlags.length ? "minor" : "ok", fixFlags);
 	// K keeps, X opens the exclude reasons, while the step is open and not yet answered
-	const keys = useRef({ keep: () => keep(draft), exclude: () => setExcluding(true), ready: false });
-	keys.current = { keep: () => keep(draft), exclude: () => setExcluding(true), ready: !answered && !excluding && !disabled && !isPending };
-	useEffect(() => {
-		if (!active) return;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.ctrlKey || event.metaKey || event.altKey || typing(event.target) || !keys.current.ready) return;
-			if (event.key === "k") void keys.current.keep();
-			else if (event.key === "x") keys.current.exclude();
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [active]);
+	const ready = !answered && !excluding && !disabled && !isPending;
+	useAuditShortcuts(ready ? { k: () => void keep(draft), x: () => setExcluding(true) } : {}, active);
 
 	const toggle = (flag: EvaluationFlag) => {
 		const next = flags.includes(flag) ? flags.filter((f) => f !== flag) : [...flags, flag];
@@ -114,13 +104,13 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 	};
 
 	const checkSays = !verdict ? "The check made no call." : verdict === "unsure" || !rule ? "The check could not decide." : `The check says ${evaluationAnswerText({ ...rule, verdict })}.`;
-	const agrees = (answer: "keep" | "exclude") => (answer === "keep" ? keeps(verdict) : verdict === "major");
-	const decided = keeps(verdict) || verdict === "major";
+	const agrees = (answer: "keep" | "exclude") => (answer === "keep" ? keepsDataset(verdict) : verdict === "major");
+	const decided = keepsDataset(verdict) || verdict === "major";
 	// the check's call is preselected: saving the audit takes it over unless you pick the other
 	const suggested = (answer: "keep" | "exclude") => (decided && agrees(answer) ? ("primary" as const) : undefined);
 	const hint = (answer: "keep" | "exclude") =>
 		decided ? (agrees(answer) ? "suggested by the check" : "the check is wrong") : answer === "keep" ? "the orthophoto is usable" : "the orthophoto is unusable";
-	const myCall = mine ? (keeps(mine.verdict) ? "keep" : "exclude") : null;
+	const myCall = mine ? (keepsDataset(mine.verdict) ? "keep" : "exclude") : null;
 	const describe = (a: IAuditAssessment) => `${evaluationAnswerText(a)}${a.reason_text ? `, “${a.reason_text}”` : ""}`;
 
 	return (
