@@ -14,6 +14,7 @@ import {
 	myAnswer,
 	type EvaluationFlag,
 } from "../../../utils/auditChecks";
+import { REPROCESS_DRAFT, evaluationDraft } from "../../../utils/auditPrefill";
 import { useAuditShortcuts } from "./useAuditShortcuts";
 
 interface EvaluationAnswerProps {
@@ -56,17 +57,18 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 	const [excluding, setExcluding] = useState(false);
 	const [reason, setReason] = useState<string | null>(verdict === "major" ? text(rule?.details.reason) : null);
 	const [note, setNote] = useState("");
-	// the flags before an answer: what the check names, and what a saved audit already holds
-	const [draftFlags, setDraftFlags] = useState<EvaluationFlag[] | null>(null);
+	// the flags before an answer live in the form, so Keep, Enter and saving the audit all read the
+	// same draft: the COG and thumbnail fields (prefilled from the check where the saved audit is
+	// empty) and the reprocessing draft
 	const form = Form.useFormInstance();
-	const savedCog = Form.useWatch("has_cog_issue", { form, preserve: true });
-	const savedThumbnail = Form.useWatch("has_thumbnail_issue", { form, preserve: true });
-	const preset = EVALUATION_FLAGS.map((f) => f.flag).filter(
-		(flag) => evaluationFlags(rule).includes(flag) || (flag === "cog_issue" && savedCog === true) || (flag === "thumbnail_issue" && savedThumbnail === true),
-	);
+	const values = Form.useWatch((v) => v, { form, preserve: true }) ?? {};
+	const draft = evaluationDraft(values, rule?.details);
+	const setDraft = (next: EvaluationFlag[]) =>
+		form.setFieldsValue(
+			Object.fromEntries(EVALUATION_FLAGS.map(({ flag, field }) => [field ?? REPROCESS_DRAFT, next.includes(flag)])),
+		);
 
 	const answered = !!mine && !changing;
-	const draft = draftFlags ?? preset;
 	const flags = answered ? evaluationFlags(mine) : draft;
 
 	const store = async (answer: AuditVerdict, fixFlags: EvaluationFlag[], reasonCode: string | null = null, reasonText: string | null = null) => {
@@ -85,7 +87,6 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 			]);
 			setChanging(false);
 			setExcluding(false);
-			setDraftFlags(null);
 			setNote("");
 		} catch {
 			message.error("Your answer was not saved. Please try again.");
@@ -100,7 +101,7 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 		const next = flags.includes(flag) ? flags.filter((f) => f !== flag) : [...flags, flag];
 		// a flag changed after the answer is part of the answer: it is stored at once
 		if (answered) void keep(next);
-		else setDraftFlags(next);
+		else setDraft(next);
 	};
 
 	const checkSays = !verdict ? "The check made no call." : verdict === "unsure" || !rule ? "The check could not decide." : `The check says ${evaluationAnswerText({ ...rule, verdict })}.`;
@@ -133,7 +134,7 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 							disabled={disabled}
 							onClick={() => {
 								// changing starts from the answer, not from what the check said
-								setDraftFlags(evaluationFlags(mine));
+								setDraft(evaluationFlags(mine));
 								setChanging(true);
 							}}
 						>

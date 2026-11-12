@@ -26,7 +26,7 @@ import {
 } from "../../hooks/useAcquisitionDateEstimate";
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
 import { answeredFormValues } from "../../utils/auditChecks";
-import { answersWithSave, withCheckSuggestions } from "../../utils/auditPrefill";
+import { REPROCESS_DRAFT, answersWithSave, withCheckSuggestions } from "../../utils/auditPrefill";
 import { withoutUncertainDate } from "../../utils/acquisitionDate";
 import { useAuditChecks, useSaveAuditAnswers } from "../../hooks/useAuditChecks";
 import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
@@ -339,8 +339,11 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		try {
 			setIsSubmitting(true);
 
+			// the form's store also holds drafts that have no column (step 1's reprocessing draft)
+			const auditValues: Record<string, unknown> = { ...values };
+			delete auditValues[REPROCESS_DRAFT];
 			const auditPayload = {
-				...values,
+				...auditValues,
 				dataset_id: dataset.id,
 				aoi_done: !!currentAOIGeometry.current,
 			};
@@ -349,7 +352,8 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 			await saveAudit({ values: auditPayload, leaseId });
 			// Saving is your review of every step: the checks' calls you left as they are become your
 			// answers, marked as given with the save.
-			const withSave = answersWithSave(auditChecks, user?.id, values, dataset.id);
+			// the whole store: it holds step 1's reprocessing draft, which has no field
+			const withSave = answersWithSave(auditChecks, user?.id, form.getFieldsValue(true), dataset.id);
 			if (withSave.length) {
 				try {
 					await saveAnswers(withSave);

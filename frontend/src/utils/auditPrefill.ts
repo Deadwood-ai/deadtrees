@@ -10,7 +10,12 @@ import {
 	formValuesForVerdict,
 	keepsDataset,
 	myAnswer,
+	type EvaluationFlag,
 } from "./auditChecks";
+
+/** The form keeps step 1's "needs reprocessing" draft under this key. It has no field in the saved
+ * audit, so it never reaches the audit row; the answer given with Keep, Enter or the save reads it. */
+export const REPROCESS_DRAFT = "evaluation_reprocess";
 
 /** A check's call that a reviewer can take over: the section's check and layer, with its run. */
 interface ICheckCall {
@@ -47,6 +52,16 @@ function callFields(call: ICheckCall): Partial<AuditFormValues> {
 		for (const { flag, field } of EVALUATION_FLAGS) if (field) values[field] = flags.includes(flag);
 	}
 	return values;
+}
+
+/** Step 1's flags as the form holds them: the COG and thumbnail fields, and the reprocessing draft
+ * (until it is touched, what the check said). */
+export function evaluationDraft(values: Record<string, unknown>, ruleDetails: Record<string, unknown> | undefined): EvaluationFlag[] {
+	const reprocess = values[REPROCESS_DRAFT];
+	const ruleFlags = evaluationFlags({ details: ruleDetails ?? {} });
+	return EVALUATION_FLAGS.filter((f) => (f.field ? values[f.field] === true : typeof reprocess === "boolean" ? reprocess : ruleFlags.includes(f.flag))).map(
+		(f) => f.flag,
+	);
 }
 
 /** The checks' calls as audit suggestions, so they prefill the form the way the stored
@@ -95,7 +110,7 @@ function formVerdict(call: ICheckCall, values: Partial<AuditFormValues>): AuditV
 export function answersWithSave(
 	checks: IAuditChecks | undefined,
 	userId: string | undefined,
-	values: Partial<AuditFormValues>,
+	values: Partial<AuditFormValues> & Record<string, unknown>,
 	datasetId: number,
 	{ only, withSave = true }: { only?: AuditCheckKey; withSave?: boolean } = {},
 ): IAuditAnswerInput[] {
@@ -107,11 +122,7 @@ export function answersWithSave(
 		if (!verdict) return [];
 		const evaluation = call.checkKey === "dataset_evaluation";
 		// a kept dataset's flags: COG and thumbnail as the form holds them, reprocessing as the check said
-		const ruleFlags = evaluationFlags({ details: call.details });
-		const fixFlags =
-			evaluation && keepsDataset(verdict)
-				? EVALUATION_FLAGS.filter((f) => (f.field ? values[f.field] === true : ruleFlags.includes(f.flag))).map((f) => f.flag)
-				: [];
+		const fixFlags = evaluation && keepsDataset(verdict) ? evaluationDraft(values, call.details) : [];
 		return [
 			{
 				check_key: call.checkKey,

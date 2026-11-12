@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditSuggestion } from "../types/acquisitionDate";
 import type { IAuditAssessment, IAuditCheckEvidence, IAuditChecks, IAuditQueueRow } from "../types/auditChecks";
-import { answersWithSave, withCheckSuggestions } from "./auditPrefill";
+import { REPROCESS_DRAFT, answersWithSave, evaluationDraft, withCheckSuggestions } from "./auditPrefill";
 
 const rule = (overrides: Partial<IAuditAssessment>): IAuditAssessment => ({
 	id: 1,
@@ -104,5 +104,20 @@ describe("answersWithSave for one step", () => {
 		const answers = answersWithSave(checks(), "me", { is_georeferenced: false }, 7, { only: "georef", withSave: false });
 		expect(answers).toHaveLength(1);
 		expect(answers[0]).toMatchObject({ check_key: "georef", verdict: "major", details: {} });
+	});
+});
+
+describe("step 1 draft", () => {
+	it("reads the COG and thumbnail fields and the reprocessing draft, falling back to the check for reprocessing", () => {
+		expect(evaluationDraft({ has_cog_issue: true, has_thumbnail_issue: false }, { fix_flags: ["reprocess"] })).toEqual(["cog_issue", "reprocess"]);
+		expect(evaluationDraft({ has_cog_issue: false, [REPROCESS_DRAFT]: false }, { fix_flags: ["reprocess"] })).toEqual([]);
+	});
+
+	it("stores the flags the reviewer set before accepting, including reprocessing", () => {
+		const answers = answersWithSave(checks(), "me", { has_cog_issue: false, has_thumbnail_issue: true, [REPROCESS_DRAFT]: true }, 7, {
+			only: "dataset_evaluation",
+			withSave: false,
+		});
+		expect(answers[0]).toMatchObject({ verdict: "minor", details: { fix_flags: ["thumbnail_issue", "reprocess"] } });
 	});
 });
