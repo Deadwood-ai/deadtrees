@@ -22,6 +22,9 @@ export interface IAuditAssessment {
   verdict: AuditVerdict;
   /** a model's likelihood (0-100) that the target has major errors; null for people and rules */
   major_likelihood?: number | null;
+  /** a model's error types on the target, each with its likelihood (0-100) and the share of the
+   * target it covers (area_pct, 0-100) */
+  modes?: Record<string, { likelihood?: number; area_pct?: number }> | null;
   reason_code: string | null;
   reason_text: string | null;
   details: Record<string, unknown>;

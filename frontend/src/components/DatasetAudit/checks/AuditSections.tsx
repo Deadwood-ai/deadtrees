@@ -111,7 +111,11 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				<CheckSummary section={s} evidence={evidence} />
 				{s.layers.map((layer) => (
 					<div key={layer}>
-						{s.layers.length > 1 && <div className="mb-1 text-xs font-medium">{LAYER_LABELS[layer]}</div>}
+						{s.cropAnswers ? (
+							<div className="mb-1 text-xs font-medium">Whole layer (this goes into the audit):</div>
+						) : (
+							s.layers.length > 1 && <div className="mb-1 text-xs font-medium">{LAYER_LABELS[layer]}</div>
+						)}
 						<CheckAnswer
 							datasetId={datasetId}
 							section={s}
@@ -143,6 +147,19 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const answerOwned = (field: keyof AuditFormValues) => field in owned;
 	// the audit check made a call on the layer: its answer row is the step's answer
 	const ranOn = (checkKey: AuditCheckKey, layer: AuditLayer) => automatedVerdict(checks?.checks[checkKey], layer) !== null;
+
+	// one prediction layer per step: the check's call on the whole layer, its crops, and the saved rating
+	const predictionBody = (layer: "deadwood" | "forest_cover") => (
+		<>
+			{answers(auditSection(layer === "deadwood" ? "deadwood" : "forest"))}
+			<PredictionQualityCard
+				layer={layer}
+				suggestions={prefill.suggestions}
+				prefilledFields={prefill.prefilledFields}
+				byCheck={ranOn("prediction_quality", layer)}
+			/>
+		</>
+	);
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
 		// where the check has run, one answer decides the step and sets the two saved-audit fields;
@@ -188,16 +205,8 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 			</>
 		),
 		phenology: <PhenologyCard {...panels.phenology} />,
-		prediction: (
-			<>
-				{answers(auditSection("prediction"))}
-				<PredictionQualityCard
-					suggestions={prefill.suggestions}
-					prefilledFields={prefill.prefilledFields}
-					byCheck={{ deadwood: ranOn("prediction_quality", "deadwood"), forestCover: ranOn("prediction_quality", "forest_cover") }}
-				/>
-			</>
-		),
+		deadwood: predictionBody("deadwood"),
+		forest: predictionBody("forest_cover"),
 	};
 
 	return (

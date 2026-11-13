@@ -26,8 +26,8 @@ describe("reviewTargets", () => {
 		expect(reviewTargets(queue).map((t) => [t.key, t.title])).toEqual([
 			["dataset_evaluation:image", "Dataset evaluation"],
 			["georef:georef", "Georeferencing"],
-			["prediction_quality:deadwood", "Deadwood"],
-			["prediction_quality:forest_cover", "Tree cover"],
+			["prediction_quality:deadwood", "Deadwood prediction"],
+			["prediction_quality:forest_cover", "Tree cover prediction"],
 		]);
 	});
 

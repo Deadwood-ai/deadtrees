@@ -181,8 +181,11 @@ for n in range(10):
 	image(cid, 'forest_cover_overlay', c, r, 640, FC, (2, 2, 2))
 	for judge in ('luna', 'haiku'):
 		assess('prediction_quality', pq, 'image', 'model', judge, 'ok', crop_id=cid, modes={'m0_not_assessable': {'likelihood': 0}})
+		# what the model saw: error types with their share of the crop, and its own words
+		dw_modes = {'m1_dead_missed': {'likelihood': 90, 'area_pct': 12}, 'm4_dw_on_lying_wood': {'likelihood': 60, 'area_pct': 3}} if n + 1 in major else {}
+		dw_details = {'errors': ['Several dead crowns in the upper half are not marked blue.'], 'area_pct': 15} if n + 1 in major else {'errors': []}
 		assess('prediction_quality', pq, 'deadwood', 'model', judge, 'major' if n + 1 in major else 'ok', crop_id=cid, label_id=DW,
-		       likelihood=90 if n + 1 in major else 5)
+		       likelihood=90 if n + 1 in major else 5, modes=dw_modes, details=dw_details)
 		assess('prediction_quality', pq, 'forest_cover', 'model', judge, 'minor' if n == 6 else 'ok', crop_id=cid, label_id=FC,
 		       likelihood=30 if n == 6 else 5)
 assess('prediction_quality', pq, 'deadwood', 'rule', 'pq-rule', 'major', label_id=DW,

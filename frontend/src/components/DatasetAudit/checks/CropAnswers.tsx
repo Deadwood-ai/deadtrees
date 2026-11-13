@@ -1,10 +1,10 @@
 import { useMemo } from "react";
-import { Button, Radio, message } from "antd";
+import { Button, Radio, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
 import { LAYER_LABELS, myAnswer, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
-import { cropCalls, cropsForReview } from "../../../utils/cropCalls";
+import { cropCalls, cropFindings, cropsForReview, type ICropFinding } from "../../../utils/cropCalls";
 import { useAuditShortcuts } from "./useAuditShortcuts";
 
 interface CropAnswersProps {
@@ -104,19 +104,20 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	const call = calls.get(cropId) ?? null;
 
 	return (
-		<div className="flex flex-col gap-2 rounded-lg bg-white p-2.5">
+		<div className="flex flex-col gap-2 rounded-lg bg-white p-2.5" data-testid="audit-crop">
 			{flaggedLine}
 			<div className="text-xs font-semibold">
 				Crop {index + 1} of {crops.length}
-				{call && <span className={call === "major" ? "text-red-600" : "text-gray-500"}> · the check: {call === "major" ? "major errors" : "fine"}</span>}
-				<span className="font-normal text-gray-500"> · n / p to step, 1 to 3 = that verdict on both layers, space = all fine</span>
+				{call && <span className={call === "major" ? "text-red-600" : "text-gray-500"}> · the check counts it {call === "major" ? "major" : "fine"}</span>}
 			</div>
 			{section.layers.map((layer) => {
 				const mine = myAnswer(people, user?.id, runId, target(layer));
+				const findings = cropFindings(evidence, cropId, layer);
 				return (
-					<div key={layer} className="flex flex-col gap-1">
+					<div key={layer} className="flex flex-col gap-1.5">
+						<CropFindings findings={findings} label={verdictLabel.bind(null, checkKey)} />
 						<div className="flex flex-wrap items-center gap-1.5">
-							<span className="w-20 text-xs">{LAYER_LABELS[layer]}</span>
+							<span className="text-xs font-medium">This crop:</span>
 							<Radio.Group
 								size="small"
 								optionType="button"
@@ -128,14 +129,43 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 								options={section.verdicts.map((v, i) => ({ value: v, label: `${i + 1} ${verdictLabel(checkKey, v)}` }))}
 							/>
 						</div>
-						{mine && (
-							<div className="pl-20 text-[11px] text-gray-500">
-								Models: {modelRows(layer).map((r) => `${r.model} ${verdictLabel(checkKey, r.verdict)}`).join(" · ") || "none"}
-							</div>
-						)}
 					</div>
 				);
 			})}
+			<div className="text-[11px] text-gray-500">n / p next or previous crop · 1 to 3 answer and go on · space = fine and go on</div>
+		</div>
+	);
+}
+
+/** What each model saw in the crop: its call, the error types it found with their share of the
+ * crop, and its own words. */
+function CropFindings({ findings, label }: { findings: ICropFinding[]; label: (verdict: AuditVerdict) => string }) {
+	if (!findings.length) return <div className="text-[11px] text-gray-500">No model judged this crop.</div>;
+	return (
+		<div className="flex flex-col gap-1.5" data-testid="audit-crop-findings">
+			<div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">What the models saw</div>
+			{findings.map((f) => (
+				<div key={f.model} className="text-xs">
+					<div>
+						<span className="font-medium">{f.model}:</span> {label(f.verdict)}
+					</div>
+					{f.issues.length > 0 && (
+						<div className="mt-0.5 flex flex-wrap gap-1">
+							{f.issues.map((i) => (
+								<Tag key={i.label} className="m-0 text-[11px]" color={f.verdict === "major" ? "orange" : "default"}>
+									{i.label}
+									{i.areaPct !== null ? ` · ${i.areaPct < 1 ? "<1" : Math.round(i.areaPct)}% of crop` : ""}
+								</Tag>
+							))}
+						</div>
+					)}
+					{f.errors.map((e, n) => (
+						<div key={n} className="mt-0.5 text-[11px] text-gray-600">
+							“{e}”
+						</div>
+					))}
+				</div>
+			))}
 		</div>
 	);
 }

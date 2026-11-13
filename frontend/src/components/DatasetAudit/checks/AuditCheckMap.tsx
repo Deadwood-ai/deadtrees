@@ -42,8 +42,9 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const [showMatches, setShowMatches] = useState(true);
 	const [droneOpacity, setDroneOpacity] = useState(60);
 	const [colorByVerdict, setColorByVerdict] = useState(true);
-	const [showModelView, setShowModelView] = useState(false);
-	const [imageKind, setImageKind] = useState<CropImageKind>("raw");
+	const [showModelView, setShowModelView] = useState(!!(section?.map?.kind === "crops" && section.map.showModelView));
+	// the step's own layer first: what the model saw of that prediction
+	const [imageKind, setImageKind] = useState<CropImageKind>(section?.map?.kind === "crops" ? section.map.images[0] : "raw");
 
 	const georef = mode?.kind === "georef" ? georefCheck : null;
 	const references = useMemo(() => (georef ? georefReferenceOptions(georef) : []), [georef]);

@@ -20,7 +20,7 @@ import type { IGeorefCheck } from "../types/georefCheck";
 import { reportedOutsideLikelyRange } from "./acquisitionDate";
 import { summarizeGeorefCheck } from "./georefCheck";
 
-export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "prediction";
+export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "deadwood" | "forest";
 export type CropImageKind = Extract<AuditImageKind, "raw" | "deadwood_overlay" | "forest_cover_overlay">;
 
 /** What the map shows while a section is open: the georeferencing matches, or the crops the check judged. */
@@ -32,16 +32,19 @@ export type IAuditSectionMap =
       images: CropImageKind[];
       /** layers whose model verdict can colour the squares */
       colorLayers: AuditLayer[];
+      /** the step opens with "what the model saw" shown (the first of `images`) */
+      showModelView?: boolean;
     };
 
 /** Map layers a step switches on (true) or off (false) while its section is open. */
 export interface ISectionLayers {
   aoi: boolean;
-  predictions: boolean;
+  deadwood: boolean;
+  forestCover: boolean;
 }
 
-const ORTHO_ONLY: ISectionLayers = { aoi: false, predictions: false };
-const ALL_LAYERS: ISectionLayers = { aoi: true, predictions: true };
+const ORTHO_ONLY: ISectionLayers = { aoi: false, deadwood: false, forestCover: false };
+const ALL_LAYERS: ISectionLayers = { aoi: true, deadwood: true, forestCover: true };
 
 export interface IAuditReason {
   code: string;
@@ -133,23 +136,31 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     verdicts: [],
     fields: ["has_valid_phenology"],
   },
-  {
-    id: "prediction",
-    title: "Prediction quality",
-    checkKey: "prediction_quality",
-    layers: ["deadwood", "forest_cover"],
-    map: { kind: "crops", images: ["raw", "deadwood_overlay", "forest_cover_overlay"], colorLayers: ["deadwood", "forest_cover"] },
-    shows: ALL_LAYERS,
-    cropAnswers: true,
-    reasons: [
-      { code: "errors_missed", label: "Model missed errors" },
-      { code: "fine_prediction_flagged", label: "Model flagged a fine prediction" },
-      { code: "crops_not_representative", label: "Crops not representative" },
-      OTHER,
-    ],
-    verdicts: ["ok", "minor", "major"],
-    fields: ["deadwood_quality", "forest_cover_quality"],
-  },
+  // the prediction check, one layer after the other: each step shows only its own layer
+  ...(["deadwood", "forest_cover"] as const).map(
+    (layer): IAuditSectionDef => ({
+      id: layer === "deadwood" ? "deadwood" : "forest",
+      title: layer === "deadwood" ? "Deadwood prediction" : "Tree cover prediction",
+      checkKey: "prediction_quality",
+      layers: [layer],
+      map: {
+        kind: "crops",
+        images: [layer === "deadwood" ? "deadwood_overlay" : "forest_cover_overlay", "raw"],
+        colorLayers: [layer],
+        showModelView: true,
+      },
+      shows: { aoi: true, deadwood: layer === "deadwood", forestCover: layer === "forest_cover" },
+      cropAnswers: true,
+      reasons: [
+        { code: "errors_missed", label: "Model missed errors" },
+        { code: "fine_prediction_flagged", label: "Model flagged a fine prediction" },
+        { code: "crops_not_representative", label: "Crops not representative" },
+        OTHER,
+      ],
+      verdicts: ["ok", "minor", "major"],
+      fields: [layer === "deadwood" ? "deadwood_quality" : "forest_cover_quality"],
+    }),
+  ),
 ];
 
 export const auditSection = (id: AuditSectionId) => AUDIT_SECTIONS.find((s) => s.id === id)!;

@@ -122,7 +122,7 @@ describe("legacySectionStatus", () => {
   const georefCheck = { decision: "poor", evidence_level: "gross", reason: "gross_offset", p90_m: 40, reference_evidence: [] } as unknown as IGeorefCheck;
 
   it("says not run yet for a check without any result, and manual for a date without an estimate", () => {
-    for (const id of ["evaluation", "georef", "prediction"] as const) {
+    for (const id of ["evaluation", "georef", "deadwood", "forest"] as const) {
       expect(legacySectionStatus(id, inputs)).toEqual({ label: "Not run yet", tone: "todo", needsYou: false });
     }
     expect(legacySectionStatus("date", inputs)).toEqual({ label: "Manual", tone: "todo", needsYou: false });
@@ -343,7 +343,8 @@ describe("section definitions", () => {
 
   it("finds the section that holds a saved-audit field", () => {
     expect(sectionOfField("has_cog_issue")).toBe("evaluation");
-    expect(sectionOfField("deadwood_quality")).toBe("prediction");
+    expect(sectionOfField("deadwood_quality")).toBe("deadwood");
+    expect(sectionOfField("forest_cover_quality")).toBe("forest");
     expect(sectionOfField("has_valid_phenology")).toBe("phenology");
     expect(sectionOfField("final_assessment")).toBeNull();
   });

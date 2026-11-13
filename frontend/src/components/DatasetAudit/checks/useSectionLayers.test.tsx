@@ -18,8 +18,8 @@ const shown = (layers: ReturnType<typeof useDatasetDetailsMap>) => {
 	return { showAOI, showDeadwood, showForestCover };
 };
 
-const ORTHO = { aoi: false, predictions: false };
-const ALL = { aoi: true, predictions: true };
+const ORTHO = { aoi: false, deadwood: false, forestCover: false };
+const ALL = { aoi: true, deadwood: true, forestCover: true };
 
 describe("useSectionLayers", () => {
 	it("shows only the orthophoto while such a step is open and brings the layers back", () => {
@@ -47,5 +47,11 @@ describe("useSectionLayers", () => {
 		act(() => result.current.setShowDeadwood(true));
 		rerender({ shows: null });
 		expect(shown(result.current).showDeadwood).toBe(true);
+	});
+
+	it("shows one prediction layer at a time for its step", () => {
+		const { result, rerender } = renderHook(({ shows }) => useLayers(shows), { wrapper, initialProps: { shows: null as ISectionLayers | null } });
+		rerender({ shows: { aoi: true, deadwood: true, forestCover: false } });
+		expect(shown(result.current)).toEqual({ showAOI: true, showDeadwood: true, showForestCover: false });
 	});
 });
