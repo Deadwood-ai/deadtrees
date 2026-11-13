@@ -55,6 +55,8 @@ export interface CropReviewerProps {
 	/** the keys work: the reviewer is on screen */
 	active: boolean;
 	disabled: boolean;
+	/** the models stay hidden until you answer: the benchmark labels blind */
+	blind?: boolean;
 }
 
 const OVERLAY: Record<PredictionLayer, CropImageKind> = { deadwood: "deadwood_overlay", forest_cover: "forest_cover_overlay" };
@@ -65,7 +67,7 @@ const OVERLAY: Record<PredictionLayer, CropImageKind> = { deadwood: "deadwood_ov
  * V side by side, ↑ ↓ error type, Y N U yes no unsure, 1 2 3 verdict (saves on the last layer),
  * Space layer fine, Shift+Space crop fine, C can't tell, Enter save and on, B benchmark, M map. */
 export default function CropReviewer(props: CropReviewerProps) {
-	const { crops, layers, imageOf, automated, mine, checkMajor, cropId, onSelectCrop, onAnswer, onDone, onAddToBenchmark, onShowMap, header, active, disabled } =
+	const { crops, layers, imageOf, automated, mine, checkMajor, cropId, onSelectCrop, onAnswer, onDone, onAddToBenchmark, onShowMap, header, active, disabled, blind } =
 		props;
 	const [allCrops, setAllCrops] = useState(false);
 	const [sideBySide, setSideBySide] = useState(true);
@@ -297,6 +299,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 							onProblem={(mode, answer) => edit(layer, (d) => withProblem(d, mode, answer))}
 							onVerdict={(verdict) => edit(layer, (d) => withVerdict(d, verdict))}
 							disabled={disabled || saving}
+							blind={blind}
 						/>
 					))}
 				{crop && (

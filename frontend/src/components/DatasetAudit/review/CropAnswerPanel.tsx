@@ -30,11 +30,13 @@ interface CropAnswerPanelProps {
 	onProblem: (mode: string, answer: ProblemAnswer) => void;
 	onVerdict: (verdict: AuditVerdict) => void;
 	disabled: boolean;
+	/** the models stay hidden until you answer (the benchmark labels blind) */
+	blind?: boolean;
 }
 
 /** One prediction layer of a crop: what each model saw, then your answer per error type (the
  * models' ones come ticked yes) and the crop's verdict on the layer. */
-export default function CropAnswerPanel({ layer, findings, draft, focus, onFocus, onProblem, onVerdict, disabled }: CropAnswerPanelProps) {
+export default function CropAnswerPanel({ layer, findings, draft, focus, onFocus, onProblem, onVerdict, disabled, blind = false }: CropAnswerPanelProps) {
 	// the share of the crop a model gave each error type, to weigh minor against major
 	const area = (mode: string) => {
 		const shares = findings.flatMap((f) => f.issues.filter((i) => i.key === mode && i.areaPct !== null).map((i) => i.areaPct as number));
@@ -43,9 +45,9 @@ export default function CropAnswerPanel({ layer, findings, draft, focus, onFocus
 	return (
 		<div className="flex flex-col gap-3" data-testid={`crop-answer-${layer}`}>
 			<div className="text-sm font-semibold">{PREDICTION_LABELS[layer]}</div>
-			<Findings findings={findings} />
+			{blind ? <div className="text-[11px] text-gray-500">The models show after your answer.</div> : <Findings findings={findings} />}
 			<div className="flex flex-col gap-1">
-				<div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Your answer · the models' problems come ticked</div>
+				<div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{blind ? "Your answer" : "Your answer · the models' problems come ticked"}</div>
 				{LAYER_MODES[layer].map((mode) => {
 					const share = area(mode);
 					return (
