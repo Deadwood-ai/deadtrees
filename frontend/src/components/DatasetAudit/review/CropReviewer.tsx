@@ -257,8 +257,8 @@ export default function CropReviewer(props: CropReviewerProps) {
 				{crop ? (
 					<CropImages
 						raw={imageOf(crop.id, "raw")}
-						prediction={imageOf(crop.id, OVERLAY[layers[0]])}
-						predictionLabel={PREDICTION_LABELS[layers[0]]}
+						prediction={imageOf(crop.id, OVERLAY[focus.layer])}
+						predictionLabel={PREDICTION_LABELS[focus.layer]}
 						sideBySide={sideBySide}
 						showPrediction={showPrediction}
 						resetKey={crop.id}
