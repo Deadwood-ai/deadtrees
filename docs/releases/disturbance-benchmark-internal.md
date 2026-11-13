@@ -108,17 +108,20 @@ the destination and key.
 
 ## Data limitations to keep visible
 
-For the v7 replacement payload, settings, metrics and ingestion commands, use
-[the v7 handoff](disturbance-benchmark-v7.md). The following counts and NA-score
-notes describe the original `pylos-2026-10-15` snapshot only; the active run is
-identified by its catalogue and site provenance.
+For the current payload, settings, metrics and ingestion commands, use
+[the v8 / v11 handoff](disturbance-benchmark-v8.md). The earlier
+[v7 handoff](disturbance-benchmark-v7.md) remains available for provenance. The
+active run is identified by its catalogue and site provenance.
 
 
-- 233 saved b+y overlays across 41 sites; 73 sites have no saved prediction. Keep
-  those sites and their warnings; never show missing products or scores as zero.
+- The original `pylos-2026-10-15` snapshot had 233 saved b+y overlays across 41
+  sites and 73 sites without a saved prediction. Coverage changes by release;
+  keep unavailable sites and warnings, and never show missing scores as zero.
 - Predictions are the saved `*_by_pred_res.tif` (preceding year b or flight year
-  y). DTE uses `dt_fc_dw_comb_by`. The frontend does not rethreshold anything.
-- Precision, recall and F1 are NA. Flight IDs and dates follow Claudia's site sheet;
+  y). Current DTE uses `dtbil10_fc_dw_comb_by` and TCD uses `tcbil10_by`, both
+  bilinear 10%. The frontend does not rethreshold anything.
+- Scores use verified original-grid confusion counts; missing coverage and
+  undefined denominators remain NA. Flight IDs and dates follow Claudia's site sheet;
   keep source warnings such as the Brazil3 flight/prediction mismatch.
 - Binary masks stay lossless (PNG in the export, lossless WebP on the web). RGB images are display imagery. Planet GCC is an RGB
   greenness proxy, not NDVI. Smoothing is display only.

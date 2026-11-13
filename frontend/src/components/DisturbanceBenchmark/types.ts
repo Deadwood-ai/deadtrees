@@ -91,6 +91,7 @@ export interface IBenchmarkSite extends IBenchmarkSiteSummary {
   products: IBenchmarkEvaluation[];
   series: IBenchmarkObservation[];
   planetSeries?: IBenchmarkPlanetObservation[];
+  planetSeriesBasis?: string;
   contexts: Partial<Record<ContextSource, IBenchmarkFrame[]>>;
   notes: string[];
   datasetUrl?: string;
