@@ -504,3 +504,26 @@ def test_remote_copies_stop_on_a_conflicting_stored_image(tmp_path):
 		with pytest.raises(SystemExit):
 			audit_import.copy_images(plan, 'storage:/data', run=run)
 		assert [c[0] for c in calls] == ['ssh']
+
+
+def test_picked_evaluation_datasets_join_the_open_gold_set_once(db):
+	owner = create_user(db)
+	kept, excluded = create_dataset(db, owner), create_dataset(db, owner)
+	deleted = excluded + 10_000_000
+	gold = {
+		'datasets': [
+			{'dataset_id': kept, 'split': audit_import.hash_split(kept)},
+			{'dataset_id': excluded, 'split': audit_import.hash_split(excluded)},
+			{'dataset_id': deleted, 'split': audit_import.hash_split(deleted)},
+		]
+	}
+	plan = audit_import.plan_evaluation_gold(db, gold)
+	assert (plan['picked'], plan['deleted_since'], plan['already_members'], plan['to_add']) == (3, [deleted], 0, 2)
+	assert plan['split_differs'] == [] and sum(plan['splits'].values()) == 2
+	assert audit_import.import_evaluation_gold(db, plan) == 2
+	assert db.execute(
+		'SELECT dataset_id, crop_id, split FROM audit.benchmark_members WHERE benchmark_id=%s ORDER BY dataset_id',
+		(plan['benchmark_id'],),
+	).fetchall() == [(d, None, audit_import.hash_split(d)) for d in (kept, excluded)]
+	again = audit_import.plan_evaluation_gold(db, gold)
+	assert (again['already_members'], again['to_add']) == (2, 0)
