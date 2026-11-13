@@ -14,7 +14,7 @@ function majorCut(evidence: Pick<IAuditCheckEvidence, "run">, layer: AuditLayer)
 /** Whether the check counted a crop major on one layer, as its rule does: the mean major
  * likelihood of the models that could assess the crop reaches the version's cut-off. A model
  * that could not assess the crop says so on the crop's image row. Null when nothing decides. */
-function cropMajor(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layer: AuditLayer): boolean | null {
+export function cropMajor(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layer: AuditLayer): boolean | null {
 	const cut = majorCut(evidence, layer);
 	if (cut === null) return null;
 	const rows = evidence.automated.filter((a) => a.crop_id === cropId && a.assessor_kind === "model");
@@ -50,7 +50,7 @@ export function cropsForReview(evidence: Pick<IAuditCheckEvidence, "crops">, cal
 }
 
 /** The prediction check's error types (processor/src/prediction_quality_v1 vocabulary) in words. */
-const MODE_LABELS: Record<string, string> = {
+export const MODE_LABELS: Record<string, string> = {
 	m0_not_assessable: "Crop not assessable",
 	m1_dead_missed: "Dead trees missed",
 	m2_dw_on_live_vegetation: "Deadwood on live trees",
@@ -62,6 +62,16 @@ const MODE_LABELS: Record<string, string> = {
 	m7_fc_artifact: "Broken or cut-off prediction",
 };
 
+/** The error types a reviewer answers per prediction layer (scripts/audit_import.py LAYER_MODES). */
+export const LAYER_MODES = {
+	deadwood: ["m1_dead_missed", "m2_dw_on_live_vegetation", "m3_dw_on_non_vegetation", "m4_dw_on_lying_wood", "m7_dw_artifact"],
+	forest_cover: ["m5_fc_trees_missed", "m6_fc_on_non_trees", "m7_fc_artifact"],
+} as const;
+export type PredictionLayer = keyof typeof LAYER_MODES;
+
+/** A model's score on an error type; a person's tag (true) has none. */
+export const modeScore = (mode: unknown) => (typeof mode === "object" && mode !== null ? (mode as { likelihood?: number; area_pct?: number }) : {});
+
 /** A model's short name: "luna-medium" → "Luna", "haiku-5.5" → "Haiku". */
 const modelName = (model: string | null) => (model ? model.split("-")[0].replace(/^\w/, (c) => c.toUpperCase()) : "Model");
 
@@ -72,7 +82,7 @@ export interface ICropFinding {
 	/** the model's own sentences on the errors */
 	errors: string[];
 	/** the error types it found likely (50 or more), most likely first, with the share of the crop */
-	issues: { label: string; likelihood: number; areaPct: number | null }[];
+	issues: { key: string; label: string; likelihood: number; areaPct: number | null }[];
 }
 
 /** Each model's findings on a crop and layer, the model that saw the worst first. */
@@ -85,9 +95,10 @@ export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, c
 			verdict: a.verdict,
 			errors: Array.isArray(a.details.errors) ? a.details.errors.filter((e): e is string => typeof e === "string" && e.trim() !== "") : [],
 			issues: Object.entries(a.modes ?? {})
+				.map(([key, m]) => [key, modeScore(m)] as const)
 				.filter(([key, m]) => key !== "m0_not_assessable" && (m.likelihood ?? 0) >= 50)
 				.sort(([, x], [, y]) => (y.likelihood ?? 0) - (x.likelihood ?? 0))
-				.map(([key, m]) => ({ label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
+				.map(([key, m]) => ({ key, label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
 		}));
 }
 

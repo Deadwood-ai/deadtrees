@@ -31,7 +31,7 @@ import CheckSummary from "./CheckSummary";
 import CropAnswers from "./CropAnswers";
 import EvaluationAnswer from "./EvaluationAnswer";
 import DerivedDecision from "./DerivedDecision";
-import type { IAuditCheckView } from "./auditCheckView";
+import { cropReviewOpen, type IAuditCheckView } from "./auditCheckView";
 import { useAuditStepper } from "./useAuditStepper";
 
 /** A saved-audit field the reviewer's answer sets: it takes part in the form, and so in its
@@ -93,14 +93,16 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const statuses = Object.fromEntries(AUDIT_SECTIONS.map((s) => [s.id, status(s)])) as Record<AuditSectionId, IAuditSectionStatus>;
 	const evaluation = checks?.checks.dataset_evaluation;
 	const myEvaluation = evaluation ? myAnswer(people, user?.id, evaluation.run.id, { checkKey: "dataset_evaluation", layer: "image" }) : null;
-	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null });
+	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null, mapOnly: false });
+	const openSection = view.section ? auditSection(view.section) : null;
 	const { goTo, next, back } = useAuditStepper({
 		datasetId,
 		checks,
 		view,
 		setView,
 		disabled,
-		openAnswered: view.section ? answeredAll(auditSection(view.section)) : false,
+		openAnswered: openSection ? answeredAll(openSection) : false,
+		cropReview: cropReviewOpen(view, openSection, openSection ? evidenceOf(openSection) : undefined),
 	});
 
 	const answers = (s: IAuditSectionDef) => {
@@ -126,14 +128,12 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				<AnswerDetails section={s} evidence={evidence} people={people} />
 				{s.cropAnswers && (
 					<CropAnswers
-						datasetId={datasetId}
 						section={s}
 						evidence={evidence}
 						people={people}
-						cropId={view.section === s.id ? view.cropId : null}
-						onSelectCrop={(cropId) => setView({ cropId })}
-						disabled={disabled}
-						active={view.section === s.id}
+						open={view.section === s.id}
+						mapOnly={view.mapOnly}
+						onShowCrops={() => setView({ mapOnly: false })}
 					/>
 				)}
 			</div>
@@ -239,7 +239,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				</AuditSection>
 			))}
 			<div className="mt-2 px-2 text-[11px] text-gray-400" data-testid="audit-shortcuts">
-				Keys: Enter take the suggestion and go on · Shift+Enter back · K keep · X exclude · n / p crops · Ctrl+S save
+				Keys: Enter take the suggestion and go on · Shift+Enter back · K keep · X exclude · Ctrl+S save · the crop review lists its own
 			</div>
 		</>
 	);

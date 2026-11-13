@@ -61,7 +61,7 @@ describe("cropFindings", () => {
 			model: "Luna",
 			verdict: "major",
 			errors: ["Most dead crowns are unmarked."],
-			issues: [{ label: "Dead trees missed", likelihood: 95, areaPct: 3 }],
+			issues: [{ key: "m1_dead_missed", label: "Dead trees missed", likelihood: 95, areaPct: 3 }],
 		});
 	});
 });

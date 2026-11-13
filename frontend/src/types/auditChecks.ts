@@ -22,14 +22,20 @@ export interface IAuditAssessment {
   verdict: AuditVerdict;
   /** a model's likelihood (0-100) that the target has major errors; null for people and rules */
   major_likelihood?: number | null;
-  /** a model's error types on the target, each with its likelihood (0-100) and the share of the
-   * target it covers (area_pct, 0-100) */
-  modes?: Record<string, { likelihood?: number; area_pct?: number }> | null;
+  /** error types on the target: a model gives each its likelihood (0-100) and the share of the
+   * target it covers (area_pct, 0-100); a person tags the ones they saw with true */
+  modes?: Record<string, IModeScore | true> | null;
   reason_code: string | null;
   reason_text: string | null;
   details: Record<string, unknown>;
   /** a person's email, added by the page for auditors */
   assessor_email?: string | null;
+}
+
+/** A model's score for one error type. */
+export interface IModeScore {
+  likelihood?: number;
+  area_pct?: number;
 }
 
 /** One row of audit.review_queue: a dataset, check and layer with a dataset-level call. */
@@ -105,6 +111,8 @@ export interface IAuditAnswerInput {
   verdict: AuditVerdict;
   reason_code?: string | null;
   reason_text?: string | null;
-  /** what the reviewer adds to the verdict, e.g. the dataset evaluation's fix_flags */
+  /** the error types the reviewer saw, tagged true (docs/audit-checks.md: people store tags) */
+  modes?: Record<string, true>;
+  /** what the reviewer adds to the verdict, e.g. the dataset evaluation's fix_flags or a crop's unsure_modes */
   details?: Record<string, unknown>;
 }
