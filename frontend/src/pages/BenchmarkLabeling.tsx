@@ -8,7 +8,7 @@ import type { AuditCheckKey, IAuditAnswerInput, IBenchmarkTarget } from "../type
 import { stepCrop } from "../utils/auditChecks";
 import { BENCHMARK_FILTERS, answeredBy, filterTargets, nextOpen, type BenchmarkFilter } from "../utils/benchmarkLabels";
 import StatusPage from "../components/StatusPage";
-import BenchmarkCropReviewer from "../components/DatasetAudit/benchmark/BenchmarkCropReviewer";
+import BenchmarkCropReview from "../components/DatasetAudit/benchmark/BenchmarkCropReview";
 import EvaluationReviewer from "../components/DatasetAudit/benchmark/EvaluationReviewer";
 
 const isFilter = (value: string | null): value is BenchmarkFilter => BENCHMARK_FILTERS.some((f) => f.value === value);
@@ -59,17 +59,17 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 		if (next) go(next);
 		else message.success("Nothing left to label here.");
 	};
-	const onSave = async (rows: IAuditAnswerInput[]) => {
+	/** Stores a label; the crop review moves on by itself, a dataset moves on here. */
+	const onSave = async (target: IBenchmarkTarget, rows: IAuditAnswerInput[], advance = false) => {
 		try {
 			await save(rows);
 		} catch {
 			message.error("Your label was not saved. Please try again.");
 			return false;
 		}
-		if (current) setKeep((k) => new Set(k).add(current.id));
-		// the rows are in the cache now, so the saved target no longer counts as open
-		const next = nextOpen(shown, current?.id ?? null, user?.id);
-		if (next && next.id !== current?.id) go(next);
+		setKeep((k) => new Set(k).add(target.id));
+		const next = advance ? nextOpen(shown, target.id, user?.id) : null;
+		if (next) go(next);
 		return true;
 	};
 
@@ -79,7 +79,7 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 	const index = current ? shown.indexOf(current) : -1;
 
 	return (
-		<div className="flex min-h-[calc(100vh-64px)] flex-col gap-3 bg-white px-4 py-3" data-testid="benchmark-labeling">
+		<div className="flex min-h-[calc(100vh-64px)] flex-col gap-3 bg-white px-4 pb-6 pt-24 md:pt-28" data-testid="benchmark-labeling">
 			<header className="flex flex-wrap items-center gap-3">
 				<Link to="/dataset-audit?tab=benchmark" className="text-sm">
 					← Benchmarks
@@ -106,17 +106,20 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 					{filter !== "all" && <Button onClick={() => go(null, "all")}>Show all</Button>}
 				</div>
 			) : checkKey === "prediction_quality" ? (
-				<BenchmarkCropReviewer key={current.id} target={current} userId={user?.id} onSave={onSave} onStep={step} onNextOpen={toNextOpen} saving={isPending} />
+				<div className="min-h-[640px] flex-1">
+					<BenchmarkCropReview targets={shown} current={current} userId={user?.id} onSelect={(t) => go(t)} onSave={onSave} />
+				</div>
 			) : (
 				<EvaluationReviewer
 					key={current.id}
 					datasetId={current.dataset_id}
+					runId={current.run_id}
 					images={current.images}
 					mine={current.people.find((p) => p.assessor_user_id === user?.id) ?? null}
 					others={current.people.filter((p) => p.assessor_user_id !== user?.id)}
 					models={current.models}
 					blind
-					onSave={(row) => onSave([row])}
+					onSave={(row) => onSave(current, [row], true)}
 					saving={isPending}
 					keys={{ ArrowRight: () => step(1), ArrowLeft: () => step(-1), Tab: toNextOpen }}
 				/>

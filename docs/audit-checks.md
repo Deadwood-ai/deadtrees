@@ -92,7 +92,11 @@ A benchmark fixes which targets a check is scored on; truth stays in
    both; a crop also joins the `benchmark` crop set. Truth is keyed by target, so a new
    version on the same crops keeps every answer given on them, and an operator's
    review-page answer on an added target is already its first label. Auditors label
-   targets with their own person rows; a row needs no run. Open now:
+   targets with their own person rows on the audit page's Benchmark tab, blind (others'
+   and the models' answers show after yours). A label carries the check's current run
+   when that run judged the target, because `audit.latest_assessments` keeps one row per
+   person and target across runs: a label without it would hide the same person's review
+   of that run. Gold crops no run judged get no run. Open now:
    `pq-gold-dt1272` v2 (v1's 197 crops with their frozen splits, migration
    `20261113150000_open_benchmark_versions.sql`) and `dataset-evaluation-gold` v1,
    whose picked datasets are added by `scripts/audit_import.py evaluation-gold`.

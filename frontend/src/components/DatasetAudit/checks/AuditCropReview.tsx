@@ -6,6 +6,7 @@ import { myAnswer, type IAuditSectionDef } from "../../../utils/auditChecks";
 import type { CropAnswerRow } from "../../../utils/cropAnswers";
 import { cropMajor, type PredictionLayer } from "../../../utils/cropCalls";
 import CropReviewer from "../review/CropReviewer";
+import { useAddToBenchmark } from "../benchmark/useAddToBenchmark";
 import { modelViewImage } from "./auditCheckView";
 import { QUALITY_VERDICT, QUALITY_WORDS, useLayerRating } from "./useLayerRating";
 
@@ -32,6 +33,8 @@ export default function AuditCropReview({ datasetId, section, evidence, people, 
 	const { calls, crops, rating, answered, layer } = useLayerRating(section, evidence, people);
 	const checkKey = section.checkKey!;
 	const runId = evidence.run.id;
+	// operators send a crop into the prediction benchmark with B
+	const addToBenchmark = useAddToBenchmark(checkKey, datasetId);
 	const labelOf = (l: AuditLayer) => evidence.automated.find((a) => a.layer === l && a.label_id !== null)?.label_id ?? null;
 
 	const onAnswer = async (id: number, rows: CropAnswerRow[]) => {
@@ -73,6 +76,7 @@ export default function AuditCropReview({ datasetId, section, evidence, people, 
 			onAnswer={onAnswer}
 			onDone={() => void onDone()}
 			onShowMap={onShowMap}
+			onAddToBenchmark={addToBenchmark && ((id) => void addToBenchmark(id))}
 			active
 			disabled={disabled}
 			header={

@@ -137,6 +137,8 @@ export interface IBenchmarkTarget {
   dataset_id: number;
   crop_id: number | null;
   split: "dev" | "holdout";
+  /** the run a label carries: the check's current run when it judged the target, else null (a gold crop) */
+  run_id: number | null;
   /** the stored images: for a crop its raw image and overlays, for a dataset its overview,
    * thumbnail and evaluation crops */
   images: IAuditImage[];

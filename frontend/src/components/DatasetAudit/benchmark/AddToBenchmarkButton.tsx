@@ -1,40 +1,35 @@
-import { Button, message } from "antd";
-import { useCanOperate } from "../../../hooks/useUserPrivileges";
-import { useAddBenchmarkTarget, useBenchmarkMembership } from "../../../hooks/useAuditBenchmarks";
+import { useState } from "react";
+import { Button } from "antd";
+import { useBenchmarkMembership } from "../../../hooks/useAuditBenchmarks";
 import type { AuditCheckKey } from "../../../types/auditChecks";
 import { useAuditShortcuts } from "../checks/useAuditShortcuts";
+import { useAddToBenchmark } from "./useAddToBenchmark";
 
 interface AddToBenchmarkButtonProps {
 	checkKey: AuditCheckKey;
 	datasetId: number;
-	/** the crop to add; null adds the whole dataset */
-	cropId?: number | null;
-	/** only while active does B add it */
+	/** only while active does B add the dataset */
 	active: boolean;
 }
 
-/** "+ Benchmark" (key B), operators only: adds the crop or the dataset to the open benchmark of
- * the check (audit.add_benchmark_target). Your answer on it is already its first label. */
-export default function AddToBenchmarkButton({ checkKey, datasetId, cropId = null, active }: AddToBenchmarkButtonProps) {
-	const { canOperate } = useCanOperate();
-	const { data: members } = useBenchmarkMembership(canOperate ? datasetId : undefined);
-	const { mutateAsync, isPending } = useAddBenchmarkTarget();
-	const added = !!members?.some((m) => m.benchmark.check_key === checkKey && m.crop_id === cropId);
-	const add = async () => {
-		if (added || isPending) return;
-		try {
-			await mutateAsync({ checkKey, datasetId, cropId });
-			message.success(cropId === null ? "Dataset added to the benchmark" : "Crop added to the benchmark");
-		} catch (error) {
-			message.error(`Not added: ${(error as { message?: string }).message ?? "please try again"}`);
-		}
+/** "+ Benchmark" (key B) on audit step 1, operators only: the whole dataset goes into the dataset
+ * evaluation benchmark. The crop review has its own (CropReviewer onAddToBenchmark). */
+export default function AddToBenchmarkButton({ checkKey, datasetId, active }: AddToBenchmarkButtonProps) {
+	const add = useAddToBenchmark(checkKey, datasetId);
+	const { data: members } = useBenchmarkMembership(add ? datasetId : undefined);
+	const [adding, setAdding] = useState(false);
+	const added = !!members?.some((m) => m.benchmark.check_key === checkKey && m.crop_id === null);
+	const run = async () => {
+		if (!add || added || adding) return;
+		setAdding(true);
+		await add(null).finally(() => setAdding(false));
 	};
-	useAuditShortcuts({ b: () => void add(), B: () => void add() }, active && canOperate);
-	if (!canOperate) return null;
+	useAuditShortcuts({ b: () => void run() }, active && !!add);
+	if (!add) return null;
 	return (
 		<div>
-			<Button size="small" disabled={added} loading={isPending} onClick={() => void add()} data-testid="add-to-benchmark">
-			{added ? "In benchmark ✓" : <>+ Benchmark <kbd className="ml-1">B</kbd></>}
+			<Button size="small" disabled={added} loading={adding} onClick={() => void run()} data-testid="add-to-benchmark">
+				{added ? "In benchmark ✓" : <>+ Benchmark <kbd className="ml-1">B</kbd></>}
 			</Button>
 		</div>
 	);

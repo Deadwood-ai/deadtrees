@@ -5,6 +5,7 @@ import { auditImageUrl } from "../../../api/auditImages";
 import type { AuditVerdict, IAuditAnswerInput, IAuditAssessment, IAuditImage } from "../../../types/auditChecks";
 import { EVALUATION_FLAGS, auditSection, evaluationAnswerText, keepsDataset, type EvaluationFlag } from "../../../utils/auditChecks";
 import { emptyEvaluationDraft, evaluationAnswerRow, evaluationDraftFromRow, type IEvaluationDraft } from "../../../utils/benchmarkLabels";
+import { modeScore } from "../../../utils/cropCalls";
 import { useAuditShortcuts, type AuditKeyMap } from "../checks/useAuditShortcuts";
 
 const REASONS = auditSection("evaluation").reasons;
@@ -20,6 +21,8 @@ const CALLS: { verdict: AuditVerdict; label: string; key: string }[] = [
 
 export interface EvaluationReviewerProps {
 	datasetId: number;
+	/** the run that judged the dataset, stored with the answer; null when none did */
+	runId: number | null;
 	/** the dataset's overview, thumbnail and evaluation crops (audit.images) */
 	images: IAuditImage[];
 	/** your latest answer on the dataset, if any */
@@ -30,7 +33,7 @@ export interface EvaluationReviewerProps {
 	models: IAuditAssessment[];
 	/** benchmark labeling: others and the models stay hidden until you have answered */
 	blind: boolean;
-	/** stores the answer (run_id null; a caller on a check run sets its own) and resolves false when nothing was saved */
+	/** stores the answer and resolves false when nothing was saved */
 	onSave: (row: IAuditAnswerInput) => Promise<boolean>;
 	saving: boolean;
 	/** more keys while it is shown, e.g. stepping between datasets */
@@ -43,19 +46,19 @@ export interface EvaluationReviewerProps {
  * crops and the thumbnail; keep (1), keep but fix (2), exclude (3) or unsure (U), the exclude
  * reasons (Q W E R T I O) and the fix flags (A S D); Enter saves, Shift+Space keeps and saves.
  * Mount it with key={datasetId}. */
-export default function EvaluationReviewer({ datasetId, images, mine, others, models, blind, onSave, saving, keys = {}, active = true }: EvaluationReviewerProps) {
-	const [draft, setDraft] = useState<IEvaluationDraft>(evaluationDraftFromRow(mine ?? undefined) ?? emptyEvaluationDraft());
+export default function EvaluationReviewer({ datasetId, runId, images, mine, others, models, blind, onSave, saving, keys = {}, active = true }: EvaluationReviewerProps) {
+	const [draft, setDraft] = useState<IEvaluationDraft>(evaluationDraftFromRow(mine) ?? emptyEvaluationDraft());
 	const [problem, setProblem] = useState<string | null>(null);
 	const revealed = !blind || !!mine;
 
 	const save = async (next: IEvaluationDraft) => {
-		const result = evaluationAnswerRow(next, datasetId);
+		const result = evaluationAnswerRow(next, datasetId, runId);
 		if ("missing" in result) {
 			setProblem(result.missing);
 			return false;
 		}
 		setProblem(null);
-		return onSave(result.rows[0]);
+		return onSave(result.row);
 	};
 	const change = (next: Partial<IEvaluationDraft>) => {
 		setDraft((d) => ({ ...d, ...next }));
@@ -85,7 +88,7 @@ export default function EvaluationReviewer({ datasetId, images, mine, others, mo
 	const describe = (row: IAuditAssessment) => {
 		if (row.assessor_kind === "person") return evaluationAnswerText(row);
 		const named = Object.entries(row.modes ?? {})
-			.filter(([, m]) => (m.likelihood ?? 0) >= 50)
+			.filter(([, m]) => (modeScore(m).likelihood ?? 0) >= 50)
 			.map(([key]) => key.replace(/_/g, " "));
 		return `${evaluationAnswerText(row)}${named.length ? ` · ${named.join(", ")}` : ""}`;
 	};

@@ -70,6 +70,8 @@ const MODELS = [
     model: "luna-medium",
     prompt_version: "pq-v5",
     assessor: "luna-medium/pq-v5",
+    // the current run of dataset 501 judged crop 101: a label on it carries that run
+    run_id: 55,
     verdict: "major",
     major_likelihood: 80,
     modes: { m1_dead_missed: { likelihood: 85 } },
@@ -101,6 +103,7 @@ async function mockSupabase(page: Page) {
       const crops = inList(url, "crop_id");
       return json(route, crops ? CROP_IMAGES.filter((i) => crops.includes(i.crop_id!)) : DATASET_IMAGES);
     }
+    if (resource === "current_runs") return json(route, [{ dataset_id: 501, run_id: 55 }]);
     if (resource === "crops") return json(route, [{ id: 900 }]);
     if (resource === "latest_assessments") return json(route, inList(url, "crop_id") ? OTHERS : []);
     if (resource === "assessments" && request.method() === "POST") {
@@ -131,51 +134,49 @@ test.describe("benchmark labeling", () => {
   test("a crop is labeled blind with the keys, and the others show after your answer", async ({ page }) => {
     await mockSupabase(page);
     await page.goto("/dataset-audit/benchmark/prediction_quality?filter=open");
-    await expect(page.getByTestId("benchmark-crop")).toBeVisible();
-    await expect(page.getByTestId("benchmark-crop-images").getByRole("img")).toHaveCount(3);
-    // blind: nothing of the other labeler or Luna before your answer
-    await expect(page.getByTestId("benchmark-reveal")).toHaveCount(0);
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 1 of 2");
+    await expect(page.getByTestId("crop-images").getByRole("img")).toHaveCount(2);
+    // blind: nothing of the other labeler or Luna before your answer, and no problem pre-ticked
+    await expect(page.getByText("Labeled blind")).toBeVisible();
+    await expect(page.getByTestId("benchmark-others")).toHaveCount(0);
+    await expect(page.getByTestId("audit-crop-findings")).toHaveCount(0);
 
-    // dead trees missed: yes; Enter wants minor or major first
+    // dead trees missed: yes, deadwood major (on to tree cover), tree cover OK saves the crop
     await page.keyboard.press("y");
-    await page.keyboard.press("Enter");
-    await expect(page.getByText("pick minor (2) or major (3)")).toBeVisible();
-    expect(saved).toHaveLength(0);
     await page.keyboard.press("3");
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("1");
     await expect.poll(() => saved.length).toBe(3);
-    expect(saved.map((r) => [r.layer, r.verdict, r.modes, r.run_id, r.crop_id])).toEqual([
-      ["image", "ok", {}, null, 101],
-      ["deadwood", "major", { m1_dead_missed: true }, null, 101],
-      ["forest_cover", "ok", {}, null, 101],
+    expect(saved.map((r) => [r.layer, r.verdict, r.modes, r.run_id, r.crop_id, r.label_id ?? null])).toEqual([
+      ["image", "ok", {}, 55, 101, null],
+      ["deadwood", "major", { m1_dead_missed: true }, 55, 101, 7001],
+      ["forest_cover", "ok", {}, 55, 101, 7002],
     ]);
-    expect(saved[1].label_id).toBe(7001);
-    // saved, on to the next open crop
-    await expect(page.getByTestId("benchmark-position")).toHaveText("2 / 2");
+    // saved, on to the next crop without your answer
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 2 of 2");
     await expect(page.getByTestId("benchmark-left")).toContainText("1 of 2 left for you");
 
-    // back to the answered crop: the second labeler and Luna are shown now
+    // back to the answered crop: the second labeler and Luna show now
     await page.keyboard.press("ArrowLeft");
-    const reveal = page.getByTestId("benchmark-reveal");
-    await expect(reveal).toContainText("second-labeler");
-    await expect(reveal).toContainText("luna-medium pq-v5");
-    const deadMissed = page.getByTestId("benchmark-question-m1_dead_missed");
-    // you said yes, the labeler no (amber: you flag it), Luna yes at 85 (green)
-    await expect(deadMissed.locator(".border-amber-500")).toHaveText("No");
-    await expect(deadMissed.locator(".border-green-500")).toContainText("Yes");
+    const others = page.getByTestId("benchmark-others");
+    await expect(others).toContainText("second-labeler");
+    // they said deadwood OK where you said major: you found a problem they did not
+    await expect(others.locator(".ant-tag-orange")).toContainText("Deadwood OK");
+    await expect(others.locator(".ant-tag-green")).toContainText("Tree cover OK");
+    await expect(page.getByTestId("audit-crop-findings").first()).toContainText("Luna");
   });
 
   test("Shift+Space labels the whole crop fine and C stores can't tell", async ({ page }) => {
     await mockSupabase(page);
     await page.goto("/dataset-audit/benchmark/prediction_quality?filter=open");
-    await expect(page.getByTestId("benchmark-crop")).toBeVisible();
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 1 of 2");
     await page.keyboard.press("Shift+Space");
     await expect.poll(() => saved.length).toBe(3);
     expect(saved.every((r) => r.verdict === "ok")).toBe(true);
-    await expect(page.getByTestId("benchmark-position")).toHaveText("2 / 2");
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 2 of 2");
     await page.keyboard.press("c");
     await expect.poll(() => saved.length).toBe(4);
-    expect(saved[3]).toMatchObject({ layer: "image", verdict: "major", modes: { m0_not_assessable: true }, crop_id: 102 });
+    // no run judged crop 102 (a gold crop): its label has none
+    expect(saved[3]).toMatchObject({ layer: "image", verdict: "major", modes: { m0_not_assessable: true }, crop_id: 102, run_id: null });
     await expect(page.getByTestId("benchmark-left")).toContainText("0 of 2 left for you");
   });
 
