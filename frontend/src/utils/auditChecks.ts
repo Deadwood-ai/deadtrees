@@ -20,7 +20,7 @@ import type { IGeorefCheck } from "../types/georefCheck";
 import { reportedOutsideLikelyRange } from "./acquisitionDate";
 import { summarizeGeorefCheck } from "./georefCheck";
 
-export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "deadwood" | "forest";
+export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "forest" | "deadwood";
 export type CropImageKind = Extract<AuditImageKind, "raw" | "deadwood_overlay" | "forest_cover_overlay">;
 
 /** What the map shows while a section is open: the georeferencing matches, or the crops the check judged. */
@@ -136,8 +136,9 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     verdicts: [],
     fields: ["has_valid_phenology"],
   },
-  // the prediction check, one layer after the other: each step shows only its own layer
-  ...(["deadwood", "forest_cover"] as const).map(
+  // the prediction check, one layer after the other: each step shows only its own layer. Deadwood,
+  // the hardest, comes last.
+  ...(["forest_cover", "deadwood"] as const).map(
     (layer): IAuditSectionDef => ({
       id: layer === "deadwood" ? "deadwood" : "forest",
       title: layer === "deadwood" ? "Deadwood prediction" : "Tree cover prediction",
@@ -302,6 +303,8 @@ export function legacySectionStatus(id: AuditSectionId, inputs: ILegacySectionIn
 }
 
 const VERDICT_QUALITY: Partial<Record<AuditVerdict, PredictionQuality>> = { ok: "great", minor: "sentinel_ok", major: "bad" };
+/** The verdict a prediction layer's saved rating stands for. */
+export const QUALITY_VERDICT: Record<PredictionQuality, AuditVerdict> = { great: "ok", sentinel_ok: "minor", bad: "major" };
 const QUALITY_FIELD: Partial<Record<AuditLayer, "deadwood_quality" | "forest_cover_quality">> = {
   deadwood: "deadwood_quality",
   forest_cover: "forest_cover_quality",

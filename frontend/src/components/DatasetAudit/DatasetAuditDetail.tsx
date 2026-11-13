@@ -18,7 +18,7 @@ import { AuditFooterFormItem } from "./AuditFooter";
 import { UserFlagsCard } from "./AuditStepCards";
 import { AuditReviewNotice } from "./AuditReviewNotice";
 import AuditSections from "./checks/AuditSections";
-import { INITIAL_CHECK_VIEW, type IAuditCheckView } from "./checks/auditCheckView";
+import { INITIAL_CHECK_VIEW, STEP_ORDER, nextStep, openStep, type IAuditCheckView } from "./checks/auditCheckView";
 import { AUDIT_SECTIONS, auditSection, sectionOfField, type AuditSectionId } from "../../utils/auditChecks";
 import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
@@ -459,6 +459,14 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 							evidence: openSection?.checkKey ? auditChecks?.checks[openSection.checkKey] : undefined,
 							cropId: checkView.cropId,
 							onSelectCrop: (cropId) => updateCheckView({ cropId }),
+							cropReview: {
+								datasetId: dataset.id,
+								people: auditChecks?.people ?? [],
+								disabled: !auditLeaseId,
+								mapOnly: checkView.mapOnly,
+								setMapOnly: (mapOnly) => updateCheckView({ mapOnly }),
+								onNextStep: () => checkView.section && openStep(updateCheckView, nextStep(STEP_ORDER, checkView.section)),
+							},
 						}}
 					/>
 				</div>

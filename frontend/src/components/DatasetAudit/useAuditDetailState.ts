@@ -25,7 +25,7 @@ import {
 	useAuditSuggestions,
 } from "../../hooks/useAcquisitionDateEstimate";
 import { suggestedAuditValues } from "../../utils/acquisitionDate";
-import { answeredFormValues } from "../../utils/auditChecks";
+import { answeredValues } from "../../utils/cropAnswers";
 import { REPROCESS_DRAFT, answersWithSave, withCheckSuggestions } from "../../utils/auditPrefill";
 import { withoutUncertainDate } from "../../utils/acquisitionDate";
 import { useAuditChecks, useSaveAuditAnswers } from "../../hooks/useAuditChecks";
@@ -250,8 +250,9 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		}
 	}, [auditData, form]);
 
-	// Where a check has run, the reviewer's answer decides its saved-audit field.
-	const answered = useMemo(() => answeredFormValues(auditChecks, user?.id), [auditChecks, user?.id]);
+	// Where a check has run, the reviewer's answer decides its saved-audit field; a prediction
+	// layer's is the rating from its crops.
+	const answered = useMemo(() => answeredValues(auditChecks, user?.id), [auditChecks, user?.id]);
 
 	// Machine suggestions prefill the form once per page load, after the saved
 	// audit, the suggestions and the re-review items have all arrived: fields
