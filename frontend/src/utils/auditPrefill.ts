@@ -105,18 +105,20 @@ function formVerdict(call: ICheckCall, values: Partial<AuditFormValues>): AuditV
 
 /** Saving the audit answers every call you have not answered yet: with the check's verdict where
  * the form still holds its suggestion, with your own where you changed the field. Each answer is
- * marked `with_save`, so it can be told apart from one you gave in its step. `only` limits it to
- * one check, e.g. the open step's when you accept it with Enter (`withSave: false`). */
+ * marked `with_save`, so it can be told apart from one you gave in its step. `only` and `layers`
+ * limit it to the open step's check and layers when you accept it with Enter (`withSave: false`):
+ * the prediction check is two steps, one layer each. */
 export function answersWithSave(
 	checks: IAuditChecks | undefined,
 	userId: string | undefined,
 	values: Partial<AuditFormValues> & Record<string, unknown>,
 	datasetId: number,
-	{ only, withSave = true }: { only?: AuditCheckKey; withSave?: boolean } = {},
+	{ only, layers, withSave = true }: { only?: AuditCheckKey; layers?: AuditLayer[]; withSave?: boolean } = {},
 ): IAuditAnswerInput[] {
 	if (!checks || !userId) return [];
 	return checkCalls(checks).flatMap((call) => {
 		if (only && call.checkKey !== only) return [];
+		if (layers && !layers.includes(call.layer)) return [];
 		if (myAnswer(checks.people, userId, call.runId, { checkKey: call.checkKey, layer: call.layer })) return [];
 		const verdict = formVerdict(call, values);
 		if (!verdict) return [];

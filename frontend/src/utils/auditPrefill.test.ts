@@ -121,3 +121,18 @@ describe("step 1 draft", () => {
 		expect(answers[0]).toMatchObject({ verdict: "minor", details: { fix_flags: ["thumbnail_issue", "reprocess"] } });
 	});
 });
+
+describe("Enter on one prediction step", () => {
+	it("answers only the open step's layer, not the other prediction layer", () => {
+		const both = checks();
+		both.checks.prediction_quality = evidence("prediction_quality", 3, [
+			{ layer: "deadwood", verdict: "minor" },
+			{ layer: "forest_cover", verdict: "ok" },
+		]);
+		const values = { deadwood_quality: "sentinel_ok" as const, forest_cover_quality: "great" as const };
+		const answers = answersWithSave(both, "me", values, 7, { only: "prediction_quality", layers: ["deadwood"], withSave: false });
+		expect(answers.map((a) => a.layer)).toEqual(["deadwood"]);
+		// the save still answers every layer
+		expect(answersWithSave(both, "me", values, 7, { only: "prediction_quality" }).map((a) => a.layer)).toEqual(["deadwood", "forest_cover"]);
+	});
+});
