@@ -14,7 +14,7 @@ import { useCropSquares, zoomToCrop } from "./useCropSquares";
 import { useSectionLayers } from "./useSectionLayers";
 import { useAuditShortcuts } from "./useAuditShortcuts";
 import { useDatasetDetailsMap } from "../../../hooks/useDatasetDetailsMapProvider";
-import { cropReviewOpen, modelViewImage } from "./auditCheckView";
+import { canReviewCrops, cropReviewOpen, modelViewImage } from "./auditCheckView";
 
 /** What the audit map needs to show the open section's check. */
 export interface IAuditCheckMapProps {
@@ -88,7 +88,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const reviewing = cropReviewOpen(cropReview, section, evidence);
 	// on the map, T switches the prediction and M goes back to the crop review
 	useAuditShortcuts(
-		{ t: overlay ? togglePrediction : undefined, m: section?.cropAnswers && evidence?.crops.length ? () => cropReview.setMapOnly(false) : undefined },
+		{ t: overlay ? togglePrediction : undefined, m: canReviewCrops(section, evidence) ? () => cropReview.setMapOnly(false) : undefined },
 		!!cropMode && !reviewing,
 	);
 	const predictionShown = section?.shows?.deadwood ? layerControl.showDeadwood : section?.shows?.forestCover ? layerControl.showForestCover : false;
@@ -96,9 +96,10 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	useCropSquares({ map, crops, selectedId: cropId, flagged, onSelect: onSelectCrop });
 
 	const index = crops ? crops.findIndex((c) => c.id === cropId) : -1;
+	// the map follows the crop only while you see it: back on the map (M) it zooms to the current one
 	useEffect(() => {
-		if (index >= 0) zoomToCrop(map, crops?.[index]);
-	}, [map, crops, index]);
+		if (index >= 0 && !reviewing) zoomToCrop(map, crops?.[index]);
+	}, [map, crops, index, reviewing]);
 
 	const step = (by: 1 | -1) => {
 		const next = stepCrop(crops ?? [], cropId, by);
@@ -152,7 +153,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 				</>
 			)}
 			{cropMode && !crops && <div className="text-gray-500">This check has no stored crops yet.</div>}
-			{cropMode && crops && section.cropAnswers && (
+			{canReviewCrops(section, evidence) && (
 				<Button size="small" type="primary" onClick={() => cropReview.setMapOnly(false)}>
 					Back to the crop review (M)
 				</Button>

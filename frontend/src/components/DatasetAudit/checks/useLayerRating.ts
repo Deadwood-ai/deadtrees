@@ -20,6 +20,3 @@ export function useLayerRating(section: IAuditSectionDef, evidence: IAuditCheckE
 }
 
 export const QUALITY_WORDS = { great: "Great", sentinel_ok: "OK", bad: "Bad" } as const;
-
-/** The verdict a layer rating stands for, as the layer's answer. */
-export const QUALITY_VERDICT = { great: "ok", sentinel_ok: "minor", bad: "major" } as const;

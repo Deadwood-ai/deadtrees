@@ -96,9 +96,11 @@ export function useSaveAuditAnswers() {
       if (!user?.id) throw new Error("Sign in to answer");
       const { data, error } = await audit()
         .from("assessments")
-        // one insert of several rows sends every column any row has: a column a row leaves out
-        // would arrive as null, so the not-null ones get their empty default here
-        .insert(answers.map((answer) => ({ modes: {}, details: {}, ...answer, assessor_kind: "person", assessor_user_id: user.id })))
+        // several rows in one insert: a column a row leaves out takes its database default, not null
+        .insert(
+          answers.map((answer) => ({ ...answer, assessor_kind: "person", assessor_user_id: user.id })),
+          { defaultToNull: false },
+        )
         .select(ASSESSMENT_COLUMNS);
       if (error) throw error;
       return (data as IAuditAssessment[]).map((row) => ({ ...row, assessor_email: user.email ?? null }));

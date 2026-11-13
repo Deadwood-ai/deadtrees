@@ -1,6 +1,6 @@
 import type { AuditLayer, AuditVerdict, IAuditAnswerInput, IAuditAssessment } from "../types/auditChecks";
 import { myAnswer } from "./auditChecks";
-import { LAYER_MODES, modeScore, type PredictionLayer } from "./cropCalls";
+import { LAYER_MODES, cropFindings, type PredictionLayer } from "./cropCalls";
 
 /** A reviewer's answer to one error type on a crop. Left unanswered, it is saved as no. */
 export type ProblemAnswer = "yes" | "no" | "unsure";
@@ -20,17 +20,15 @@ export type CropDraft = { assessable: false } | { assessable: true; layers: Part
  * they saw tagged true and the ones they were unsure of in details.unsure_modes. */
 export type CropAnswerRow = Pick<IAuditAnswerInput, "layer" | "verdict" | "modes" | "details">;
 
-/** A model saw an error type when it gives it a likelihood of 50 or more. */
-const SEEN = 50;
-
 /** The reviewer's starting point on a crop's layer: the error types a model saw ticked yes, and
  * the verdict major where the check counted the crop major, minor where a model saw a problem,
  * else ok. */
 export function suggestedLayer(automated: IAuditAssessment[], cropId: number, layer: PredictionLayer, checkMajor: boolean | null): ILayerDraft {
-	const rows = automated.filter((a) => a.crop_id === cropId && a.layer === layer && a.assessor_kind === "model");
+	const findings = cropFindings({ automated }, cropId, layer);
+	const seen = new Set(findings.flatMap((f) => f.issues.map((i) => i.key)));
 	const problems: ILayerDraft["problems"] = {};
-	for (const mode of LAYER_MODES[layer]) if (rows.some((r) => (modeScore(r.modes?.[mode]).likelihood ?? 0) >= SEEN)) problems[mode] = "yes";
-	const modelMajor = checkMajor ?? rows.some((r) => r.verdict === "major");
+	for (const mode of LAYER_MODES[layer]) if (seen.has(mode)) problems[mode] = "yes";
+	const modelMajor = checkMajor ?? findings.some((f) => f.verdict === "major");
 	const verdict: AuditVerdict = modelMajor ? "major" : Object.keys(problems).length ? "minor" : "ok";
 	return { verdict, problems };
 }

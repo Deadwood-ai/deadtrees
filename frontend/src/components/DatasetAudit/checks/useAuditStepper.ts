@@ -21,8 +21,6 @@ interface UseAuditStepperOptions {
 	cropReview: boolean;
 }
 
-const ORDER = STEP_ORDER;
-
 /** Going through the audit one step at a time: Back and Next, moving on once the open step's
  * check is answered, and the keys: Enter takes the open step's suggestions as your answers and
  * moves on, Shift+Enter goes back, Ctrl+S saves the audit. */
@@ -32,9 +30,9 @@ export function useAuditStepper({ datasetId, checks, view, setView, disabled, op
 	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
 
 	const goTo = (id: AuditSectionId | null) => openStep(setView, id);
-	const next = (id: AuditSectionId) => nextStep(ORDER, id);
+	const next = (id: AuditSectionId) => nextStep(STEP_ORDER, id);
 	const back = (id: AuditSectionId) => {
-		const before = previousStep(ORDER, id);
+		const before = previousStep(STEP_ORDER, id);
 		return before ? () => goTo(before) : undefined;
 	};
 
@@ -49,7 +47,7 @@ export function useAuditStepper({ datasetId, checks, view, setView, disabled, op
 
 	const accept = async () => {
 		const id = view.section;
-		if (!id) return goTo(ORDER[0]);
+		if (!id) return goTo(STEP_ORDER[0]);
 		const { checkKey, layers } = auditSection(id);
 		const answers = checkKey ? answersWithSave(checks, user?.id, form.getFieldsValue(true), datasetId, { only: checkKey, layers, withSave: false }) : [];
 		if (!answers.length) return goTo(next(id));

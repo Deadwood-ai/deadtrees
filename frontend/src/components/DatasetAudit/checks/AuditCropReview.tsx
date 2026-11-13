@@ -2,12 +2,13 @@ import { message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
-import { myAnswer, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { QUALITY_VERDICT, automatedRows, myAnswer, type IAuditSectionDef } from "../../../utils/auditChecks";
 import type { CropAnswerRow } from "../../../utils/cropAnswers";
 import { cropMajor, type PredictionLayer } from "../../../utils/cropCalls";
 import CropReviewer from "../review/CropReviewer";
 import { modelViewImage } from "./auditCheckView";
-import { QUALITY_VERDICT, QUALITY_WORDS, useLayerRating } from "./useLayerRating";
+import LayerRatingLine from "./LayerRatingLine";
+import { useLayerRating } from "./useLayerRating";
 
 export interface AuditCropReviewProps {
 	datasetId: number;
@@ -32,7 +33,8 @@ export default function AuditCropReview({ datasetId, section, evidence, people, 
 	const { calls, crops, rating, answered, layer } = useLayerRating(section, evidence, people);
 	const checkKey = section.checkKey!;
 	const runId = evidence.run.id;
-	const labelOf = (l: AuditLayer) => evidence.automated.find((a) => a.layer === l && a.label_id !== null)?.label_id ?? null;
+	// the prediction the layer's rule row judged, as the step's Enter stores it
+	const labelOf = (l: AuditLayer) => automatedRows(evidence, l)[0]?.label_id ?? null;
 
 	const onAnswer = async (id: number, rows: CropAnswerRow[]) => {
 		try {
@@ -78,16 +80,7 @@ export default function AuditCropReview({ datasetId, section, evidence, people, 
 			header={
 				<div className="flex flex-wrap items-baseline justify-between gap-2" data-testid="crop-review-header">
 					<span className="text-base font-semibold">{section.title}</span>
-					{rating && (
-						<span className="text-xs">
-							Layer rating from the crops: <b>{QUALITY_WORDS[rating.quality]}</b>
-							<span className="text-gray-500">
-								{" "}
-								· {rating.major} major of {rating.counted} counted · you answered {answered} of {crops.length}
-								{answered === crops.length ? " · Enter: next step" : ""}
-							</span>
-						</span>
-					)}
+					{rating && <LayerRatingLine rating={rating} extra={`you answered ${answered} of ${crops.length}`} />}
 				</div>
 			}
 		/>
