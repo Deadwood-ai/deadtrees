@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useDatasetThumbnailUrl } from "../../hooks/useDatasetAccess";
 import { Form, message, Button, Drawer } from "antd";
 import { IDataset } from "../../types/dataset";
-import { DatasetDetailsMapProvider } from "../../hooks/useDatasetDetailsMapProvider";
+import { DatasetDetailsMapProvider, SATELLITE_MAP_STYLE } from "../../hooks/useDatasetDetailsMapProvider";
 import { useAuditDetailState } from "./useAuditDetailState";
 import { Settings } from "../../config";
 import { DatasetSeasonInfo } from "../../hooks/useSeasonPrompt";
@@ -444,7 +444,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 			)}
 
 			{/* Map - wrapped in provider for layer controls */}
-			<DatasetDetailsMapProvider>
+			<DatasetDetailsMapProvider initialMapStyle={SATELLITE_MAP_STYLE}>
 				<div className="absolute inset-0 z-0">
 					<AuditMapWithControls
 						ref={mapRef}
