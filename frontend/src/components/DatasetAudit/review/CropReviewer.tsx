@@ -19,6 +19,7 @@ import {
 } from "../../../utils/cropAnswers";
 import { useAuditShortcuts } from "../checks/useAuditShortcuts";
 import CropAnswerPanel, { PREDICTION_LABELS } from "./CropAnswerPanel";
+import CropImage from "./CropImage";
 import CropImages from "./CropImages";
 
 /** A crop to review, in review order. */
@@ -272,6 +273,15 @@ export default function CropReviewer(props: CropReviewerProps) {
 						</Button>
 					</div>
 				)}
+				{/* the next crop's images load while you answer this one */}
+				<div hidden>
+					{crop &&
+						[nextOpen() ?? stepCrop(cycle, cropId, 1)].flatMap((id) =>
+							id === null || id === crop.id
+								? []
+								: [imageOf(id, "raw"), imageOf(id, OVERLAY[focus.layer])].flatMap((image) => (image ? [<CropImage key={image.id} image={image} />] : [])),
+						)}
+				</div>
 				<CropStrip crops={crops} cropId={cropId} answered={answered} inCycle={(id) => cycle.some((c) => c.id === id)} onSelect={goTo} />
 				<div className="text-[11px] text-gray-500">
 					← → {cyclingFlagged ? "flagged " : ""}crops · A all or flagged · Tab next without your answer · T raw or prediction · V side by side · scroll to zoom

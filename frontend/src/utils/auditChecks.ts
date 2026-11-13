@@ -303,6 +303,8 @@ export function legacySectionStatus(id: AuditSectionId, inputs: ILegacySectionIn
 }
 
 const VERDICT_QUALITY: Partial<Record<AuditVerdict, PredictionQuality>> = { ok: "great", minor: "sentinel_ok", major: "bad" };
+/** The verdict a prediction layer's saved rating stands for. */
+export const QUALITY_VERDICT: Record<PredictionQuality, AuditVerdict> = { great: "ok", sentinel_ok: "minor", bad: "major" };
 const QUALITY_FIELD: Partial<Record<AuditLayer, "deadwood_quality" | "forest_cover_quality">> = {
   deadwood: "deadwood_quality",
   forest_cover: "forest_cover_quality",

@@ -14,7 +14,11 @@ export const INITIAL_CHECK_VIEW: IAuditCheckView = { section: null, cropId: null
 /** The crop review covers the map: the open step answers per crop, its check stored crops, and
  * you did not ask for the map. Its own keys then replace the steps' Enter. */
 export const cropReviewOpen = (view: Pick<IAuditCheckView, "mapOnly">, section: IAuditSectionDef | null, evidence: IAuditCheckEvidence | undefined) =>
-	!!section?.cropAnswers && !!evidence?.crops.length && !view.mapOnly;
+	canReviewCrops(section, evidence) && !view.mapOnly;
+
+/** The open step answers per crop and its check stored crops: the crop review can show them. */
+export const canReviewCrops = (section: IAuditSectionDef | null, evidence: IAuditCheckEvidence | undefined) =>
+	!!section?.cropAnswers && !!evidence?.crops.length;
 
 /** The stored image the model saw: the selected crop's (falling back to its raw image), else the dataset overview. */
 export function modelViewImage(evidence: IAuditCheckEvidence | undefined, cropId: number | null, kind: CropImageKind): IAuditImage | null {

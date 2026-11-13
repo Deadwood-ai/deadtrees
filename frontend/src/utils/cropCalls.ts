@@ -1,4 +1,5 @@
-import type { AuditLayer, AuditVerdict, IAuditCheckEvidence } from "../types/auditChecks";
+import type { PredictionQuality } from "../hooks/useDatasetAudit";
+import type { AuditLayer, AuditVerdict, IAuditCheckEvidence, IModeScore } from "../types/auditChecks";
 import { orderedCrops } from "./auditChecks";
 
 /** The rule config key of a layer (processor/src/prediction_quality_v1/rule.py, RULE_CONFIG). */
@@ -70,7 +71,10 @@ export const LAYER_MODES = {
 export type PredictionLayer = keyof typeof LAYER_MODES;
 
 /** A model's score on an error type; a person's tag (true) has none. */
-export const modeScore = (mode: unknown) => (typeof mode === "object" && mode !== null ? (mode as { likelihood?: number; area_pct?: number }) : {});
+export const modeScore = (mode: IModeScore | true | null | undefined): IModeScore => (mode && mode !== true ? mode : {});
+
+/** A model saw an error type when it gives it a likelihood of 50 or more. */
+const SEEN = 50;
 
 /** A model's short name: "luna-medium" → "Luna", "haiku-5.5" → "Haiku". */
 const modelName = (model: string | null) => (model ? model.split("-")[0].replace(/^\w/, (c) => c.toUpperCase()) : "Model");
@@ -96,7 +100,7 @@ export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, c
 			errors: Array.isArray(a.details.errors) ? a.details.errors.filter((e): e is string => typeof e === "string" && e.trim() !== "") : [],
 			issues: Object.entries(a.modes ?? {})
 				.map(([key, m]) => [key, modeScore(m)] as const)
-				.filter(([key, m]) => key !== "m0_not_assessable" && (m.likelihood ?? 0) >= 50)
+				.filter(([key, m]) => key !== "m0_not_assessable" && (m.likelihood ?? 0) >= SEEN)
 				.sort(([, x], [, y]) => (y.likelihood ?? 0) - (x.likelihood ?? 0))
 				.map(([key, m]) => ({ key, label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
 		}));
@@ -110,7 +114,7 @@ export function layerRatingFromCrops(
 	evidence: Pick<IAuditCheckEvidence, "crops">,
 	calls: Map<number, AuditVerdict | null>,
 	mine: (cropId: number) => AuditVerdict | null,
-): { quality: "great" | "sentinel_ok" | "bad"; major: number; counted: number } | null {
+): { quality: PredictionQuality; major: number; counted: number } | null {
 	const counted = evidence.crops.some((c) => c.crop_sets.includes("exclude")) ? evidence.crops.filter((c) => c.crop_sets.includes("exclude")) : evidence.crops;
 	const verdicts = counted.map((c) => mine(c.id) ?? calls.get(c.id) ?? null).filter((v): v is AuditVerdict => v !== null && v !== "unsure");
 	if (!verdicts.length) return null;

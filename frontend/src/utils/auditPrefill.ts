@@ -119,9 +119,11 @@ export function answersWithSave(
 	return checkCalls(checks).flatMap((call) => {
 		if (only && call.checkKey !== only) return [];
 		if (layers && !layers.includes(call.layer)) return [];
-		if (myAnswer(checks.people, userId, call.runId, { checkKey: call.checkKey, layer: call.layer })) return [];
+		const mine = myAnswer(checks.people, userId, call.runId, { checkKey: call.checkKey, layer: call.layer });
 		const verdict = formVerdict(call, values);
 		if (!verdict) return [];
+		// an answer stands, except a prediction layer's: it follows the crops, which may have changed since
+		if (mine && (call.checkKey !== "prediction_quality" || mine.verdict === verdict)) return [];
 		const evaluation = call.checkKey === "dataset_evaluation";
 		// a kept dataset's flags: COG and thumbnail as the form holds them, reprocessing as the check said
 		const fixFlags = evaluation && keepsDataset(verdict) ? evaluationDraft(values, call.details) : [];

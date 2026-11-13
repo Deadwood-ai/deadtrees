@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditAssessment } from "../types/auditChecks";
-import { cropAnswerRows, myCropVerdict, savedLayer, suggestedLayer, withProblem, withVerdict } from "./cropAnswers";
+import { answeredValues, cropAnswerRows, myCropVerdict, savedLayer, suggestedLayer, withProblem, withVerdict } from "./cropAnswers";
 
 const row = (overrides: Partial<IAuditAssessment>): IAuditAssessment =>
 	({
@@ -82,5 +82,25 @@ describe("myCropVerdict", () => {
 		expect(mine(3)).toBe("major");
 		expect(mine(4)).toBe("unsure");
 		expect(mine(5)).toBeNull();
+	});
+});
+
+describe("answeredValues", () => {
+	const person = (layer: IAuditAssessment["layer"], verdict: IAuditAssessment["verdict"], crop_id: number | null) =>
+		row({ assessor_kind: "person", assessor_user_id: "me", model: null, layer, verdict, crop_id });
+	const crop = (id: number) => ({ id, ortho_sha256: "x", crop_sets: ["exclude"], geometry: { type: "Polygon" as const, coordinates: [] } });
+	const checks = (people: IAuditAssessment[]) => ({
+		available: true,
+		checks: { prediction_quality: { run: { id: 10, check_key: "prediction_quality" as const, inputs: {}, evidence: {} }, automated: [], queue: [], crops: [crop(1), crop(2), crop(3)], images: [] } },
+		people,
+	});
+
+	it("sets an answered prediction layer to the rating from your crop answers, not an older layer answer", () => {
+		const people = [person("deadwood", "minor", null), person("deadwood", "major", 1), person("deadwood", "major", 2)];
+		expect(answeredValues(checks(people), "me").deadwood_quality).toBe("bad");
+	});
+
+	it("leaves a layer you have not answered to the suggestions", () => {
+		expect(answeredValues(checks([]), "me").deadwood_quality).toBeUndefined();
 	});
 });

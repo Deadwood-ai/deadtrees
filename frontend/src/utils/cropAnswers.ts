@@ -1,6 +1,8 @@
 import type { AuditLayer, AuditVerdict, IAuditAnswerInput, IAuditAssessment } from "../types/auditChecks";
-import { myAnswer } from "./auditChecks";
-import { LAYER_MODES, modeScore, type PredictionLayer } from "./cropCalls";
+import type { AuditFormValues } from "../hooks/useDatasetAudit";
+import type { IAuditChecks } from "../types/auditChecks";
+import { AUDIT_SECTIONS, answeredFormValues, formValuesForVerdict, myAnswer, QUALITY_VERDICT } from "./auditChecks";
+import { LAYER_MODES, cropCalls, cropFindings, layerRatingFromCrops, type PredictionLayer } from "./cropCalls";
 
 /** A reviewer's answer to one error type on a crop. Left unanswered, it is saved as no. */
 export type ProblemAnswer = "yes" | "no" | "unsure";
@@ -20,17 +22,15 @@ export type CropDraft = { assessable: false } | { assessable: true; layers: Part
  * they saw tagged true and the ones they were unsure of in details.unsure_modes. */
 export type CropAnswerRow = Pick<IAuditAnswerInput, "layer" | "verdict" | "modes" | "details">;
 
-/** A model saw an error type when it gives it a likelihood of 50 or more. */
-const SEEN = 50;
-
 /** The reviewer's starting point on a crop's layer: the error types a model saw ticked yes, and
  * the verdict major where the check counted the crop major, minor where a model saw a problem,
  * else ok. */
 export function suggestedLayer(automated: IAuditAssessment[], cropId: number, layer: PredictionLayer, checkMajor: boolean | null): ILayerDraft {
-	const rows = automated.filter((a) => a.crop_id === cropId && a.layer === layer && a.assessor_kind === "model");
+	const findings = cropFindings({ automated }, cropId, layer);
+	const seen = new Set(findings.flatMap((f) => f.issues.map((i) => i.key)));
 	const problems: ILayerDraft["problems"] = {};
-	for (const mode of LAYER_MODES[layer]) if (rows.some((r) => (modeScore(r.modes?.[mode]).likelihood ?? 0) >= SEEN)) problems[mode] = "yes";
-	const modelMajor = checkMajor ?? rows.some((r) => r.verdict === "major");
+	for (const mode of LAYER_MODES[layer]) if (seen.has(mode)) problems[mode] = "yes";
+	const modelMajor = checkMajor ?? findings.some((f) => f.verdict === "major");
 	const verdict: AuditVerdict = modelMajor ? "major" : Object.keys(problems).length ? "minor" : "ok";
 	return { verdict, problems };
 }
@@ -86,4 +86,22 @@ export function myCropVerdict(people: IAuditAssessment[], userId: string | undef
 		if (cantTell(myAnswer(people, userId, runId, target("image")))) return "unsure";
 		return myAnswer(people, userId, runId, target(layer))?.verdict ?? null;
 	};
+}
+
+/** The saved-audit fields your answers decide (answeredFormValues), with each prediction layer you
+ * answered (on the layer or on any crop) set to the rating that follows from the crops: your crop
+ * answers, else the check's calls. One owner, so the form and the crop review cannot disagree. */
+export function answeredValues(checks: IAuditChecks | undefined, userId: string | undefined): Partial<AuditFormValues> {
+	const values = answeredFormValues(checks, userId);
+	if (!checks || !userId) return values;
+	for (const section of AUDIT_SECTIONS) {
+		const evidence = section.cropAnswers && section.checkKey ? checks.checks[section.checkKey] : undefined;
+		if (!evidence) continue;
+		const layer = section.layers[0];
+		const mine = myCropVerdict(checks.people, userId, evidence.run.id, layer);
+		const answered = myAnswer(checks.people, userId, evidence.run.id, { checkKey: section.checkKey!, layer }) || evidence.crops.some((c) => mine(c.id) !== null);
+		const rating = answered ? layerRatingFromCrops(evidence, cropCalls(evidence, section.layers), mine) : null;
+		if (rating) Object.assign(values, formValuesForVerdict(section.checkKey!, layer, QUALITY_VERDICT[rating.quality]));
+	}
+	return values;
 }

@@ -127,14 +127,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				))}
 				<AnswerDetails section={s} evidence={evidence} people={people} />
 				{s.cropAnswers && (
-					<CropAnswers
-						section={s}
-						evidence={evidence}
-						people={people}
-						open={view.section === s.id}
-						mapOnly={view.mapOnly}
-						onShowCrops={() => setView({ mapOnly: false })}
-					/>
+<CropAnswers section={s} evidence={evidence} people={people} />
 				)}
 			</div>
 		);
