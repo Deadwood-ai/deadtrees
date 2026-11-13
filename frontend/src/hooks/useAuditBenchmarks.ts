@@ -7,11 +7,13 @@ import type {
   IAuditAnswerInput,
   IAuditAssessment,
   IAuditBenchmark,
+  IAuditCrop,
   IAuditImage,
+  IAuditRun,
   IBenchmarkData,
   IBenchmarkTarget,
 } from "../types/auditChecks";
-import { mergeAnswers } from "../utils/auditChecks";
+import { mergeAnswers, runEvidence } from "../utils/auditChecks";
 
 /** The checks with a benchmark people label, in the order the tab lists them. */
 export const BENCHMARK_CHECKS: { checkKey: AuditCheckKey; title: string }[] = [
@@ -19,6 +21,8 @@ export const BENCHMARK_CHECKS: { checkKey: AuditCheckKey; title: string }[] = [
   { checkKey: "dataset_evaluation", title: "Dataset evaluation" },
 ];
 
+const CROP_COLUMNS = "id, dataset_id, crop_sets, ortho_sha256, geometry";
+type CropRow = IAuditCrop & { dataset_id: number };
 const IMAGE_COLUMNS = "id, crop_id, label_id, kind, storage_path, width, height, ortho_sha256, dataset_id";
 // a list filter travels in the URL; 100 ids stay well under its limit
 const CHUNK = 100;
@@ -82,6 +86,19 @@ function labelRun(target: TargetRef, current: Map<number, number>, models: IAudi
   return models.some((m) => m.crop_id === target.crop_id && m.run_id === run) ? run : null;
 }
 
+/** The images of a target as the run that judged it saw them, picked by the review page's own
+ * rule (runEvidence): the run's crops, and its own file where it differs from the stored row (a
+ * rerun keeps the first overview row, so the stored one may show an older AOI). */
+function runImages(target: TargetRef, run: IAuditRun, loaded: { models: IAuditAssessment[]; crops: (CropRow)[]; images: IAuditImage[] }) {
+  const evidence = runEvidence(run, {
+    automated: loaded.models.filter((m) => m.run_id === run.id),
+    queue: [],
+    crops: loaded.crops.filter((c) => c.dataset_id === target.dataset_id),
+    images: loaded.images.filter((i) => i.dataset_id === target.dataset_id),
+  });
+  return target.crop_id === null ? evidence.images.filter((i) => i.crop_id === null || i.kind === "raw") : evidence.images.filter((i) => i.crop_id === target.crop_id);
+}
+
 async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData> {
   const members = await allRows<Pick<IBenchmarkTarget, "id" | "dataset_id" | "crop_id" | "split">>((from, to) =>
     audit().from("benchmark_members").select("id, dataset_id, crop_id, split").eq("benchmark_id", benchmark.id).order("id").range(from, to),
@@ -103,12 +120,15 @@ async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData
         .in(column, chunk);
       return (onCrops ? query : query.is("crop_id", null)).order("id").range(from, to);
     });
-  // a dataset target shows its evaluation crops only, not the prediction check's many crops
-  const evaluationCrops = onCrops
-    ? []
-    : await byIds<{ id: number }>(datasetIds, (chunk, from, to) =>
-        audit().from("crops").select("id").in("dataset_id", chunk).contains("crop_sets", ["evaluation"]).order("id").range(from, to),
-      );
+  // the target crops; a dataset target shows its evaluation crops only, not the prediction check's many crops
+  const crops = await byIds<CropRow>(ids, (chunk, from, to) =>
+    (onCrops
+      ? audit().from("crops").select(CROP_COLUMNS).in("id", chunk)
+      : audit().from("crops").select(CROP_COLUMNS).in("dataset_id", chunk).contains("crop_sets", ["evaluation"])
+    )
+      .order("id")
+      .range(from, to),
+  );
   const [images, people, models, current] = await Promise.all([
     onCrops
       ? byIds<IAuditImage>(cropIds, (chunk, from, to) => audit().from("images").select(IMAGE_COLUMNS).in("crop_id", chunk).order("id").range(from, to))
@@ -117,7 +137,7 @@ async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData
             audit().from("images").select(IMAGE_COLUMNS).in("dataset_id", chunk).is("crop_id", null).order("id").range(from, to),
           ),
           byIds<IAuditImage>(
-            evaluationCrops.map((c) => c.id),
+            crops.map((c) => c.id),
             (chunk, from, to) => audit().from("images").select(IMAGE_COLUMNS).in("crop_id", chunk).eq("kind", "raw").order("id").range(from, to),
           ),
         ]).then((parts) => parts.flat()),
@@ -127,18 +147,27 @@ async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData
       audit().from("current_runs").select("dataset_id, run_id").eq("check_key", benchmark.check_key).in("dataset_id", chunk).order("dataset_id").range(from, to),
     ),
   ]);
-  const named = await withEmails(people);
-  const latestModels = latestPerAssessor(models);
   const currentRuns = new Map(current.map((c) => [c.dataset_id, c.run_id]));
+  const labelRuns = new Map(members.map((m) => [m.id, labelRun(m, currentRuns, models)]));
+  const runIds = [...new Set([...labelRuns.values()].filter((id): id is number => id !== null))];
+  const [named, runs] = await Promise.all([
+    withEmails(people),
+    byIds<IAuditRun>(runIds, (chunk, from, to) => audit().from("runs").select("id, check_key, inputs, evidence").in("id", chunk).order("id").range(from, to)),
+  ]);
+  const runById = new Map(runs.map((r) => [r.id, r]));
+  const latestModels = latestPerAssessor(models);
   return {
     benchmark,
-    targets: members.map((m) => ({
-      ...m,
-      run_id: labelRun(m, currentRuns, models),
-      images: targetImages(m, images),
-      people: named.filter((r) => isOnTarget(m, r)),
-      models: latestModels.filter((r) => isOnTarget(m, r)),
-    })),
+    targets: members.map((m) => {
+      const run = runById.get(labelRuns.get(m.id) ?? -1);
+      return {
+        ...m,
+        run_id: run?.id ?? null,
+        images: run ? runImages(m, run, { models, crops, images }) : targetImages(m, images),
+        people: named.filter((r) => isOnTarget(m, r)),
+        models: latestModels.filter((r) => isOnTarget(m, r)),
+      };
+    }),
   };
 }
 

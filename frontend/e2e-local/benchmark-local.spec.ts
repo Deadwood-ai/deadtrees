@@ -38,6 +38,19 @@ const CROP_IMAGES = [101, 102].flatMap((crop, i) => [
   image(crop * 10 + 2, crop, 501 + i, "forest_cover_overlay", 7002),
 ]);
 const DATASET_IMAGES = [image(6010, null, 601, "overview"), image(6011, null, 601, "thumbnail"), image(6012, 900, 601, "raw")];
+const SHA = "a".repeat(64);
+const crop = (id: number, dataset: number, set: string) => ({ id, dataset_id: dataset, crop_sets: [set], ortho_sha256: SHA, geometry: null });
+const CROPS = [crop(101, 501, "exclude"), crop(102, 502, "benchmark"), ...[900, 901, 902, 903].map((id) => crop(id, 601, "evaluation"))];
+// the evaluation run kept the first overview row but judged its own overview file
+const RUNS = [
+  { id: 55, check_key: "prediction_quality", inputs: { ortho_sha256: SHA }, evidence: {} },
+  {
+    id: 77,
+    check_key: "dataset_evaluation",
+    inputs: { ortho_sha256: SHA },
+    evidence: { judged: { images: [{ crop_id: null, label_id: null, kind: "overview", storage_path: "audit/bench/run-77-overview.png" }] } },
+  },
+];
 const row = (overrides: Record<string, unknown>) => ({
   id: 1,
   check_key: "prediction_quality",
@@ -103,8 +116,15 @@ async function mockSupabase(page: Page) {
       const crops = inList(url, "crop_id");
       return json(route, crops ? CROP_IMAGES.filter((i) => crops.includes(i.crop_id!)) : DATASET_IMAGES);
     }
-    if (resource === "current_runs") return json(route, [{ dataset_id: 501, run_id: 55 }]);
-    if (resource === "crops") return json(route, [{ id: 900 }]);
+    if (resource === "current_runs") {
+      const evaluation = url.searchParams.get("check_key") === "eq.dataset_evaluation";
+      return json(route, evaluation ? [{ dataset_id: 601, run_id: 77 }] : [{ dataset_id: 501, run_id: 55 }]);
+    }
+    if (resource === "runs") return json(route, RUNS.filter((r) => inList(url, "id")?.includes(r.id)));
+    if (resource === "crops") {
+      const ids = inList(url, "id");
+      return json(route, ids ? CROPS.filter((c) => ids.includes(c.id)) : CROPS.filter((c) => c.crop_sets.includes("evaluation")));
+    }
     if (resource === "latest_assessments") return json(route, inList(url, "crop_id") ? OTHERS : []);
     if (resource === "assessments" && request.method() === "POST") {
       const rows = (request.postDataJSON() as Record<string, unknown>[]).map((r, i) => ({ ...row({}), ...r, id: 1000 + saved.length + i, assessor: auditor.id }));
@@ -184,13 +204,15 @@ test.describe("benchmark labeling", () => {
     await mockSupabase(page);
     await page.goto("/dataset-audit/benchmark/dataset_evaluation?filter=open");
     await expect(page.getByTestId("benchmark-evaluation-images").getByRole("img")).toHaveCount(3);
+    // the overview the evaluation run judged, not the older stored row
+    await expect(page.getByRole("img", { name: "Overview" })).toHaveAttribute("src", /run-77-overview\.png$/);
     await page.keyboard.press("3");
     await page.keyboard.press("Enter");
     await expect(page.getByText("Excluding needs a reason")).toBeVisible();
     await page.keyboard.press("q");
     await page.keyboard.press("Enter");
     await expect.poll(() => saved.length).toBe(1);
-    expect(saved[0]).toMatchObject({ check_key: "dataset_evaluation", dataset_id: 601, crop_id: null, layer: "image", verdict: "major", reason_code: "blurry", run_id: null });
+    expect(saved[0]).toMatchObject({ check_key: "dataset_evaluation", dataset_id: 601, crop_id: null, layer: "image", verdict: "major", reason_code: "blurry", run_id: 77 });
     await expect(page.getByTestId("benchmark-reveal")).toContainText("Nobody else labeled this dataset yet");
   });
 });
