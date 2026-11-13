@@ -1,5 +1,3 @@
-import { useEffect } from "react";
-import { Form } from "antd";
 import type { IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
 import type { IAuditSectionDef } from "../../../utils/auditChecks";
 import LayerRatingLine from "./LayerRatingLine";
@@ -12,18 +10,11 @@ interface CropAnswersProps {
 	people: IAuditAssessment[];
 }
 
-/** A prediction step in the sidebar: the layer rating that follows from the crops, which goes into
- * the saved audit, and how far you are. The crops themselves are answered in the crop review. */
+/** A prediction step in the sidebar: the layer rating that follows from the crops (the page puts
+ * it into the saved audit once you answer, utils/cropAnswers answeredValues) and how far you are. The crops themselves are answered in the crop review. */
 export default function CropAnswers({ section, evidence, people }: CropAnswersProps) {
 	const { calls, crops, rating, answered } = useLayerRating(section, evidence, people);
 	const flagged = crops.filter((c) => calls.get(c.id) === "major").length;
-
-	// the layer's saved rating follows from the crops: your answers, else the check's calls
-	const form = Form.useFormInstance();
-	const field = section.fields[0];
-	useEffect(() => {
-		if (rating && field && form.getFieldValue(field) !== rating.quality) form.setFieldsValue({ [field]: rating.quality });
-	}, [rating?.quality, field, form]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	if (!crops.length) return <div className="text-xs text-gray-500">This check stored no crops.</div>;
 	return (

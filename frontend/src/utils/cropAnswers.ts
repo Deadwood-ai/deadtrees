@@ -1,6 +1,8 @@
 import type { AuditLayer, AuditVerdict, IAuditAnswerInput, IAuditAssessment } from "../types/auditChecks";
-import { myAnswer } from "./auditChecks";
-import { LAYER_MODES, cropFindings, type PredictionLayer } from "./cropCalls";
+import type { AuditFormValues } from "../hooks/useDatasetAudit";
+import type { IAuditChecks } from "../types/auditChecks";
+import { AUDIT_SECTIONS, answeredFormValues, formValuesForVerdict, myAnswer, QUALITY_VERDICT } from "./auditChecks";
+import { LAYER_MODES, cropCalls, cropFindings, layerRatingFromCrops, type PredictionLayer } from "./cropCalls";
 
 /** A reviewer's answer to one error type on a crop. Left unanswered, it is saved as no. */
 export type ProblemAnswer = "yes" | "no" | "unsure";
@@ -84,4 +86,22 @@ export function myCropVerdict(people: IAuditAssessment[], userId: string | undef
 		if (cantTell(myAnswer(people, userId, runId, target("image")))) return "unsure";
 		return myAnswer(people, userId, runId, target(layer))?.verdict ?? null;
 	};
+}
+
+/** The saved-audit fields your answers decide (answeredFormValues), with each prediction layer you
+ * answered (on the layer or on any crop) set to the rating that follows from the crops: your crop
+ * answers, else the check's calls. One owner, so the form and the crop review cannot disagree. */
+export function answeredValues(checks: IAuditChecks | undefined, userId: string | undefined): Partial<AuditFormValues> {
+	const values = answeredFormValues(checks, userId);
+	if (!checks || !userId) return values;
+	for (const section of AUDIT_SECTIONS) {
+		const evidence = section.cropAnswers && section.checkKey ? checks.checks[section.checkKey] : undefined;
+		if (!evidence) continue;
+		const layer = section.layers[0];
+		const mine = myCropVerdict(checks.people, userId, evidence.run.id, layer);
+		const answered = myAnswer(checks.people, userId, evidence.run.id, { checkKey: section.checkKey!, layer }) || evidence.crops.some((c) => mine(c.id) !== null);
+		const rating = answered ? layerRatingFromCrops(evidence, cropCalls(evidence, section.layers), mine) : null;
+		if (rating) Object.assign(values, formValuesForVerdict(section.checkKey!, layer, QUALITY_VERDICT[rating.quality]));
+	}
+	return values;
 }
