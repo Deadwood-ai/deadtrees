@@ -37,18 +37,21 @@ const CROP_IMAGES = [101, 102].flatMap((crop, i) => [
   image(crop * 10 + 1, crop, 501 + i, "deadwood_overlay", 7001),
   image(crop * 10 + 2, crop, 501 + i, "forest_cover_overlay", 7002),
 ]);
-const DATASET_IMAGES = [image(6010, null, 601, "overview"), image(6011, null, 601, "thumbnail"), image(6012, 900, 601, "raw")];
+const DATASET_IMAGES = [image(6010, null, 601, "overview"), image(6011, null, 601, "thumbnail"), ...[900, 901, 902, 903].map((c, i) => image(6012 + i, c, 601, "raw"))];
 const SHA = "a".repeat(64);
 const crop = (id: number, dataset: number, set: string) => ({ id, dataset_id: dataset, crop_sets: [set], ortho_sha256: SHA, geometry: null });
 const CROPS = [crop(101, 501, "exclude"), crop(102, 502, "benchmark"), ...[900, 901, 902, 903].map((id) => crop(id, 601, "evaluation"))];
-// the evaluation run kept the first overview row but judged its own overview file
+// a rerun of the evaluation: it kept the first overview row but judged its own overview file,
+// and picked other crops (901, 902) than the earlier run (900, 903)
 const RUNS = [
   { id: 55, check_key: "prediction_quality", inputs: { ortho_sha256: SHA }, evidence: {} },
   {
     id: 77,
     check_key: "dataset_evaluation",
     inputs: { ortho_sha256: SHA },
-    evidence: { judged: { images: [{ crop_id: null, label_id: null, kind: "overview", storage_path: "audit/bench/run-77-overview.png" }] } },
+    evidence: {
+      judged: { crop_ids: [901, 902], images: [{ crop_id: null, label_id: null, kind: "overview", storage_path: "audit/bench/run-77-overview.png" }] },
+    },
   },
 ];
 const row = (overrides: Record<string, unknown>) => ({
@@ -203,9 +206,11 @@ test.describe("benchmark labeling", () => {
   test("a dataset is labeled for the dataset evaluation benchmark", async ({ page }) => {
     await mockSupabase(page);
     await page.goto("/dataset-audit/benchmark/dataset_evaluation?filter=open");
-    await expect(page.getByTestId("benchmark-evaluation-images").getByRole("img")).toHaveCount(3);
-    // the overview the evaluation run judged, not the older stored row
+    // what the current run judged: its own overview file, the thumbnail and its two crops
+    await expect(page.getByTestId("benchmark-evaluation-images").getByRole("img")).toHaveCount(4);
     await expect(page.getByRole("img", { name: "Overview" })).toHaveAttribute("src", /run-77-overview\.png$/);
+    await expect(page.getByRole("img", { name: "Crop 1" })).toHaveAttribute("src", /6013\.png$/);
+    await expect(page.getByRole("img", { name: "Crop 2" })).toHaveAttribute("src", /6014\.png$/);
     await page.keyboard.press("3");
     await page.keyboard.press("Enter");
     await expect(page.getByText("Excluding needs a reason")).toBeVisible();
