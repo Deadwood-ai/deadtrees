@@ -192,7 +192,8 @@ export default function BenchmarkSignalChart({
         <span className="db-context-date-key">· Available image dates</span>
       </div>
       <p className="db-chart-note">
-        GCC = G / (R + G + B), averaged over valid Planet RGB pixels. Null
+        GCC = G / (R + G + B). Source and aggregation details are described
+        in Methods. Null
         values remain missing. Lines show robust LOWESS trends (120-day
         Sentinel, 240-day Planet windows); faint points and hover values are
         original observations. Trends stop across gaps longer than 45 days
