@@ -48,3 +48,45 @@ export function cropsForReview(evidence: Pick<IAuditCheckEvidence, "crops">, cal
 	const major = (id: number) => (calls.get(id) === "major" ? 0 : 1);
 	return orderedCrops(evidence).sort((a, b) => major(a.id) - major(b.id));
 }
+
+/** The prediction check's error types (processor/src/prediction_quality_v1 vocabulary) in words. */
+const MODE_LABELS: Record<string, string> = {
+	m0_not_assessable: "Crop not assessable",
+	m1_dead_missed: "Dead trees missed",
+	m2_dw_on_live_vegetation: "Deadwood on live trees",
+	m3_dw_on_non_vegetation: "Deadwood on bare ground",
+	m4_dw_on_lying_wood: "Lying wood marked as deadwood",
+	m7_dw_artifact: "Broken or cut-off prediction",
+	m5_fc_trees_missed: "Trees missed",
+	m6_fc_on_non_trees: "Tree cover on non-trees",
+	m7_fc_artifact: "Broken or cut-off prediction",
+};
+
+/** A model's short name: "luna-medium" → "Luna", "haiku-5.5" → "Haiku". */
+const modelName = (model: string | null) => (model ? model.split("-")[0].replace(/^\w/, (c) => c.toUpperCase()) : "Model");
+
+/** What one model saw in a crop on one layer. */
+export interface ICropFinding {
+	model: string;
+	verdict: AuditVerdict;
+	/** the model's own sentences on the errors */
+	errors: string[];
+	/** the error types it found likely (50 or more), most likely first, with the share of the crop */
+	issues: { label: string; likelihood: number; areaPct: number | null }[];
+}
+
+/** Each model's findings on a crop and layer, the model that saw the worst first. */
+export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, cropId: number, layer: AuditLayer): ICropFinding[] {
+	return evidence.automated
+		.filter((a) => a.crop_id === cropId && a.layer === layer && a.assessor_kind === "model")
+		.sort((a, b) => (b.major_likelihood ?? 0) - (a.major_likelihood ?? 0))
+		.map((a) => ({
+			model: modelName(a.model),
+			verdict: a.verdict,
+			errors: Array.isArray(a.details.errors) ? a.details.errors.filter((e): e is string => typeof e === "string" && e.trim() !== "") : [],
+			issues: Object.entries(a.modes ?? {})
+				.filter(([key, m]) => key !== "m0_not_assessable" && (m.likelihood ?? 0) >= 50)
+				.sort(([, x], [, y]) => (y.likelihood ?? 0) - (x.likelihood ?? 0))
+				.map(([key, m]) => ({ label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
+		}));
+}

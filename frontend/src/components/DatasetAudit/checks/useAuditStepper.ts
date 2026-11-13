@@ -52,8 +52,8 @@ export function useAuditStepper({ datasetId, checks, view, setView, disabled, op
 	const accept = async () => {
 		const id = view.section;
 		if (!id) return goTo(ORDER[0]);
-		const { checkKey } = auditSection(id);
-		const answers = checkKey ? answersWithSave(checks, user?.id, form.getFieldsValue(true), datasetId, { only: checkKey, withSave: false }) : [];
+		const { checkKey, layers } = auditSection(id);
+		const answers = checkKey ? answersWithSave(checks, user?.id, form.getFieldsValue(true), datasetId, { only: checkKey, layers, withSave: false }) : [];
 		if (!answers.length) return goTo(next(id));
 		try {
 			// a stored answer moves on by itself (above)

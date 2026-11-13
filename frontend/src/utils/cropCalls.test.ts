@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditAssessment, IAuditCheckEvidence } from "../types/auditChecks";
-import { cropCall, cropCalls, cropsForReview } from "./cropCalls";
+import { cropCall, cropCalls, cropFindings, cropsForReview } from "./cropCalls";
 
 const model = (crop_id: number, layer: IAuditAssessment["layer"], modelName: string, major_likelihood: number, verdict: IAuditAssessment["verdict"] = "ok") =>
 	({ crop_id, layer, model: modelName, major_likelihood, verdict, assessor_kind: "model" }) as IAuditAssessment;
@@ -41,5 +41,27 @@ describe("cropsForReview", () => {
 		const calls = cropCalls(e, ["deadwood"]);
 		expect(cropsForReview(e, calls).map((c) => c.id)).toEqual([3, 1, 2, 4]);
 		expect([...calls].filter(([, call]) => call === "major").map(([id]) => id)).toEqual([3]);
+	});
+});
+
+describe("cropFindings", () => {
+	it("says what each model saw in a crop: its likely error types with their share, and its words", () => {
+		const row = {
+			crop_id: 7,
+			layer: "deadwood",
+			model: "luna-medium",
+			assessor_kind: "model",
+			verdict: "major",
+			major_likelihood: 95,
+			modes: { m1_dead_missed: { likelihood: 95, area_pct: 3 }, m4_dw_on_lying_wood: { likelihood: 40, area_pct: 1 }, m0_not_assessable: { likelihood: 0 } },
+			details: { errors: ["Most dead crowns are unmarked."] },
+		} as unknown as IAuditAssessment;
+		const [finding] = cropFindings({ automated: [row] }, 7, "deadwood");
+		expect(finding).toEqual({
+			model: "Luna",
+			verdict: "major",
+			errors: ["Most dead crowns are unmarked."],
+			issues: [{ label: "Dead trees missed", likelihood: 95, areaPct: 3 }],
+		});
 	});
 });
