@@ -176,8 +176,9 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		),
 		georef: (
 			<>
-				{answers(auditSection("georef"))}
+				{/* the evidence first, then the call and its answer row */}
 				<GeoreferencingCard {...panels.georef} byCheck={ranOn("georef", "georef")} />
+				{answers(auditSection("georef"))}
 			</>
 		),
 		date: (
