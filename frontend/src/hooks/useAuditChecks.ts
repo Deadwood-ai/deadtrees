@@ -23,7 +23,7 @@ export const SCHEMA_NOT_EXPOSED = "PGRST106";
 /** The columns the page reads of an assessment; the model's raw reply stays on the server. The major
  * likelihood and the error modes come along so the page can mark the crops the check counted major
  * and say what each model saw in a crop (utils/cropCalls). */
-const ASSESSMENT_COLUMNS =
+export const ASSESSMENT_COLUMNS =
   "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, major_likelihood, modes, reason_code, reason_text, details";
 export const QUEUE_COLUMNS = "dataset_id, check_key, layer, run_id, verdict, reason";
 
@@ -66,7 +66,7 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
 }
 
 /** Reviewers' emails for their answers (get_user_emails answers auditors only); ids stay when it fails. */
-async function withEmails(rows: IAuditAssessment[]): Promise<IAuditAssessment[]> {
+export async function withEmails(rows: IAuditAssessment[]): Promise<IAuditAssessment[]> {
   const ids = [...new Set(rows.map((r) => r.assessor_user_id).filter((id): id is string => !!id))];
   if (!ids.length) return rows;
   const { data, error } = await supabase.rpc("get_user_emails", { p_user_ids: ids });

@@ -47,12 +47,13 @@ import { useAnalytics } from "../hooks/useAnalytics";
 import { isDatasetReadyForAudit } from "../utils/processingSteps";
 import AuditCheckQueue from "../components/DatasetAudit/checks/AuditCheckQueue";
 import type { AuditCheckQueueKind } from "../components/DatasetAudit/checks/AuditCheckQueue";
+import BenchmarkTab from "../components/DatasetAudit/benchmark/BenchmarkTab";
 
 const { Title, Text } = Typography;
 
 // Tab structure including edits & flags
-type AuditTab = "to-review" | "disagreements" | "pending" | "completed" | "reference" | "edits-flags" | "re-review";
-const AUDIT_TABS: readonly AuditTab[] = ["to-review", "disagreements", "pending", "completed", "reference", "edits-flags", "re-review"];
+type AuditTab = "to-review" | "disagreements" | "benchmark" | "pending" | "completed" | "reference" | "edits-flags" | "re-review";
+const AUDIT_TABS: readonly AuditTab[] = ["to-review", "disagreements", "benchmark", "pending", "completed", "reference", "edits-flags", "re-review"];
 // tabs that list automated check results rather than datasets
 const CHECK_TABS: readonly AuditTab[] = ["to-review", "disagreements"];
 
@@ -60,6 +61,7 @@ const CHECK_TABS: readonly AuditTab[] = ["to-review", "disagreements"];
 const TAB_DESCRIPTIONS: Record<AuditTab, string> = {
 	"to-review": "Datasets whose automated check results wait for a person, one row per dataset. Open one and answer each check: agree, or say the check is wrong.",
 	disagreements: "Reviewers disagree with each other or with the models. These go to adjudication and become benchmark cases.",
+	benchmark: "Label the crops and datasets the checks are scored and tuned on, blind: others' and the models' answers show after yours.",
 	pending: "Datasets that finished processing and have not been audited yet.",
 	completed: "Datasets with a saved audit. Use the filters to find earlier decisions by status, auditor or outputs.",
 	"edits-flags": "Datasets with suggested corrections to predictions or issue reports from users that still need a decision.",
@@ -1054,6 +1056,7 @@ function DatasetAuditInner() {
 							options={[
 								{ label: "To review", value: "to-review" },
 								{ label: "Disagreements", value: "disagreements" },
+								{ label: "Benchmark", value: "benchmark" },
 								{ label: `Pending (${pendingCount})`, value: "pending" },
 								{ label: `Completed (${completedCount})`, value: "completed" },
 								{ label: `Edits & Flags (${editsFlagsCount})`, value: "edits-flags" },
@@ -1072,6 +1075,7 @@ function DatasetAuditInner() {
 							options={[
 							{ label: <span className="px-2 py-1">To review</span>, value: "to-review" },
 							{ label: <span className="px-2 py-1">Disagreements</span>, value: "disagreements" },
+							{ label: <span className="px-2 py-1">Benchmark</span>, value: "benchmark" },
 							{
 								label: (
 									<Space size={6} className="py-1 px-2">
@@ -1126,7 +1130,11 @@ function DatasetAuditInner() {
 					</Text>
 				</div>
 
-				{CHECK_TABS.includes(activeTab) ? (
+				{activeTab === "benchmark" ? (
+				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
+					<BenchmarkTab />
+				</div>
+				) : CHECK_TABS.includes(activeTab) ? (
 				<div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
 					<AuditCheckQueue kind={activeTab as AuditCheckQueueKind} locationOf={locationOf} />
 				</div>

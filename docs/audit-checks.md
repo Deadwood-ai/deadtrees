@@ -84,7 +84,22 @@ A benchmark fixes which targets a check is scored on; truth stays in
    id with 1 in 5 held out; a set frozen earlier (the DT-1272 gold split) gives its own.
    All members from one dataset share one split.
 2. Freezing (`frozen_at`) makes the members and the benchmark final; a bigger set is a
-   new version. Only a deleted dataset or crop still takes its members along.
+   new version. Only a deleted dataset or crop still takes its members along. Each
+   check has at most one open (unfrozen) version, where new targets go:
+   `audit.add_benchmark_target(check_key, dataset_id, crop_id)` (operators; `crop_id`
+   null adds the whole dataset) adds one, on the side its dataset already has in a
+   benchmark of the check, else the hash. A benchmark holds crops or datasets, not
+   both; a crop also joins the `benchmark` crop set. Truth is keyed by target, so a new
+   version on the same crops keeps every answer given on them, and an operator's
+   review-page answer on an added target is already its first label. Auditors label
+   targets with their own person rows on the audit page's Benchmark tab, blind (others'
+   and the models' answers show after yours). A label carries the check's current run
+   when that run judged the target, because `audit.latest_assessments` keeps one row per
+   person and target across runs: a label without it would hide the same person's review
+   of that run. Gold crops no run judged get no run. Open now:
+   `pq-gold-dt1272` v2 (v1's 197 crops with their frozen splits, migration
+   `20261113150000_open_benchmark_versions.sql`) and `dataset-evaluation-gold` v1,
+   whose picked datasets are added by `scripts/audit_import.py evaluation-gold`.
 3. A candidate version runs on the members in the `benchmark` queue. Benchmark runs
    stay out of the production queues and cost caps and never become the current run.
 4. The check's scorer compares the candidate's rows with the truth rows and records
@@ -306,6 +321,10 @@ back to the saved-audit fields.
   and listed. A window graded twice is one crop with both gradings; where the gradings differ the
   run stops and lists them, unless `--accept-later-answers` keeps both and lets the later
   one count.
+- `evaluation-gold`: the datasets picked in `gold-set.json`
+  (`scripts/dataset_evaluation/gold_set.py`) become dataset members of the open
+  `dataset-evaluation-gold` v1 on their hash split. No labels are imported; deleted
+  datasets and existing members are skipped.
 
 ## The saved audits
 
