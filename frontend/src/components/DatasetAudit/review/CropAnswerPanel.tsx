@@ -45,7 +45,7 @@ export default function CropAnswerPanel({ layer, findings, draft, focus, onFocus
 	return (
 		<div className="flex flex-col gap-3" data-testid={`crop-answer-${layer}`}>
 			<div className="text-sm font-semibold">{PREDICTION_LABELS[layer]}</div>
-			{blind ? <div className="text-[11px] text-gray-500">Models are shown after your answer.</div> : <Findings findings={findings} />}
+			{blind ? <div className="text-[11px] text-gray-500">The models show after your answer.</div> : <Findings findings={findings} />}
 			<div className="flex flex-col gap-1">
 				<div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{blind ? "Your answer" : "Your answer · the models' problems come ticked"}</div>
 				{LAYER_MODES[layer].map((mode) => {
