@@ -90,3 +90,19 @@ export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, c
 				.map(([key, m]) => ({ label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
 		}));
 }
+
+/** A prediction layer's saved rating, worked out from its crops: per crop your answer, else the
+ * check's call, counted over the crops the check counts (its exclude set, or all when it has none).
+ * Two or more major crops make it bad, one makes it ok, none great. The audit asks no question on
+ * the whole layer; each use downstream can read the crop answers with its own rule. */
+export function layerRatingFromCrops(
+	evidence: Pick<IAuditCheckEvidence, "crops">,
+	calls: Map<number, AuditVerdict | null>,
+	mine: (cropId: number) => AuditVerdict | null,
+): { quality: "great" | "sentinel_ok" | "bad"; major: number; counted: number } | null {
+	const counted = evidence.crops.some((c) => c.crop_sets.includes("exclude")) ? evidence.crops.filter((c) => c.crop_sets.includes("exclude")) : evidence.crops;
+	const verdicts = counted.map((c) => mine(c.id) ?? calls.get(c.id) ?? null).filter((v): v is AuditVerdict => v !== null && v !== "unsure");
+	if (!verdicts.length) return null;
+	const major = verdicts.filter((v) => v === "major").length;
+	return { quality: major >= 2 ? "bad" : major === 1 ? "sentinel_ok" : "great", major, counted: verdicts.length };
+}

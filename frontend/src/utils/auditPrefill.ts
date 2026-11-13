@@ -134,7 +134,12 @@ export function answersWithSave(
 				label_id: call.labelId,
 				verdict: evaluation && keepsDataset(verdict) ? (fixFlags.length ? "minor" : "ok") : verdict,
 				reason_code: evaluation && !keepsDataset(verdict) && typeof call.details.reason === "string" ? call.details.reason : null,
-				details: { ...(withSave ? { with_save: true } : {}), ...(evaluation ? { fix_flags: fixFlags } : {}) },
+				details: {
+					...(withSave ? { with_save: true } : {}),
+					...(evaluation ? { fix_flags: fixFlags } : {}),
+					// a prediction layer's answer is worked out from its crops, not given on the whole layer
+					...(call.checkKey === "prediction_quality" ? { from_crops: true } : {}),
+				},
 			},
 		];
 	});

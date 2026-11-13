@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditAssessment, IAuditCheckEvidence } from "../types/auditChecks";
-import { cropCall, cropCalls, cropFindings, cropsForReview } from "./cropCalls";
+import { cropCall, cropCalls, cropFindings, cropsForReview, layerRatingFromCrops } from "./cropCalls";
 
 const model = (crop_id: number, layer: IAuditAssessment["layer"], modelName: string, major_likelihood: number, verdict: IAuditAssessment["verdict"] = "ok") =>
 	({ crop_id, layer, model: modelName, major_likelihood, verdict, assessor_kind: "model" }) as IAuditAssessment;
@@ -63,5 +63,16 @@ describe("cropFindings", () => {
 			errors: ["Most dead crowns are unmarked."],
 			issues: [{ label: "Dead trees missed", likelihood: 95, areaPct: 3 }],
 		});
+	});
+});
+
+describe("layerRatingFromCrops", () => {
+	const crops = [crop(1), crop(2), crop(3), crop(4, ["training"])];
+	const calls = new Map<number, IAuditAssessment["verdict"] | null>([[1, "major"], [2, "ok"], [3, "ok"], [4, "major"]]);
+
+	it("counts the check's calls on the exclude set, and your answers over them", () => {
+		expect(layerRatingFromCrops({ crops }, calls, () => null)).toEqual({ quality: "sentinel_ok", major: 1, counted: 3 });
+		expect(layerRatingFromCrops({ crops }, calls, (id) => (id === 2 ? "major" : null))).toEqual({ quality: "bad", major: 2, counted: 3 });
+		expect(layerRatingFromCrops({ crops }, calls, (id) => (id === 1 ? "ok" : null))).toEqual({ quality: "great", major: 0, counted: 3 });
 	});
 });

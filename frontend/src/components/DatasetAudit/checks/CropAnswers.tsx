@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
-import { Button, Radio, Segmented, Tag, message } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { Button, Form, Radio, Segmented, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
 import { LAYER_LABELS, myAnswer, stepCrop, verdictLabel, type IAuditSectionDef } from "../../../utils/auditChecks";
-import { cropCalls, cropFindings, cropsForReview, type ICropFinding } from "../../../utils/cropCalls";
+import { cropCalls, cropFindings, cropsForReview, layerRatingFromCrops, type ICropFinding } from "../../../utils/cropCalls";
 import { useAuditShortcuts } from "./useAuditShortcuts";
 
 interface CropAnswersProps {
@@ -35,6 +35,14 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	const [allCrops, setAllCrops] = useState(false);
 	const cycle = allCrops || !flagged.length ? crops : flagged;
 	const index = crops.findIndex((c) => c.id === cropId);
+
+	// the layer's saved rating follows from the crops: your answers, else the check's calls
+	const form = Form.useFormInstance();
+	const field = section.fields[0];
+	const rating = layerRatingFromCrops(evidence, calls, (id) => myAnswer(people, user?.id, evidence.run.id, { checkKey, layer: section.layers[0], cropId: id })?.verdict ?? null);
+	useEffect(() => {
+		if (rating && field && form.getFieldValue(field) !== rating.quality) form.setFieldsValue({ [field]: rating.quality });
+	}, [rating?.quality, field, form]); // eslint-disable-line react-hooks/exhaustive-deps
 	const runId = evidence.run.id;
 	const target = (layer: AuditLayer) => ({ checkKey, layer, cropId });
 	const modelRows = (layer: AuditLayer) => evidence.automated.filter((a) => a.crop_id === cropId && a.layer === layer);
@@ -85,6 +93,15 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	);
 
 	if (!crops.length) return <div className="text-xs text-gray-500">This check stored no crops.</div>;
+	const ratingLine = rating && (
+		<div className="text-xs" data-testid="audit-layer-rating">
+			Layer rating from the crops: <b>{QUALITY_WORDS[rating.quality]}</b>
+			<span className="text-gray-500">
+				{" "}
+				· {rating.major} major of {rating.counted} counted crops (your answers, else the check's) · goes into the audit
+			</span>
+		</div>
+	);
 	const flaggedLine = flagged.length > 0 && (
 		<div className="flex flex-wrap items-center gap-1 text-xs">
 			<span className="text-gray-600">Counted major by the check:</span>
@@ -110,6 +127,7 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	if (cropId === null || index < 0) {
 		return (
 			<div className="flex flex-col gap-2">
+				{ratingLine}
 				{flaggedLine}
 				<Button block type="primary" ghost onClick={() => step(1)}>
 					{flagged.length ? `Start with the ${flagged.length} flagged crops (n)` : `Start with crop 1 of ${crops.length} (n)`}
@@ -121,6 +139,7 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg bg-white p-2.5" data-testid="audit-crop">
+			{ratingLine}
 			{flaggedLine}
 			<div className="flex flex-wrap items-center justify-between gap-2">
 				<span className="flex items-center gap-1.5 text-xs font-semibold">
@@ -190,6 +209,8 @@ function CropFindings({ findings, label }: { findings: ICropFinding[]; label: (v
 		</div>
 	);
 }
+
+const QUALITY_WORDS = { great: "Great", sentinel_ok: "OK", bad: "Bad" } as const;
 
 const VERDICT_COLOR: Record<AuditVerdict, string> = { ok: "green", minor: "gold", major: "red", unsure: "default" };
 

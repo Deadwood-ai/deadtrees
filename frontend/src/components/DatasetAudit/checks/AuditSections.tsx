@@ -109,13 +109,10 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		return (
 			<div className="mb-3 flex flex-col gap-3">
 				<CheckSummary section={s} evidence={evidence} />
-				{s.layers.map((layer) => (
+				{/* a prediction step asks per crop only; its layer rating follows from the crops */}
+				{!s.cropAnswers && s.layers.map((layer) => (
 					<div key={layer}>
-						{s.cropAnswers ? (
-							<div className="mb-1 text-xs font-medium">Whole layer (this goes into the audit):</div>
-						) : (
-							s.layers.length > 1 && <div className="mb-1 text-xs font-medium">{LAYER_LABELS[layer]}</div>
-						)}
+						{s.layers.length > 1 && <div className="mb-1 text-xs font-medium">{LAYER_LABELS[layer]}</div>}
 						<CheckAnswer
 							datasetId={datasetId}
 							section={s}
