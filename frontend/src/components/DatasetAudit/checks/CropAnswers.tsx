@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Button, Radio, Tag, message } from "antd";
+import { useMemo, useState } from "react";
+import { Button, Radio, Segmented, Tag, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
@@ -31,6 +31,9 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	const calls = useMemo(() => cropCalls(evidence, section.layers), [evidence, section.layers]);
 	const crops = cropsForReview(evidence, calls);
 	const flagged = crops.filter((c) => calls.get(c.id) === "major");
+	// by default n / p go through the crops the check flagged only; A switches to all crops
+	const [allCrops, setAllCrops] = useState(false);
+	const cycle = allCrops || !flagged.length ? crops : flagged;
 	const index = crops.findIndex((c) => c.id === cropId);
 	const runId = evidence.run.id;
 	const target = (layer: AuditLayer) => ({ checkKey, layer, cropId });
@@ -59,7 +62,7 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	};
 
 	const step = (by: 1 | -1) => {
-		const next = stepCrop(crops, cropId, by);
+		const next = stepCrop(cycle, cropId, by);
 		if (next !== null) onSelectCrop(next);
 	};
 
@@ -72,6 +75,7 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 		{
 			n: () => step(1),
 			p: () => step(-1),
+			a: () => setAllCrops((all) => !all),
 			" ": () => answerAndStep("ok"),
 			"1": () => answerAndStep(section.verdicts[0]),
 			"2": () => answerAndStep(section.verdicts[1]),
@@ -91,12 +95,24 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 			))}
 		</div>
 	);
+	const cycleSwitch =
+		flagged.length > 0 ? (
+			<Segmented
+				size="small"
+				value={allCrops ? "all" : "flagged"}
+				onChange={(v) => setAllCrops(v === "all")}
+				options={[
+					{ label: `Flagged (${flagged.length})`, value: "flagged" },
+					{ label: `All (${crops.length})`, value: "all" },
+				]}
+			/>
+		) : null;
 	if (cropId === null || index < 0) {
 		return (
 			<div className="flex flex-col gap-2">
 				{flaggedLine}
-				<Button block onClick={() => step(1)}>
-					Start with crop 1 of {crops.length} (or click a square on the map)
+				<Button block type="primary" ghost onClick={() => step(1)}>
+					{flagged.length ? `Start with the ${flagged.length} flagged crops (n)` : `Start with crop 1 of ${crops.length} (n)`}
 				</Button>
 			</div>
 		);
@@ -106,9 +122,12 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 	return (
 		<div className="flex flex-col gap-2 rounded-lg bg-white p-2.5" data-testid="audit-crop">
 			{flaggedLine}
-			<div className="text-xs font-semibold">
-				Crop {index + 1} of {crops.length}
-				{call && <span className={call === "major" ? "text-red-600" : "text-gray-500"}> · the check counts it {call === "major" ? "major" : "fine"}</span>}
+			<div className="flex flex-wrap items-center justify-between gap-2">
+				<span className="flex items-center gap-1.5 text-xs font-semibold">
+					Crop {index + 1} of {crops.length}
+					{call && <CallTag call={call} />}
+				</span>
+				{cycleSwitch}
 			</div>
 			{section.layers.map((layer) => {
 				const mine = myAnswer(people, user?.id, runId, target(layer));
@@ -132,7 +151,9 @@ export default function CropAnswers({ datasetId, section, evidence, people, crop
 					</div>
 				);
 			})}
-			<div className="text-[11px] text-gray-500">n / p next or previous crop · 1 to 3 answer and go on · space = fine and go on</div>
+			<div className="text-[11px] text-gray-500">
+				n / p next or previous {allCrops || !flagged.length ? "crop" : "flagged crop"} · A all or flagged · T raw or prediction · 1 to 3 answer and go on · space = fine and go on
+			</div>
 		</div>
 	);
 }
@@ -147,7 +168,7 @@ function CropFindings({ findings, label }: { findings: ICropFinding[]; label: (v
 			{findings.map((f) => (
 				<div key={f.model} className="text-xs">
 					<div>
-						<span className="font-medium">{f.model}:</span> {label(f.verdict)}
+						<span className="font-medium">{f.model}:</span> <VerdictTag verdict={f.verdict} text={label(f.verdict)} />
 					</div>
 					{f.issues.length > 0 && (
 						<div className="mt-0.5 flex flex-wrap gap-1">
@@ -167,5 +188,25 @@ function CropFindings({ findings, label }: { findings: ICropFinding[]; label: (v
 				</div>
 			))}
 		</div>
+	);
+}
+
+const VERDICT_COLOR: Record<AuditVerdict, string> = { ok: "green", minor: "gold", major: "red", unsure: "default" };
+
+/** A verdict as a coloured tag with its word, so minor and major read apart at a glance. */
+function VerdictTag({ verdict, text }: { verdict: AuditVerdict; text: string }) {
+	return (
+		<Tag className="m-0 text-[11px]" color={VERDICT_COLOR[verdict]}>
+			{text}
+		</Tag>
+	);
+}
+
+/** The check's own call on the crop (its rule on the models' scores): major, or fine. */
+function CallTag({ call }: { call: AuditVerdict }) {
+	return (
+		<Tag className="m-0 text-[11px] font-normal" color={call === "major" ? "red" : "green"}>
+			check: {call === "major" ? "major errors" : "fine"}
+		</Tag>
 	);
 }

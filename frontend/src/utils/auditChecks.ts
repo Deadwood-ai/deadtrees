@@ -20,7 +20,7 @@ import type { IGeorefCheck } from "../types/georefCheck";
 import { reportedOutsideLikelyRange } from "./acquisitionDate";
 import { summarizeGeorefCheck } from "./georefCheck";
 
-export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "deadwood" | "forest";
+export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "forest" | "deadwood";
 export type CropImageKind = Extract<AuditImageKind, "raw" | "deadwood_overlay" | "forest_cover_overlay">;
 
 /** What the map shows while a section is open: the georeferencing matches, or the crops the check judged. */
@@ -136,8 +136,9 @@ export const AUDIT_SECTIONS: IAuditSectionDef[] = [
     verdicts: [],
     fields: ["has_valid_phenology"],
   },
-  // the prediction check, one layer after the other: each step shows only its own layer
-  ...(["deadwood", "forest_cover"] as const).map(
+  // the prediction check, one layer after the other: each step shows only its own layer. Deadwood,
+  // the hardest, comes last.
+  ...(["forest_cover", "deadwood"] as const).map(
     (layer): IAuditSectionDef => ({
       id: layer === "deadwood" ? "deadwood" : "forest",
       title: layer === "deadwood" ? "Deadwood prediction" : "Tree cover prediction",

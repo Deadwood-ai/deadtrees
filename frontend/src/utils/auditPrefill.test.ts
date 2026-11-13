@@ -133,6 +133,6 @@ describe("Enter on one prediction step", () => {
 		const answers = answersWithSave(both, "me", values, 7, { only: "prediction_quality", layers: ["deadwood"], withSave: false });
 		expect(answers.map((a) => a.layer)).toEqual(["deadwood"]);
 		// the save still answers every layer
-		expect(answersWithSave(both, "me", values, 7, { only: "prediction_quality" }).map((a) => a.layer)).toEqual(["deadwood", "forest_cover"]);
+		expect(answersWithSave(both, "me", values, 7, { only: "prediction_quality" }).map((a) => a.layer)).toEqual(["forest_cover", "deadwood"]);
 	});
 });

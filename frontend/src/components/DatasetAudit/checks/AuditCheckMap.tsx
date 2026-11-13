@@ -13,6 +13,8 @@ import { InlineLoadError, InlineSkeleton } from "../../SectionStates";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
 import { useCropSquares, zoomToCrop } from "./useCropSquares";
 import { useSectionLayers } from "./useSectionLayers";
+import { useAuditShortcuts } from "./useAuditShortcuts";
+import { useDatasetDetailsMap } from "../../../hooks/useDatasetDetailsMapProvider";
 import { modelViewImage } from "./auditCheckView";
 
 /** What the audit map needs to show the open section's check. */
@@ -66,6 +68,21 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	);
 
 	useSectionLayers(section?.shows ?? null);
+
+	// T switches raw image and prediction at once: the crop view of what the model saw and the
+	// step's prediction layer on the map
+	const { layerControl, setShowDeadwood, setShowForestCover } = useDatasetDetailsMap();
+	const overlay = cropMode?.images.find((kind) => kind !== "raw");
+	const togglePrediction = () => {
+		if (!overlay || !section?.shows) return;
+		const showing = imageKind !== "raw";
+		setShowModelView(true);
+		setImageKind(showing ? "raw" : overlay);
+		if (section.shows.deadwood) setShowDeadwood(!showing);
+		if (section.shows.forestCover) setShowForestCover(!showing);
+	};
+	useAuditShortcuts({ t: overlay ? togglePrediction : undefined }, !!overlay);
+	const predictionShown = section?.shows?.deadwood ? layerControl.showDeadwood : section?.shows?.forestCover ? layerControl.showForestCover : false;
 	useGeorefLayers({ map, orthoLayer, check: georef, provider: shownProvider, showMatches, droneOpacity });
 	useCropSquares({ map, crops, selectedId: cropId, flagged, onSelect: onSelectCrop });
 
@@ -134,13 +151,18 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 			{cropMode && showModelView && (
 				<>
 					{cropMode.images.length > 1 && cropId !== null && (
-						<Segmented
-							size="small"
-							block
-							value={imageKind}
-							options={cropMode.images.map((kind) => ({ label: IMAGE_LABELS[kind], value: kind }))}
-							onChange={(v) => setImageKind(v as CropImageKind)}
-						/>
+						<>
+							<Segmented
+								size="small"
+								block
+								value={imageKind}
+								options={cropMode.images.map((kind) => ({ label: IMAGE_LABELS[kind], value: kind }))}
+								onChange={(v) => setImageKind(v as CropImageKind)}
+							/>
+							<div className="text-[11px] text-gray-500">
+								T: raw or prediction, here and on the map (map prediction {predictionShown ? "on" : "off"})
+							</div>
+						</>
 					)}
 					<ModelImage image={modelViewImage(evidence, cropId, imageKind)} hasCrop={cropId !== null} />
 				</>
