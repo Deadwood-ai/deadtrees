@@ -43,7 +43,8 @@ export interface IAuditQueueRow {
   dataset_id: number;
   check_key: AuditCheckKey;
   layer: AuditLayer;
-  run_id: number;
+  /** the run whose results the person judged; null for a benchmark label on a target no run judged (a gold crop) */
+  run_id: number | null;
   verdict: AuditVerdict;
   /** why the result goes to a person; null when the version's mode applies it without review */
   reason: "review_all" | "unsure" | "models_disagree" | "spot_check" | null;
@@ -72,6 +73,8 @@ export type AuditImageKind = "raw" | "deadwood_overlay" | "forest_cover_overlay"
 
 export interface IAuditImage {
   id: number;
+  /** read where images of several datasets are loaded at once (the benchmark) */
+  dataset_id?: number;
   ortho_sha256: string;
   crop_id: number | null;
   /** the prediction an overlay shows; null for raw crops, overviews and thumbnails */
@@ -104,7 +107,8 @@ export interface IAuditChecks {
 export interface IAuditAnswerInput {
   check_key: AuditCheckKey;
   dataset_id: number;
-  run_id: number;
+  /** the run whose results the person judged; null for a benchmark label on a target no run judged (a gold crop) */
+  run_id: number | null;
   layer: AuditLayer;
   crop_id?: number | null;
   label_id?: number | null;
@@ -115,4 +119,34 @@ export interface IAuditAnswerInput {
   modes?: Record<string, true>;
   /** what the reviewer adds to the verdict, e.g. the dataset evaluation's fix_flags or a crop's unsure_modes */
   details?: Record<string, unknown>;
+}
+
+/** An open benchmark version and its targets (audit.benchmarks, audit.benchmark_members). */
+export interface IAuditBenchmark {
+  id: number;
+  check_key: AuditCheckKey;
+  name: string;
+  version: string;
+}
+
+/** One target of a benchmark: a crop (prediction quality) or a whole dataset (dataset evaluation),
+ * with what a labeler needs to judge it. */
+export interface IBenchmarkTarget {
+  /** the member row */
+  id: number;
+  dataset_id: number;
+  crop_id: number | null;
+  split: "dev" | "holdout";
+  /** the stored images: for a crop its raw image and overlays, for a dataset its overview,
+   * thumbnail and evaluation crops */
+  images: IAuditImage[];
+  /** native person rows, latest per person and layer */
+  people: IAuditAssessment[];
+  /** model and rule rows, latest per assessor and layer */
+  models: IAuditAssessment[];
+}
+
+export interface IBenchmarkData {
+  benchmark: IAuditBenchmark;
+  targets: IBenchmarkTarget[];
 }
