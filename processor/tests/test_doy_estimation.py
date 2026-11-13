@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from shared.asset_manifest import DOY_ESTIMATION_MODEL_DIR_NAME
 from shared.models import Dataset
 
 from processor.src.doy_estimation_v1 import assessment, circular, features
@@ -192,12 +193,31 @@ def test_model_bundle_loads_and_predicts_a_distribution():
 	if not (MODEL_DIR / 'manifest.json').exists():
 		pytest.skip(f'acquisition-date model not found at {MODEL_DIR}; run `make download-doy-model`')
 	bundle = load_bundle(MODEL_DIR, 'cpu')
+	assert bundle.version == DOY_ESTIMATION_MODEL_DIR_NAME
 	assert set(bundle.ensembles) == {'s2', 'nos2'}
 	assert all(len(e.nets) == 5 for e in bundle.ensembles.values())
 	x = features.site_inputs(np.zeros((16, 1536), np.float16), {}, 51.0, 12.0, 2024, 0.03)
 	p, cal = predict_distribution(bundle.ensembles['nos2'], x, 'Temperate Broadleaf and Mixed Forests', 'cpu')
 	assert p.shape == (365,) and abs(p.sum() - 1) < 1e-9
-	assert cal['biome'] == 'Temperate Broadleaf and Mixed Forests'
+	assert cal['T'] > 0
+
+
+@pytest.mark.unit
+def test_masked_site_facts_do_not_change_the_prediction():
+	import torch
+
+	from processor.src.doy_estimation_v1.model import DOYModel
+
+	cfg = dict(p10=16, p1m=False, ov=False, feats='dino', pool='attn', pheno=False, D=16, feat_drop=0.0, s2=False)
+	cfg['static_masked'] = [7, 8]
+	torch.manual_seed(0)
+	net = DOYModel(cfg, emb_dim=1536, s2_dim=32, static_dim=10).eval()
+	x = features.site_inputs(np.random.default_rng(0).normal(size=(16, 1536)).astype(np.float16), {}, 51.0, 12.0, 2024, 0.03)
+	flagged = {**x, 'static': x['static'].copy()}
+	flagged['static'][0, 7:9] = 1.0  # has_s2, has_match
+	with torch.no_grad():
+		logits = [net({k: torch.as_tensor(v) for k, v in inputs.items()}) for inputs in (x, flagged)]
+	assert torch.equal(logits[0], logits[1])
 
 
 def _small_cog(path, width_m: float):
