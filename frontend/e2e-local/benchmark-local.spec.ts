@@ -163,6 +163,7 @@ test.describe("benchmark labeling", () => {
     await expect(page.getByText("Labeled blind")).toBeVisible();
     await expect(page.getByTestId("benchmark-others")).toHaveCount(0);
     await expect(page.getByTestId("audit-crop-findings")).toHaveCount(0);
+    await expect(page.getByText("The models show after your answer.").first()).toBeVisible();
 
     // dead trees missed: yes, deadwood major (on to tree cover), tree cover OK saves the crop
     await page.keyboard.press("y");

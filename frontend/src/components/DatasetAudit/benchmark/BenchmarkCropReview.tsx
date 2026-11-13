@@ -62,6 +62,7 @@ export default function BenchmarkCropReview({ targets, current, userId, onSelect
 			}}
 			onAnswer={onAnswer}
 			header={current && <OtherLabelers target={current} userId={userId} />}
+			blind={!current || !answeredBy(current, userId)}
 			active
 			disabled={false}
 		/>
