@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useDatasetThumbnailUrl } from "../../hooks/useDatasetAccess";
 import { Form, message, Button, Drawer } from "antd";
 import { IDataset } from "../../types/dataset";
-import { DatasetDetailsMapProvider } from "../../hooks/useDatasetDetailsMapProvider";
+import { DatasetDetailsMapProvider, SATELLITE_MAP_STYLE } from "../../hooks/useDatasetDetailsMapProvider";
 import { useAuditDetailState } from "./useAuditDetailState";
 import { Settings } from "../../config";
 import { DatasetSeasonInfo } from "../../hooks/useSeasonPrompt";
@@ -18,7 +18,7 @@ import { AuditFooterFormItem } from "./AuditFooter";
 import { UserFlagsCard } from "./AuditStepCards";
 import { AuditReviewNotice } from "./AuditReviewNotice";
 import AuditSections from "./checks/AuditSections";
-import { INITIAL_CHECK_VIEW, type IAuditCheckView } from "./checks/auditCheckView";
+import { INITIAL_CHECK_VIEW, STEP_ORDER, nextStep, openStep, type IAuditCheckView } from "./checks/auditCheckView";
 import { AUDIT_SECTIONS, auditSection, sectionOfField, type AuditSectionId } from "../../utils/auditChecks";
 import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
@@ -444,7 +444,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 			)}
 
 			{/* Map - wrapped in provider for layer controls */}
-			<DatasetDetailsMapProvider>
+			<DatasetDetailsMapProvider initialMapStyle={SATELLITE_MAP_STYLE}>
 				<div className="absolute inset-0 z-0">
 					<AuditMapWithControls
 						ref={mapRef}
@@ -459,6 +459,14 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 							evidence: openSection?.checkKey ? auditChecks?.checks[openSection.checkKey] : undefined,
 							cropId: checkView.cropId,
 							onSelectCrop: (cropId) => updateCheckView({ cropId }),
+							cropReview: {
+								datasetId: dataset.id,
+								people: auditChecks?.people ?? [],
+								disabled: !auditLeaseId,
+								mapOnly: checkView.mapOnly,
+								setMapOnly: (mapOnly) => updateCheckView({ mapOnly }),
+								onNextStep: () => checkView.section && openStep(updateCheckView, nextStep(STEP_ORDER, checkView.section)),
+							},
 						}}
 					/>
 				</div>

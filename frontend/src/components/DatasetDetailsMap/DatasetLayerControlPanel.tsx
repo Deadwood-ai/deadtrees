@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SATELLITE_MAP_STYLE } from "../../hooks/useDatasetDetailsMapProvider";
 import { Segmented, Slider, Checkbox, Button, Divider, Tooltip, Select } from "antd";
 import {
   FlagOutlined,
@@ -78,7 +79,7 @@ const QualityIcon = ({ quality }: { quality: QualityRating }) => {
 // Basemap options matching DeadtreesMap
 const basemapOptions = [
   { value: "streets-v12", label: "Streets" },
-  { value: "satellite-streets-v12", label: "Imagery" },
+  { value: SATELLITE_MAP_STYLE, label: "Imagery" },
 ];
 
 // Label a model-prediction variant by its module + checkpoint so auditors can

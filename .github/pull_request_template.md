@@ -1,21 +1,32 @@
+<!-- Agents write this body with the show-work skill (jstack), from the final diff.
+     Keep the six sections in this order; write "none" rather than dropping one.
+     In Projects threads the two attribution lines stay first. -->
+
 ## Briefing
 
-<!-- In two to four sentences, state the outcome, why it matters, who or what is affected, and any material limitation or remaining gate. -->
+<!-- 2–4 sentences: the outcome, why now, who is affected, what is left. -->
 
-## What changed
+## How it works
 
-<!-- Use two to five outcome-level bullets. Describe behavior and boundaries, not a file inventory or work diary. -->
+<!-- The approach, then a numbered walkthrough in the order data or control flows:
+     `path/file.py` → `function()`: what it does now; what changed. -->
+
+## Decisions
+
+<!-- "Chose X over Y, because Z." (you) or (agent) -->
+
+## Smells and trade-offs
+
+<!-- At most 5 bullets tagged Smell:, Steered: or Unsure:. -->
 
 ## Validation
 
-<!-- List only checks actually performed, with observed results and the relevant environment. If something was not run, say so and explain why. -->
+<!-- Only checks actually run, with results and environment; what did not run and why.
+     For a visible change, live browser evidence and before/after screenshots.
+     User-facing changes add a `## Test plan` after this. -->
 
-## Risk and limitations
+## Risk and rollout
 
-<!-- State user-visible, compatibility, data, migration, deployment, or operational implications. For low-risk changes, one concrete sentence is sufficient. -->
+<!-- Who or what breaks if this is wrong, deploy order, how to revert. -->
 
-## Tracking
-
-<!-- Use `Fixes ISSUE-ID` only when merging fully completes the issue. Otherwise use `Related to ISSUE-ID`. Delete this section when no issue is tracked. -->
-
-<!-- Add a `Reviewer guide` only when review order, a design decision, screenshots, exact copy, or a high-risk area needs special attention. -->
+<!-- Fixes DT-NNN only when merging completes the issue, otherwise Related to DT-NNN. -->

@@ -23,6 +23,7 @@ const HomePage = lazy(() => import("./pages/Home"));
 const ProfilePage = lazy(() => import("./pages/Profile"));
 const Dataset = lazy(() => import("./pages/Dataset"));
 const DatasetAudit = lazy(() => import("./pages/DatasetAudit"));
+const BenchmarkLabeling = lazy(() => import("./pages/BenchmarkLabeling"));
 const DatasetReferencePatchEditor = lazy(
   () => import("./pages/DatasetReferencePatchEditor"),
 );
@@ -166,6 +167,7 @@ function AppWithTracking() {
           <Route path="dataset" element={<Dataset />} />
           <Route path="dataset/:id" element={<DatasetDetails />} />
           <Route path="dataset-audit" element={<DatasetAudit />} />
+          <Route path="dataset-audit/benchmark/:check" element={<BenchmarkLabeling />} />
           <Route path="dataset-audit/:id" element={<DatasetAudit />} />
           {/* New route for Reference Patch Editor */}
           <Route

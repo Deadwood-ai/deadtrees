@@ -854,15 +854,17 @@ test.describe("auditor local e2e", () => {
       .getByPlaceholder("Seasonal observations...")
       .fill("Leaf-on season confirmed in local workflow smoke.");
 
-    const predictionCard = await section(page, "Prediction quality");
-    await predictionCard.getByText("🟡 OK").nth(0).click();
-    await predictionCard.getByRole("button", { name: "Add a deadwood note" }).click();
-    await predictionCard
+    // the prediction check is two steps, one layer each
+    const deadwoodCard = await section(page, "Deadwood prediction");
+    await deadwoodCard.getByText("🟡 OK").click();
+    await deadwoodCard.getByRole("button", { name: "Add a deadwood note" }).click();
+    await deadwoodCard
       .getByPlaceholder("Deadwood notes...")
       .fill("Deadwood cover is usable with minor noise.");
-    await predictionCard.getByText("🟢 Great").nth(1).click();
-    await predictionCard.getByRole("button", { name: "Add a tree cover note" }).click();
-    await predictionCard
+    const treeCoverCard = await section(page, "Tree cover prediction");
+    await treeCoverCard.getByText("🟢 Great").click();
+    await treeCoverCard.getByRole("button", { name: "Add a tree cover note" }).click();
+    await treeCoverCard
       .getByPlaceholder("Tree cover notes...")
       .fill("Tree cover looks consistent.");
 

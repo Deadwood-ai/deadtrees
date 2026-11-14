@@ -254,65 +254,47 @@ export function PhenologyCard({ dataset, phenologyData, isPhenologyLoading, onCo
 	);
 }
 
-// === Prediction quality: the saved per-layer ratings ===
-/** `byCheck`: the audit check ran on that layer; its answer row above decides the rating. */
+// === Prediction quality: the saved rating of one layer ===
+const RATING = {
+	deadwood: { field: "deadwood_quality", notes: "deadwood_notes", title: "Deadwood cover segmentation", note: "deadwood", required: true },
+	forest_cover: { field: "forest_cover_quality", notes: "forest_cover_notes", title: "Tree cover segmentation", note: "tree cover", required: false },
+} as const;
+
+/** One prediction layer's saved rating and note. `byCheck`: the audit check ran on the layer; its
+ * answer row above decides the rating, so the radio is hidden. */
 export function PredictionQualityCard({
+	layer,
 	suggestions,
 	prefilledFields,
 	byCheck,
 }: {
+	layer: "deadwood" | "forest_cover";
 	suggestions: IAuditSuggestion[];
 	prefilledFields: string[];
-	/** the audit check ran on that layer: its answer row above replaces the rating radio */
-	byCheck?: { deadwood: boolean; forestCover: boolean };
+	byCheck?: boolean;
 }) {
+	const { field, notes, title, note, required } = RATING[layer];
 	return (
 		<div>
-			{/* Deadwood cover */}
-			<div className="mb-3">
-				<div className={byCheck?.deadwood ? "hidden" : "mb-1 flex items-center"}>
-					<Text className="text-xs font-medium">Deadwood cover segmentation</Text>
-					<SuggestedTag field="deadwood_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
-				</div>
-				<Form.Item
-					name="deadwood_quality"
-					className="mb-1"
-					hidden={byCheck?.deadwood}
-					rules={createConditionalRule("Please rate deadwood quality")}
-				>
-					<Radio.Group>
-						<Space size="large">
-							<Radio value="great">🟢 Great</Radio>
-							<Radio value="sentinel_ok">🟡 OK</Radio>
-							<Radio value="bad">🔴 Bad</Radio>
-						</Space>
-					</Radio.Group>
-				</Form.Item>
-				<NoteField name="deadwood_notes" placeholder="Deadwood notes..." label="Add a deadwood note" />
+			<div className={byCheck ? "hidden" : "mb-1 flex items-center"}>
+				<Text className="text-xs font-medium">{title}</Text>
+				<SuggestedTag field={field} suggestions={suggestions} prefilledFields={prefilledFields} />
 			</div>
-
-			{/* Tree cover */}
-			<div>
-				<div className={byCheck?.forestCover ? "hidden" : "mb-1 flex items-center"}>
-					<Text className="text-xs font-medium">Tree cover segmentation</Text>
-					<SuggestedTag field="forest_cover_quality" suggestions={suggestions} prefilledFields={prefilledFields} />
-				</div>
-				<Form.Item
-					name="forest_cover_quality"
-					className="mb-1"
-					hidden={byCheck?.forestCover}
-					rules={[{ required: false, message: "Please rate tree cover quality" }]}
-				>
-					<Radio.Group>
-						<Space size="large">
-							<Radio value="great">🟢 Great</Radio>
-							<Radio value="sentinel_ok">🟡 OK</Radio>
-							<Radio value="bad">🔴 Bad</Radio>
-						</Space>
-					</Radio.Group>
-				</Form.Item>
-				<NoteField name="forest_cover_notes" placeholder="Tree cover notes..." label="Add a tree cover note" />
-			</div>
+			<Form.Item
+				name={field}
+				className="mb-1"
+				hidden={byCheck}
+				rules={required ? createConditionalRule("Please rate deadwood quality") : [{ required: false, message: `Please rate ${note} quality` }]}
+			>
+				<Radio.Group>
+					<Space size="large">
+						<Radio value="great">🟢 Great</Radio>
+						<Radio value="sentinel_ok">🟡 OK</Radio>
+						<Radio value="bad">🔴 Bad</Radio>
+					</Space>
+				</Radio.Group>
+			</Form.Item>
+			<NoteField name={notes} placeholder={`${note.charAt(0).toUpperCase()}${note.slice(1)} notes...`} label={`Add a ${note} note`} />
 		</div>
 	);
 }

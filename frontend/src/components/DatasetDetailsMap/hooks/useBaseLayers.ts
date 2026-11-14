@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import { SATELLITE_MAP_STYLE } from "../../../hooks/useDatasetDetailsMapProvider";
 import type BaseLayer from "ol/layer/Base";
 import LayerGroup from "ol/layer/Group";
 import TileLayer from "ol/layer/Tile";
@@ -66,7 +67,7 @@ export function useBaseLayers({
 	useEffect(() => {
 		if (!map || isInitializedRef.current) return;
 
-		const isSatellite = mapStyle === "satellite-streets-v12";
+		const isSatellite = mapStyle === SATELLITE_MAP_STYLE;
 		// Borrowed from the shared pool; returned (not disposed) in cleanup.
 		const libertyLayer = acquireLibertyBasemapGroup();
 		libertyLayer.setVisible(!isSatellite);
@@ -111,7 +112,7 @@ export function useBaseLayers({
 	useEffect(() => {
 		if (!libertyLayerRef.current || !waybackLayerRef.current) return;
 
-		const isSatellite = mapStyle === "satellite-streets-v12";
+		const isSatellite = mapStyle === SATELLITE_MAP_STYLE;
 		libertyLayerRef.current.setVisible(!isSatellite);
 		waybackLayerRef.current.setVisible(isSatellite);
 		// Source is constant — re-setting it here would only throw away the
@@ -128,8 +129,8 @@ export function useBaseLayers({
 
 	// Visibility setters
 	const setBasemapVisible = useCallback((visible: boolean) => {
-		libertyLayerRef.current?.setVisible(visible && mapStyle !== "satellite-streets-v12");
-		waybackLayerRef.current?.setVisible(visible && mapStyle === "satellite-streets-v12");
+		libertyLayerRef.current?.setVisible(visible && mapStyle !== SATELLITE_MAP_STYLE);
+		waybackLayerRef.current?.setVisible(visible && mapStyle === SATELLITE_MAP_STYLE);
 	}, [mapStyle]);
 
 	const setDroneImageryVisible = useCallback((visible: boolean) => {

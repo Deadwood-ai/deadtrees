@@ -126,15 +126,17 @@ test.describe("auditor local write flows", () => {
       .getByPlaceholder("Seasonal observations...")
       .fill("Local write suite confirms phenology.");
 
-    const predictionCard = await section(page, "Prediction quality");
-    await predictionCard.getByText(/Great/).nth(0).click();
-    await predictionCard.getByRole("button", { name: "Add a deadwood note" }).click();
-    await predictionCard
+    // the prediction check is two steps, one layer each
+    const deadwoodCard = await section(page, "Deadwood prediction");
+    await deadwoodCard.getByText(/Great/).click();
+    await deadwoodCard.getByRole("button", { name: "Add a deadwood note" }).click();
+    await deadwoodCard
       .getByPlaceholder("Deadwood notes...")
       .fill("Deadwood prediction is fit for audit.");
-    await predictionCard.getByText(/OK/).nth(1).click();
-    await predictionCard.getByRole("button", { name: "Add a tree cover note" }).click();
-    await predictionCard
+    const treeCoverCard = await section(page, "Tree cover prediction");
+    await treeCoverCard.getByText(/OK/).click();
+    await treeCoverCard.getByRole("button", { name: "Add a tree cover note" }).click();
+    await treeCoverCard
       .getByPlaceholder("Tree cover notes...")
       .fill("Tree cover is usable.");
 

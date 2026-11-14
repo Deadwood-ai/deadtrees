@@ -31,7 +31,7 @@ import CheckSummary from "./CheckSummary";
 import CropAnswers from "./CropAnswers";
 import EvaluationAnswer from "./EvaluationAnswer";
 import DerivedDecision from "./DerivedDecision";
-import type { IAuditCheckView } from "./auditCheckView";
+import { cropReviewOpen, type IAuditCheckView } from "./auditCheckView";
 import { useAuditStepper } from "./useAuditStepper";
 
 /** A saved-audit field the reviewer's answer sets: it takes part in the form, and so in its
@@ -93,14 +93,16 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const statuses = Object.fromEntries(AUDIT_SECTIONS.map((s) => [s.id, status(s)])) as Record<AuditSectionId, IAuditSectionStatus>;
 	const evaluation = checks?.checks.dataset_evaluation;
 	const myEvaluation = evaluation ? myAnswer(people, user?.id, evaluation.run.id, { checkKey: "dataset_evaluation", layer: "image" }) : null;
-	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null });
+	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null, mapOnly: false });
+	const openSection = view.section ? auditSection(view.section) : null;
 	const { goTo, next, back } = useAuditStepper({
 		datasetId,
 		checks,
 		view,
 		setView,
 		disabled,
-		openAnswered: view.section ? answeredAll(auditSection(view.section)) : false,
+		openAnswered: openSection ? answeredAll(openSection) : false,
+		cropReview: cropReviewOpen(view, openSection, openSection ? evidenceOf(openSection) : undefined),
 	});
 
 	const answers = (s: IAuditSectionDef) => {
@@ -109,7 +111,8 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		return (
 			<div className="mb-3 flex flex-col gap-3">
 				<CheckSummary section={s} evidence={evidence} />
-				{s.layers.map((layer) => (
+				{/* a prediction step asks per crop only; its layer rating follows from the crops */}
+				{!s.cropAnswers && s.layers.map((layer) => (
 					<div key={layer}>
 						{s.layers.length > 1 && <div className="mb-1 text-xs font-medium">{LAYER_LABELS[layer]}</div>}
 						<CheckAnswer
@@ -124,16 +127,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				))}
 				<AnswerDetails section={s} evidence={evidence} people={people} />
 				{s.cropAnswers && (
-					<CropAnswers
-						datasetId={datasetId}
-						section={s}
-						evidence={evidence}
-						people={people}
-						cropId={view.section === s.id ? view.cropId : null}
-						onSelectCrop={(cropId) => setView({ cropId })}
-						disabled={disabled}
-						active={view.section === s.id}
-					/>
+<CropAnswers section={s} evidence={evidence} people={people} />
 				)}
 			</div>
 		);
@@ -143,6 +137,19 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 	const answerOwned = (field: keyof AuditFormValues) => field in owned;
 	// the audit check made a call on the layer: its answer row is the step's answer
 	const ranOn = (checkKey: AuditCheckKey, layer: AuditLayer) => automatedVerdict(checks?.checks[checkKey], layer) !== null;
+
+	// one prediction layer per step: the check's call on the whole layer, its crops, and the saved rating
+	const predictionBody = (layer: "deadwood" | "forest_cover") => (
+		<>
+			{answers(auditSection(layer === "deadwood" ? "deadwood" : "forest"))}
+			<PredictionQualityCard
+				layer={layer}
+				suggestions={prefill.suggestions}
+				prefilledFields={prefill.prefilledFields}
+				byCheck={ranOn("prediction_quality", layer)}
+			/>
+		</>
+	);
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
 		// where the check has run, one answer decides the step and sets the two saved-audit fields;
@@ -176,8 +183,9 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 		),
 		georef: (
 			<>
-				{answers(auditSection("georef"))}
+				{/* the evidence first, then the call and its answer row */}
 				<GeoreferencingCard {...panels.georef} byCheck={ranOn("georef", "georef")} />
+				{answers(auditSection("georef"))}
 			</>
 		),
 		date: (
@@ -187,16 +195,8 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 			</>
 		),
 		phenology: <PhenologyCard {...panels.phenology} />,
-		prediction: (
-			<>
-				{answers(auditSection("prediction"))}
-				<PredictionQualityCard
-					suggestions={prefill.suggestions}
-					prefilledFields={prefill.prefilledFields}
-					byCheck={{ deadwood: ranOn("prediction_quality", "deadwood"), forestCover: ranOn("prediction_quality", "forest_cover") }}
-				/>
-			</>
-		),
+		deadwood: predictionBody("deadwood"),
+		forest: predictionBody("forest_cover"),
 	};
 
 	return (
@@ -232,7 +232,7 @@ export default function AuditSections({ datasetId, checks, checksFailed, onRetry
 				</AuditSection>
 			))}
 			<div className="mt-2 px-2 text-[11px] text-gray-400" data-testid="audit-shortcuts">
-				Keys: Enter take the suggestion and go on · Shift+Enter back · K keep · X exclude · n / p crops · Ctrl+S save
+				Keys: Enter take the suggestion and go on · Shift+Enter back · K keep · X exclude · Ctrl+S save · the crop review lists its own
 			</div>
 		</>
 	);

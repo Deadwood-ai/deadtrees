@@ -21,9 +21,10 @@ export const audit = () => supabase.schema("audit");
 export const SCHEMA_NOT_EXPOSED = "PGRST106";
 
 /** The columns the page reads of an assessment; the model's raw reply stays on the server. The major
- * likelihood comes along so the page can mark the crops the check counted major (utils/cropCalls). */
-const ASSESSMENT_COLUMNS =
-  "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, major_likelihood, reason_code, reason_text, details";
+ * likelihood and the error modes come along so the page can mark the crops the check counted major
+ * and say what each model saw in a crop (utils/cropCalls). */
+export const ASSESSMENT_COLUMNS =
+  "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, major_likelihood, modes, reason_code, reason_text, details";
 export const QUEUE_COLUMNS = "dataset_id, check_key, layer, run_id, verdict, reason";
 
 export const auditChecksKey = (datasetId: number | undefined) => ["audit-checks", datasetId];
@@ -65,7 +66,7 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
 }
 
 /** Reviewers' emails for their answers (get_user_emails answers auditors only); ids stay when it fails. */
-async function withEmails(rows: IAuditAssessment[]): Promise<IAuditAssessment[]> {
+export async function withEmails(rows: IAuditAssessment[]): Promise<IAuditAssessment[]> {
   const ids = [...new Set(rows.map((r) => r.assessor_user_id).filter((id): id is string => !!id))];
   if (!ids.length) return rows;
   const { data, error } = await supabase.rpc("get_user_emails", { p_user_ids: ids });
@@ -95,7 +96,11 @@ export function useSaveAuditAnswers() {
       if (!user?.id) throw new Error("Sign in to answer");
       const { data, error } = await audit()
         .from("assessments")
-        .insert(answers.map((answer) => ({ ...answer, assessor_kind: "person", assessor_user_id: user.id })))
+        // several rows in one insert: a column a row leaves out takes its database default, not null
+        .insert(
+          answers.map((answer) => ({ ...answer, assessor_kind: "person", assessor_user_id: user.id })),
+          { defaultToNull: false },
+        )
         .select(ASSESSMENT_COLUMNS);
       if (error) throw error;
       return (data as IAuditAssessment[]).map((row) => ({ ...row, assessor_email: user.email ?? null }));

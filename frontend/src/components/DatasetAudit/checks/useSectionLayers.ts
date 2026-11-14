@@ -11,18 +11,19 @@ export function useSectionLayers(shows: ISectionLayers | null) {
 	const shown = useRef(layerControl);
 	shown.current = layerControl;
 	const aoi = shows?.aoi;
-	const predictions = shows?.predictions;
+	const deadwood = shows?.deadwood;
+	const forestCover = shows?.forestCover;
 	useEffect(() => {
-		if (aoi === undefined || predictions === undefined) return;
+		if (aoi === undefined || deadwood === undefined || forestCover === undefined) return;
 		const before = shown.current;
-		setShowForestCover(predictions);
-		setShowDeadwood(predictions);
+		setShowForestCover(forestCover);
+		setShowDeadwood(deadwood);
 		setShowAOI(aoi);
 		return () => {
 			// a layer still as the step set it goes back; one the reviewer switched stays
-			if (shown.current.showForestCover === predictions) setShowForestCover(before.showForestCover);
-			if (shown.current.showDeadwood === predictions) setShowDeadwood(before.showDeadwood);
+			if (shown.current.showForestCover === forestCover) setShowForestCover(before.showForestCover);
+			if (shown.current.showDeadwood === deadwood) setShowDeadwood(before.showDeadwood);
 			if (shown.current.showAOI === aoi) setShowAOI(before.showAOI);
 		};
-	}, [aoi, predictions, setShowForestCover, setShowDeadwood, setShowAOI]);
+	}, [aoi, deadwood, forestCover, setShowForestCover, setShowDeadwood, setShowAOI]);
 }

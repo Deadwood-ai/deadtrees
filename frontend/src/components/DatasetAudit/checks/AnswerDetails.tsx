@@ -43,7 +43,14 @@ export default function AnswerDetails({ section, evidence, people }: { section: 
 								<div key={layer}>
 									{section.layers.length > 1 && <div className="font-medium text-gray-700">{LAYER_LABELS[layer]}</div>}
 									{queued?.reason && <div>Here because {QUEUE_REASONS[queued.reason].because}.</div>}
-									<div>Models: {models.map((m) => `${m.model}: ${answerText(section, m)}`).join(" · ") || "none"}</div>
+									<div>
+										Models:{" "}
+										{models.length
+											? models.map((m) => `${m.model}: ${answerText(section, m)}`).join(" · ")
+											: section.cropAnswers
+												? "they judge each crop; pick a crop to see what they saw"
+												: "none"}
+									</div>
 									<div>
 										Other reviewers:{" "}
 										{others.length ? others.map((a) => `${a.assessor_email ?? "a reviewer"}: ${answerText(section, a)}`).join(" · ") : "no answers yet"}
