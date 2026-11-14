@@ -3,6 +3,7 @@ import {
   publicTreeTypeGroupLabels,
   type PublicTreeObservation,
 } from "../types/publicTreeObservations";
+import { escapeCsvCell } from "./csvCell";
 
 const csvHeaders = [
   "id",
@@ -16,11 +17,6 @@ const csvHeaders = [
   "specific_species_name",
   "comment",
 ];
-
-const escapeCsvCell = (value: string | number | null | undefined) => {
-  const normalized = value === null || value === undefined ? "" : String(value);
-  return `"${normalized.replace(/"/g, '""')}"`;
-};
 
 export const publicTreeObservationsToCsv = (
   observations: PublicTreeObservation[],

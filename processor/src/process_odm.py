@@ -15,9 +15,11 @@ from shared.logging import LogContext, LogCategory
 from shared.db import use_client, login
 from shared.upload_validation import RAW_IMAGE_EXTENSIONS
 from shared.zip_utils import (
+	check_zip_extraction_budget,
 	ensure_supported_zip_compression,
 	UnsupportedZipCompressionError,
 	InvalidZipArchiveError,
+	ZipExtractionLimitError,
 )
 from processor.src.utils.ssh import (
 	pull_file_from_storage_server,
@@ -428,10 +430,14 @@ def process_odm(task: QueueTask, temp_dir: Path):
 
 		try:
 			ensure_supported_zip_compression(local_zip_path)
+			# Bound what extraction writes (file count, size, ratio, free disk).
+			check_zip_extraction_budget(local_zip_path, extraction_dir)
 		except UnsupportedZipCompressionError as e:
 			raise Exception(f'Unsupported ZIP compression for dataset {dataset_id}: {str(e)}') from e
 		except InvalidZipArchiveError as e:
 			raise Exception(f'Invalid ZIP archive for dataset {dataset_id}: {str(e)}') from e
+		except ZipExtractionLimitError as e:
+			raise Exception(f'ZIP archive for dataset {dataset_id} is too large to unpack: {str(e)}') from e
 
 		with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
 			zip_ref.extractall(extraction_dir)

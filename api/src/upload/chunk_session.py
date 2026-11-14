@@ -8,16 +8,23 @@ and replacing a lock inode would let two workers enter the same session.
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
-from typing import Callable, Literal
+from typing import BinaryIO, Callable, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 # Receipt and lock directory under settings.base_path.
 UPLOAD_SESSIONS_DIR = '.upload-sessions'
+
+# Largest accepted chunk. The web app sends 50 MB and the CLI 100 MB chunks;
+# nginx caps the request body a little above this (storage-server.conf).
+MAX_CHUNK_BYTES = 128 * 1024 * 1024
+# Chunks are hashed and copied in blocks of this size, never read whole.
+COPY_BLOCK_BYTES = 1024 * 1024
 
 
 class ChunkReceipt(BaseModel):
@@ -39,6 +46,21 @@ def _sync_directory(path: Path):
 		os.fsync(directory)
 	finally:
 		os.close(directory)
+
+
+def _measure_chunk(stream: BinaryIO) -> ChunkReceipt:
+	"""Size and hash a chunk in blocks; reject it once it passes MAX_CHUNK_BYTES."""
+	stream.seek(0)
+	digest = hashlib.sha256()
+	size = 0
+	while block := stream.read(COPY_BLOCK_BYTES):
+		size += len(block)
+		if size > MAX_CHUNK_BYTES:
+			raise HTTPException(
+				status_code=413, detail=f'Upload chunk is larger than {MAX_CHUNK_BYTES // (1024 * 1024)} MiB'
+			)
+		digest.update(block)
+	return ChunkReceipt(size=size, sha256=digest.hexdigest())
 
 
 class ChunkSession:
@@ -72,10 +94,15 @@ class ChunkSession:
 		temporary.replace(self.receipt_path)
 		_sync_directory(self.receipt_path.parent)
 
-	def accept(self, index: int, content: bytes) -> dict | None:
-		"""Return an existing reply, or None when all bytes need finalization."""
-		chunk = ChunkReceipt(size=len(content), sha256=hashlib.sha256(content).hexdigest())
-		if not content:
+	def accept(self, index: int, content: bytes | BinaryIO) -> dict | None:
+		"""Return an existing reply, or None when all bytes need finalization.
+
+		`content` is the chunk's bytes or a seekable binary file. A file is hashed
+		and copied in blocks, so a chunk never sits in memory as a whole.
+		"""
+		stream = io.BytesIO(content) if isinstance(content, (bytes, bytearray)) else content
+		chunk = _measure_chunk(stream)
+		if not chunk.size:
 			raise HTTPException(status_code=422, detail='Empty upload chunk')
 		if index < len(self.receipt.chunks):
 			if self.receipt.chunks[index] != chunk:
@@ -94,7 +121,9 @@ class ChunkSession:
 			with self.target_path.open(mode) as output:
 				output.truncate(offset)
 				output.seek(offset)
-				output.write(content)
+				stream.seek(0)
+				while block := stream.read(COPY_BLOCK_BYTES):
+					output.write(block)
 				output.flush()
 				os.fsync(output.fileno())
 			_sync_directory(self.target_path.parent)

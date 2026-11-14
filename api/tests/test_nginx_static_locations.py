@@ -55,3 +55,13 @@ def test_images_and_exports_need_authorization(config):
 	assert 'return 404;' in _location(text, '/downloads/v1')
 	assert 'alias /data/downloads' not in text
 	assert 'internal;' in _location(text, '= /_authorize_public_file')
+
+
+def test_upload_chunks_have_a_body_limit():
+	"""The chunk route must not inherit the server-wide 10G body limit (API cap: 128 MiB)."""
+	config = REPO_ROOT / 'nginx/api-conf/storage-server.conf'
+	if not config.exists():
+		pytest.skip('nginx/api-conf/storage-server.conf is not available in this environment')
+	block = re.search(r'location = /api/v1/datasets/chunk \{(?P<body>[^}]*)\}', config.read_text())
+	assert block is not None
+	assert re.search(r'client_max_body_size\s+130m;', block['body'])

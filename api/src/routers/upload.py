@@ -123,7 +123,7 @@ def upload_chunk(
 			**metadata,
 		},
 	) as session:
-		response = session.accept(chunk_index, file.file.read())
+		response = session.accept(chunk_index, file.file)
 		if response is not None:
 			return response
 		session.begin_finalization(
