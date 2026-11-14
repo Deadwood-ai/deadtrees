@@ -63,11 +63,21 @@ Monthly and quarterly composite periods can overlap. The viewer's methods text
 reports this source basis while remaining compatible with earlier exports.
 
 The supplied Planet values are shown as supplied. 1,041 Planet frames have no
-matching workbook observation and stay null. Two monthly values are exactly 1.0
-(`Dieback_Czechia_2023` 2020-12, `Dieback_Germany_2025` 2021-12), which needs
-R = B = 0 and is likely a source artefact. Each stretches that site's Planet axis
-in the full-record chart. Confirm or correct them in the source workbooks before
-publishing.
+matching workbook observation and stay null.
+
+Dark or empty monthly composites give unreliable GCC in the supplied workbooks.
+Two values are exactly 1.0, with ExG 2, GRVI 1 and VARI 1:
+
+- `Dieback_Germany_2025` 2021-12: every pixel of the source raster is 0 in R, G
+  and B, so the composite is empty.
+- `Dieback_Czechia_2023` 2020-12: 2,447 of 3,796 pixels are 0, and the rest are
+  nearly black (mean R/G/B 1.1/2.5/0.0).
+
+Neighbouring months read 0.31–0.54. Each 1.0 stretches that site's Planet axis in
+the full-record chart. More broadly, 521 supplied values in 67 sites are above
+0.6. Most come from dark frames: the median mean band value is 13.5, against 44
+for a sample of the other frames. Empty and dark composites should become null,
+either when the workbooks are generated or in the converter, before publishing.
 
 Missing product coverage remains unavailable. Undefined score denominators
 remain null; F1 is `2TP/(2TP+FP+FN)`, including zero for missed positives with no
