@@ -23,4 +23,4 @@ export E2E_LOCAL_AUDITOR_WRITE=1
 export PLAYWRIGHT_PORT="${PLAYWRIGHT_PORT:-5174}"
 
 cd "$FRONTEND_DIR"
-exec ./node_modules/.bin/playwright test --config playwright.local.config.ts e2e-local/auditor-write-flows.spec.ts
+exec ./node_modules/.bin/playwright test --config playwright.local.config.ts e2e-local/auditor-write-flows.spec.ts e2e-local/editor-ai-tools.spec.ts
