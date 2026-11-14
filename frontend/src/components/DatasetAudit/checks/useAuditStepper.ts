@@ -3,9 +3,9 @@ import { Form, message } from "antd";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
 import type { IAuditChecks } from "../../../types/auditChecks";
-import { AUDIT_SECTIONS, auditSection, type AuditSectionId } from "../../../utils/auditChecks";
+import { auditSection, type AuditSectionId } from "../../../utils/auditChecks";
 import { answersWithSave } from "../../../utils/auditPrefill";
-import { nextStep, previousStep, type IAuditCheckView } from "./auditCheckView";
+import { STEP_ORDER, nextStep, openStep, previousStep, type IAuditCheckView } from "./auditCheckView";
 import { useAuditShortcuts } from "./useAuditShortcuts";
 
 interface UseAuditStepperOptions {
@@ -17,26 +17,22 @@ interface UseAuditStepperOptions {
 	disabled: boolean;
 	/** you answered every layer of the open step's check */
 	openAnswered: boolean;
+	/** the crop review is open: Enter is its key */
+	cropReview: boolean;
 }
-
-const ORDER: AuditSectionId[] = AUDIT_SECTIONS.map((s) => s.id);
 
 /** Going through the audit one step at a time: Back and Next, moving on once the open step's
  * check is answered, and the keys: Enter takes the open step's suggestions as your answers and
  * moves on, Shift+Enter goes back, Ctrl+S saves the audit. */
-export function useAuditStepper({ datasetId, checks, view, setView, disabled, openAnswered }: UseAuditStepperOptions) {
+export function useAuditStepper({ datasetId, checks, view, setView, disabled, openAnswered, cropReview }: UseAuditStepperOptions) {
 	const { user } = useAuth();
 	const form = Form.useFormInstance();
 	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
 
-	const goTo = (id: AuditSectionId | null) => {
-		setView({ section: id, cropId: null });
-		// past the last step: back to the decision at the top, where the audit is saved
-		if (id === null) document.querySelector('[data-testid="audit-decision"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-	};
-	const next = (id: AuditSectionId) => nextStep(ORDER, id);
+	const goTo = (id: AuditSectionId | null) => openStep(setView, id);
+	const next = (id: AuditSectionId) => nextStep(STEP_ORDER, id);
 	const back = (id: AuditSectionId) => {
-		const before = previousStep(ORDER, id);
+		const before = previousStep(STEP_ORDER, id);
 		return before ? () => goTo(before) : undefined;
 	};
 
@@ -51,7 +47,7 @@ export function useAuditStepper({ datasetId, checks, view, setView, disabled, op
 
 	const accept = async () => {
 		const id = view.section;
-		if (!id) return goTo(ORDER[0]);
+		if (!id) return goTo(STEP_ORDER[0]);
 		const { checkKey, layers } = auditSection(id);
 		const answers = checkKey ? answersWithSave(checks, user?.id, form.getFieldsValue(true), datasetId, { only: checkKey, layers, withSave: false }) : [];
 		if (!answers.length) return goTo(next(id));
@@ -65,7 +61,7 @@ export function useAuditStepper({ datasetId, checks, view, setView, disabled, op
 
 	useAuditShortcuts(
 		{
-			Enter: disabled ? undefined : () => void accept(),
+			Enter: disabled || cropReview ? undefined : () => void accept(),
 			"shift+Enter": view.section ? back(view.section) : undefined,
 			"mod+s": () => form.submit(),
 		},

@@ -21,6 +21,8 @@ export default function CheckSummary({ section, evidence }: { section: IAuditSec
 					typeof details.major_crops === "number" && typeof details.judged_crops === "number"
 						? `${details.major_crops} of ${details.judged_crops} crops major`
 						: null;
+				// a prediction step has no whole-layer verdict: only what the crops say
+				if (section.cropAnswers) return crops ? <div key={layer}>The check counts {crops}.</div> : null;
 				const toFix = verdict === "minor" ? fixes(details.fix_flags) : null;
 				const because = [words(details.reason), crops, words(details.summary)].filter(Boolean).join("; ");
 				return (

@@ -16,6 +16,7 @@ import {
 } from "../../../utils/auditChecks";
 import { REPROCESS_DRAFT, evaluationDraft } from "../../../utils/auditPrefill";
 import { useAuditShortcuts } from "./useAuditShortcuts";
+import AddToBenchmarkButton from "../benchmark/AddToBenchmarkButton";
 
 interface EvaluationAnswerProps {
 	datasetId: number;
@@ -119,6 +120,7 @@ export default function EvaluationAnswer({ datasetId, evidence, people, disabled
 			<div className="text-xs text-gray-700">
 				<b>{checkSays}</b> {text(rule?.details.summary)}
 			</div>
+			<AddToBenchmarkButton checkKey="dataset_evaluation" datasetId={datasetId} active={active} />
 
 			{answered ? (
 				<div className="flex flex-col gap-1 rounded-md bg-white px-2.5 py-2 text-xs">

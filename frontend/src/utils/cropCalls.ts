@@ -1,4 +1,5 @@
-import type { AuditLayer, AuditVerdict, IAuditCheckEvidence } from "../types/auditChecks";
+import type { PredictionQuality } from "../hooks/useDatasetAudit";
+import type { AuditLayer, AuditVerdict, IAuditCheckEvidence, IModeScore } from "../types/auditChecks";
 import { orderedCrops } from "./auditChecks";
 
 /** The rule config key of a layer (processor/src/prediction_quality_v1/rule.py, RULE_CONFIG). */
@@ -14,7 +15,7 @@ function majorCut(evidence: Pick<IAuditCheckEvidence, "run">, layer: AuditLayer)
 /** Whether the check counted a crop major on one layer, as its rule does: the mean major
  * likelihood of the models that could assess the crop reaches the version's cut-off. A model
  * that could not assess the crop says so on the crop's image row. Null when nothing decides. */
-function cropMajor(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layer: AuditLayer): boolean | null {
+export function cropMajor(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layer: AuditLayer): boolean | null {
 	const cut = majorCut(evidence, layer);
 	if (cut === null) return null;
 	const rows = evidence.automated.filter((a) => a.crop_id === cropId && a.assessor_kind === "model");
@@ -50,7 +51,7 @@ export function cropsForReview(evidence: Pick<IAuditCheckEvidence, "crops">, cal
 }
 
 /** The prediction check's error types (processor/src/prediction_quality_v1 vocabulary) in words. */
-const MODE_LABELS: Record<string, string> = {
+export const MODE_LABELS: Record<string, string> = {
 	m0_not_assessable: "Crop not assessable",
 	m1_dead_missed: "Dead trees missed",
 	m2_dw_on_live_vegetation: "Deadwood on live trees",
@@ -62,6 +63,19 @@ const MODE_LABELS: Record<string, string> = {
 	m7_fc_artifact: "Broken or cut-off prediction",
 };
 
+/** The error types a reviewer answers per prediction layer (scripts/audit_import.py LAYER_MODES). */
+export const LAYER_MODES = {
+	deadwood: ["m1_dead_missed", "m2_dw_on_live_vegetation", "m3_dw_on_non_vegetation", "m4_dw_on_lying_wood", "m7_dw_artifact"],
+	forest_cover: ["m5_fc_trees_missed", "m6_fc_on_non_trees", "m7_fc_artifact"],
+} as const;
+export type PredictionLayer = keyof typeof LAYER_MODES;
+
+/** A model's score on an error type; a person's tag (true) has none. */
+export const modeScore = (mode: IModeScore | true | null | undefined): IModeScore => (mode && mode !== true ? mode : {});
+
+/** A model saw an error type when it gives it a likelihood of 50 or more. */
+const SEEN = 50;
+
 /** A model's short name: "luna-medium" → "Luna", "haiku-5.5" → "Haiku". */
 const modelName = (model: string | null) => (model ? model.split("-")[0].replace(/^\w/, (c) => c.toUpperCase()) : "Model");
 
@@ -72,7 +86,7 @@ export interface ICropFinding {
 	/** the model's own sentences on the errors */
 	errors: string[];
 	/** the error types it found likely (50 or more), most likely first, with the share of the crop */
-	issues: { label: string; likelihood: number; areaPct: number | null }[];
+	issues: { key: string; label: string; likelihood: number; areaPct: number | null }[];
 }
 
 /** Each model's findings on a crop and layer, the model that saw the worst first. */
@@ -85,8 +99,25 @@ export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, c
 			verdict: a.verdict,
 			errors: Array.isArray(a.details.errors) ? a.details.errors.filter((e): e is string => typeof e === "string" && e.trim() !== "") : [],
 			issues: Object.entries(a.modes ?? {})
-				.filter(([key, m]) => key !== "m0_not_assessable" && (m.likelihood ?? 0) >= 50)
+				.map(([key, m]) => [key, modeScore(m)] as const)
+				.filter(([key, m]) => key !== "m0_not_assessable" && (m.likelihood ?? 0) >= SEEN)
 				.sort(([, x], [, y]) => (y.likelihood ?? 0) - (x.likelihood ?? 0))
-				.map(([key, m]) => ({ label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
+				.map(([key, m]) => ({ key, label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
 		}));
+}
+
+/** A prediction layer's saved rating, worked out from its crops: per crop your answer, else the
+ * check's call, counted over the crops the check counts (its exclude set, or all when it has none).
+ * Two or more major crops make it bad, one makes it ok, none great. The audit asks no question on
+ * the whole layer; each use downstream can read the crop answers with its own rule. */
+export function layerRatingFromCrops(
+	evidence: Pick<IAuditCheckEvidence, "crops">,
+	calls: Map<number, AuditVerdict | null>,
+	mine: (cropId: number) => AuditVerdict | null,
+): { quality: PredictionQuality; major: number; counted: number } | null {
+	const counted = evidence.crops.some((c) => c.crop_sets.includes("exclude")) ? evidence.crops.filter((c) => c.crop_sets.includes("exclude")) : evidence.crops;
+	const verdicts = counted.map((c) => mine(c.id) ?? calls.get(c.id) ?? null).filter((v): v is AuditVerdict => v !== null && v !== "unsure");
+	if (!verdicts.length) return null;
+	const major = verdicts.filter((v) => v === "major").length;
+	return { quality: major >= 2 ? "bad" : major === 1 ? "sentinel_ok" : "great", major, counted: verdicts.length };
 }

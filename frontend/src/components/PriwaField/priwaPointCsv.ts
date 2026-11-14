@@ -1,4 +1,5 @@
 import type { IPriwaPoint } from "./types";
+import { escapeCsvCell } from "../../utils/csvCell";
 
 const csvHeaders = [
   "id",
@@ -23,11 +24,6 @@ const csvHeaders = [
   "sync_status",
   "bestaetigte_befliegungsdateien",
 ];
-
-const escapeCsvCell = (value: string | number | boolean | null | undefined) => {
-  const normalized = value === null || value === undefined ? "" : String(value);
-  return `"${normalized.replace(/"/g, '""')}"`;
-};
 
 export const priwaPointsToCsv = (
   points: IPriwaPoint[],

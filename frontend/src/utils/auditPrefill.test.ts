@@ -133,6 +133,15 @@ describe("Enter on one prediction step", () => {
 		const answers = answersWithSave(both, "me", values, 7, { only: "prediction_quality", layers: ["deadwood"], withSave: false });
 		expect(answers.map((a) => a.layer)).toEqual(["deadwood"]);
 		// the save still answers every layer
-		expect(answersWithSave(both, "me", values, 7, { only: "prediction_quality" }).map((a) => a.layer)).toEqual(["deadwood", "forest_cover"]);
+		expect(answersWithSave(both, "me", values, 7, { only: "prediction_quality" }).map((a) => a.layer)).toEqual(["forest_cover", "deadwood"]);
+	});
+});
+
+describe("a prediction layer answered before its crops changed", () => {
+	it("is answered again with the save when the rating from the crops moved", () => {
+		const mine = rule({ assessor_kind: "person", assessor_user_id: "me", assessor: "me", check_key: "prediction_quality", run_id: 3, layer: "deadwood", verdict: "minor" });
+		const values = { deadwood_quality: "bad" as const };
+		expect(answersWithSave(checks([mine]), "me", values, 7, { only: "prediction_quality" }).map((a) => [a.layer, a.verdict])).toEqual([["deadwood", "major"]]);
+		expect(answersWithSave(checks([mine]), "me", { deadwood_quality: "sentinel_ok" as const }, 7, { only: "prediction_quality" })).toEqual([]);
 	});
 });

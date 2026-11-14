@@ -17,6 +17,12 @@ gold    The graded DT-1272 crops become the frozen benchmark pq-gold-dt1272 v1:
         truth) and the members with their dev/holdout split. Each manifest entry
         names the ortho sha256 its crop was cut from; crops on a replaced or
         unknown ortho are left out. Stored images are never replaced.
+evaluation-gold
+        The datasets picked for the dataset evaluation gold set
+        (scripts/dataset_evaluation/gold_set.py) become dataset members of the open
+        benchmark dataset-evaluation-gold v1, each on its audit.benchmark_split side.
+        No labels are imported. Datasets deleted since, or already members, are
+        skipped, so a second run adds nothing.
 
 Every command is a dry run that reads the production database read-only and
 reports counts, unless --execute is given. --execute writes in one transaction
@@ -30,6 +36,7 @@ Example:
 	python3 scripts/audit_import.py derive --root .local/exclusion-benchmark --output test-crops.json
 	python3 scripts/audit_import.py gold --root .local/exclusion-benchmark \\
 		--manifest gold-manifest.json --manifest test-crops.json --assessor-user-id <uuid>
+	python3 scripts/audit_import.py evaluation-gold --gold-set .local/dataset-evaluation/gold-set.json
 """
 
 from __future__ import annotations
@@ -50,6 +57,7 @@ import psycopg
 ANALYST_ENV = 'DEADTREES_ANALYST_DATABASE_URL'
 LEGACY = 'dataset_audit'
 BENCHMARK = ('pq-gold-dt1272', 'v1')
+EVALUATION_BENCHMARK = ('dataset-evaluation-gold', 'v1')
 STORAGE_PREFIX = 'audit/benchmarks/pq-gold-dt1272'
 COG_ROOT = 'https://data2.deadtrees.earth/cogs/v1/'
 # a stored crop matches the current COG window when its median 16 px block correlation
@@ -674,16 +682,64 @@ def copy_remote(image: dict, destination: str, run) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Dataset evaluation gold set
+# ---------------------------------------------------------------------------
+
+
+def plan_evaluation_gold(conn, gold: dict) -> dict:
+	"""Which picked datasets would join the open dataset-evaluation-gold v1, and on which side."""
+	row = conn.execute(
+		'SELECT id, frozen_at IS NOT NULL FROM audit.benchmarks WHERE name = %s AND version = %s', EVALUATION_BENCHMARK
+	).fetchone()
+	if row is None:
+		raise SystemExit(f'benchmark {EVALUATION_BENCHMARK[0]} {EVALUATION_BENCHMARK[1]} does not exist')
+	benchmark, frozen = row
+	if frozen:
+		raise SystemExit(f'benchmark {EVALUATION_BENCHMARK[0]} {EVALUATION_BENCHMARK[1]} is frozen')
+	stated = {int(d['dataset_id']): d.get('split') for d in gold['datasets']}
+	picked = sorted(stated)
+	existing = {r[0] for r in conn.execute('SELECT id FROM public.v2_datasets WHERE id = ANY(%s)', (picked,))}
+	members = {
+		r[0]
+		for r in conn.execute(
+			'SELECT dataset_id FROM audit.benchmark_members WHERE benchmark_id = %s AND crop_id IS NULL', (benchmark,)
+		)
+	}
+	add = [d for d in picked if d in existing and d not in members]
+	return {
+		'benchmark_id': benchmark,
+		'picked': len(picked),
+		'deleted_since': sorted(set(picked) - existing),
+		'already_members': len(members & set(picked)),
+		'to_add': len(add),
+		'splits': dict(Counter(hash_split(d) for d in add)),
+		# gold_set.py writes the hash split; a difference means the file was made another way
+		'split_differs': sorted(d for d in add if stated[d] not in (None, hash_split(d))),
+		'add': add,
+	}
+
+
+def import_evaluation_gold(conn, plan: dict) -> int:
+	"""Adds the planned datasets; the member guard sets each split."""
+	with conn.cursor() as cur:
+		cur.executemany(
+			'INSERT INTO audit.benchmark_members (benchmark_id, dataset_id) VALUES (%s, %s)',
+			[(plan['benchmark_id'], d) for d in plan['add']],
+		)
+	return len(plan['add'])
+
+
 def main(argv: list[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	sub = parser.add_subparsers(dest='command', required=True)
-	for name in ('audits', 'derive', 'gold'):
+	for name in ('audits', 'derive', 'gold', 'evaluation-gold'):
 		p = sub.add_parser(name)
 		p.add_argument('--read-env', default=ANALYST_ENV, help='read-only connection for dry runs (env var name)')
 		if name != 'derive':
 			p.add_argument('--execute', action='store_true', help='write; needs approval for this run')
 			p.add_argument('--db-url-env', help='env var with the writer connection, required with --execute')
-		if name != 'audits':
+		if name in ('derive', 'gold'):
 			p.add_argument('--root', type=Path, required=True, help='the DT-1272 benchmark folder')
 	sub.choices['derive'].add_argument('--output', type=Path, required=True)
 	sub.choices['derive'].add_argument('--cog-root', default=COG_ROOT, help='where the COGs are read from')
@@ -696,6 +752,9 @@ def main(argv: list[str] | None = None) -> int:
 		'--accept-later-answers',
 		action='store_true',
 		help='import crops whose gradings differ: every answer is stored and the later one counts',
+	)
+	sub.choices['evaluation-gold'].add_argument(
+		'--gold-set', type=Path, required=True, help='gold-set.json written by scripts/dataset_evaluation/gold_set.py'
 	)
 	args = parser.parse_args(argv)
 
@@ -711,6 +770,11 @@ def main(argv: list[str] | None = None) -> int:
 			report = plan_audits(conn)
 			if writing:
 				report['inserted'] = import_audits(conn)
+		elif args.command == 'evaluation-gold':
+			plan = plan_evaluation_gold(conn, json.loads(args.gold_set.read_text()))
+			report = {k: v for k, v in plan.items() if k != 'add'}
+			if writing:
+				report['inserted'] = import_evaluation_gold(conn, plan)
 		elif args.command == 'derive':
 			crops = json.loads((args.root / 'gold-test.json').read_text())
 			entries, problems = test_crop_entries(conn, args.root, crops, args.cog_root)
