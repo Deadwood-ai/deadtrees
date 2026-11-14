@@ -224,8 +224,25 @@ def build_single_dataset_metadata_row(
 	return row
 
 
+# A spreadsheet runs a cell as a formula when its text starts with one of these.
+_CSV_FORMULA_TRIGGERS = ('=', '+', '-', '@', '\t', '\r')
+
+
+def _neutralize_csv_formula(value):
+	"""Prefix user text that a spreadsheet would run as a formula with an apostrophe."""
+	if isinstance(value, str) and value.startswith(_CSV_FORMULA_TRIGGERS):
+		return "'" + value
+	return value
+
+
 def _write_metadata_tables(archive: zipfile.ZipFile, df: pd.DataFrame, include_parquet: bool) -> None:
-	archive.writestr('METADATA.csv', df.to_csv(index=False))
+	# Only the CSV is neutralized; Parquet keeps the exact values.
+	csv_df = df.copy()
+	for column in csv_df.columns:
+		# Text columns are object or (pandas 3) str dtype; numbers stay untouched.
+		if pd.api.types.is_object_dtype(csv_df[column]) or pd.api.types.is_string_dtype(csv_df[column]):
+			csv_df[column] = csv_df[column].map(_neutralize_csv_formula)
+	archive.writestr('METADATA.csv', csv_df.to_csv(index=False))
 	if include_parquet:
 		archive.writestr('METADATA.parquet', df.to_parquet(index=False))
 

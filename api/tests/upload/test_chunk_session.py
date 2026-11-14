@@ -125,3 +125,30 @@ def test_rejected_validation_leaves_upload_retryable(tmp_path):
 		assert session.accept(1, b'last') is None
 		session.begin_finalization(validate=lambda _path: None)
 		session.complete({'id': 123})
+
+
+def test_file_chunk_matches_bytes_chunk_on_retry(tmp_path):
+	import io
+
+	with open_session(tmp_path) as session:
+		session.accept(0, io.BytesIO(b'first'))
+	# A retry of the same chunk as bytes has the same receipt.
+	with open_session(tmp_path) as session:
+		assert session.accept(0, b'first') == {'message': 'Chunk 0 of 2 received'}
+	assert (tmp_path / 'upload.tmp').read_bytes() == b'first'
+
+
+def test_oversized_chunk_is_rejected_before_writing(tmp_path, monkeypatch):
+	import io
+
+	from api.src.upload import chunk_session
+
+	monkeypatch.setattr(chunk_session, 'MAX_CHUNK_BYTES', 8)
+	monkeypatch.setattr(chunk_session, 'COPY_BLOCK_BYTES', 3)
+	with open_session(tmp_path) as session:
+		with pytest.raises(HTTPException) as error:
+			session.accept(0, io.BytesIO(b'123456789'))
+		assert error.value.status_code == 413
+		# A chunk of exactly the limit is accepted, copied in small blocks.
+		assert session.accept(0, io.BytesIO(b'12345678')) == {'message': 'Chunk 0 of 2 received'}
+	assert (tmp_path / 'upload.tmp').read_bytes() == b'12345678'
