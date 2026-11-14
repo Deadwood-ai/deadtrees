@@ -192,15 +192,15 @@ export default function BenchmarkSignalChart({
         <span className="db-context-date-key">· Available image dates</span>
       </div>
       <p className="db-chart-note">
-        GCC = G / (R + G + B). Source and aggregation details are described
-        in Methods. Null
-        values remain missing. Lines show robust LOWESS trends (120-day
-        Sentinel, 240-day Planet windows); faint points and hover values are
-        original observations. Trends stop across gaps longer than 45 days
-        (Sentinel) or 100 days (Planet), and at missing Planet observations.
-        Sentinel trends use gentler fits within 30 days of gap edges; stretches
-        with fewer than four nearby observations show points only. Smoothing can
-        soften abrupt changes and does not establish the disturbance date.
+        GCC = G / (R + G + B). Source and aggregation details are described in
+        Methods. Null values remain missing. Lines show robust LOWESS trends
+        (120-day Sentinel, 240-day Planet windows); faint points and hover
+        values are original observations. Trends stop across gaps longer than 45
+        days (Sentinel) or 100 days (Planet), and at missing Planet
+        observations. Sentinel trends use gentler fits within 30 days of gap
+        edges; stretches with fewer than four nearby observations show points
+        only. Smoothing can soften abrupt changes and does not establish the
+        disturbance date.
         {outside > 0 &&
           ` ${outside} displayed image dates lie outside this close-up; uncheck Zoom to disturbance window to view the full record.`}
       </p>

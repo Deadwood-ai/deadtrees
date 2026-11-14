@@ -3,8 +3,7 @@
 This release uses the new reference polygons and time series in
 `5-Graph/Results_plots_v11`, with saved evaluations in
 `6-Validation/tmp_residuals_0.25_all_NO_mask_v8_multithr`. Both folders are under
-`/mnt/gsdata/projects/deadtrees/disturbances/`; the repeated `projects/deadtrees`
-in the supplied message was a path typo. There are 114 matching sites. The extra
+`/mnt/gsdata/projects/deadtrees/disturbances/`. There are 114 matching sites. The extra
 `_backup_env11_missing_years` evaluation folder is excluded.
 
 The selected products remain DTE `dtbil10_fc_dw_comb_by` and TCD `tcbil10_by`,
@@ -63,6 +62,13 @@ null. Cloud percentages are preserved without applying an additional filter.
 Monthly and quarterly composite periods can overlap. The viewer's methods text
 reports this source basis while remaining compatible with earlier exports.
 
+The supplied Planet values are shown as supplied. 1,041 Planet frames have no
+matching workbook observation and stay null. Two monthly values are exactly 1.0
+(`Dieback_Czechia_2023` 2020-12, `Dieback_Germany_2025` 2021-12), which needs
+R = B = 0 and is likely a source artefact. Each stretches that site's Planet axis
+in the full-record chart. Confirm or correct them in the source workbooks before
+publishing.
+
 Missing product coverage remains unavailable. Undefined score denominators
 remain null; F1 is `2TP/(2TP+FP+FN)`, including zero for missed positives with no
 detections. The previous acquisition metadata snapshot and its date warnings are
@@ -84,8 +90,10 @@ $PY scripts/disturbance_benchmark_publish.py publish "$RUN" --dry-run
 $PY scripts/disturbance_benchmark_publish.py publish "$RUN"
 ```
 
-The publisher reuses the prepared build, stages a new version and switches
-`current`, retaining the earlier version for rollback. Existing core-team access
+The publisher reuses the prepared build because `build.json` exists; it does not
+re-run its missing-reference check on a reused build. To rebuild on the processing
+server instead, leave `BENCHMARK_BUILDS_ROOT` unset. Publishing stages a new
+version and switches `current`, retaining the earlier version for rollback. Existing core-team access
 control remains required. This PR does not deploy production.
 
 ## Validation scope
