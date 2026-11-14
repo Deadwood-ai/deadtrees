@@ -53,6 +53,17 @@ export interface IBenchmarkObservation {
 export interface IBenchmarkPlanetObservation {
   date: string;
   gcc: number | null;
+  /** Provenance only; charts consume gcc, never this original workbook value. */
+  gccSourceValue?: number | null;
+  visualizationQuality?: {
+    status: "accepted" | "excluded";
+    reasons: string[];
+    policyVersion: string;
+    meanPositiveBrightness?: number | null;
+    usableCoverage?: number;
+    positiveCoverage?: number;
+    positiveRows?: number;
+  };
   validPixels?: number;
   frameImage?: string;
 }

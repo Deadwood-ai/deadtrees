@@ -14,7 +14,7 @@ Thresholds are retained from the previous release, not retuned on the new labels
 ## NAS package
 
 ```text
-\\unfnrd02.public.ads.uni-freiburg.de\unfnrd02\projects\deadtrees\disturbances\11-Webviewer_visuals\runs\pylos-2026-11-13-v8
+\\unfnrd02.public.ads.uni-freiburg.de\unfnrd02\projects\deadtrees\disturbances\11-Webviewer_visuals\runs\pylos-2026-11-14-v8-planet-qc
 ```
 
 Start with `HANDOFF.md` in that directory. The package includes:
@@ -29,7 +29,7 @@ Start with `HANDOFF.md` in that directory. The package includes:
 - `time-series/`: JSON copies of supplied aggregate and per-polygon observations,
   retained outside the served payload.
 - `asset-manifest.json`, `site-sizes.csv`, `handoff-audit.json`,
-  `v8-source-audit.json`, `overlay-sampling-audit.json`, `web-build-audit.json`
+  `planet-quality-validation.json`, `web-build-audit.json`
   and `archive-audit.json`: integrity, source, geometry, metrics and size evidence.
 - Conversion code bundle, input fingerprints, acquisition metadata snapshot,
   dependency versions and execution logs.
@@ -38,7 +38,7 @@ Only `export/` is the raw web payload. Keep the reports, metadata, source code
 and metric tables outside the served directory and outside Git.
 
 The raw export contains 114 sites in 45 countries, 18,687 files and
-1,130,597,264 bytes (1,130.60 decimal MB). All 513 available product evaluations
+1,139,155,540 bytes (1,139.16 decimal MB). All 513 available product evaluations
 have verified original-raster counts. The separate workbook-variant table has
 95,417 rows. The payload audit found no missing asset references or errors.
 
@@ -62,12 +62,38 @@ null. Cloud percentages are preserved without applying an additional filter.
 Monthly and quarterly composite periods can overlap. The viewer's methods text
 reports this source basis while remaining compatible with earlier exports.
 
-The supplied Planet values are shown as supplied. 1,041 Planet frames have no
-matching workbook observation and stay null. Two monthly values are exactly 1.0
-(`Dieback_Czechia_2023` 2020-12, `Dieback_Germany_2025` 2021-12), which needs
-R = B = 0 and is likely a source artefact. Each stretches that site's Planet axis
-in the full-record chart. Confirm or correct them in the source workbooks before
-publishing.
+The converter applies display policy `planet-rgb-display-v1` to original native
+Planet pixels within the supplied polygons. It requires mean positive-pixel RGB
+brightness >=15/255 and >=50% of source-eligible polygon intersection weights
+supported by valid pixels with
+mean RGB >10/255. Alpha/nodata, black pixels, source-rule clouds and missing
+raster coverage do not contribute usable area. Intersections below the source
+extraction threshold (0.2) are excluded from both numerator and denominator;
+otherwise thin polygon slivers would incorrectly appear as missing imagery. UInt32 containers retain their
+0–255 visual values; the wider nodata sentinel is masked before statistics.
+
+The check excludes whole observations without recomputing the supplied GCC.
+Original values remain in `gccSourceValue`; `gcc` is null when excluded. Reasons,
+coverage and brightness are in `visualizationQuality`, with full diagnostics and
+native-file hashes in `planet-quality/`. The viewer shows no filtering notices,
+counts or badges and never falls back to the original value. Nulls stop trends;
+hover only selects available GCC values. Upstream pixels, workbooks, masks and
+polygons remain unchanged, and the original package is retained for rollback.
+
+Validation covers all 16,041 supplied values, a brightness/coverage sensitivity
+matrix and 44 stratified visual examples. The 20/255 candidate discarded useful
+scene detail between 15 and 20; 75–90% coverage was substantially more restrictive.
+Both known near-black GCC=1 observations are excluded. The threshold is a
+release-specific display guard, not an independently measured scientific validity
+classifier. It does not reject an observation because GCC exceeds 0.6. The 1,041
+frames without a supplied workbook observation remain null. The final rule keeps
+15,195 supplied values and excludes 846 from display, including both GCC=1 cases.
+It retains 174 values above GCC 0.6, and every site retains accepted observations.
+
+Use `planet-quality-validation.json`, `planet-quality-summary.json` and the
+review sheets in the NAS package for exact counts and the sensitivity results.
+Original source/evaluation audits are explicitly retained under
+`parent-provenance/`; fresh archive, payload and WebP audits cover this revision.
 
 Missing product coverage remains unavailable. Undefined score denominators
 remain null; F1 is `2TP/(2TP+FP+FN)`, including zero for missed positives with no
@@ -77,11 +103,11 @@ retained because this update supplied polygons/evaluations, not new flight dates
 ## Ingestion after review
 
 The prepared WebP build is under
-`11-Webviewer_visuals/builds/pylos-2026-11-13-v8`. Use the existing publisher and
+`11-Webviewer_visuals/builds/pylos-2026-11-14-v8-planet-qc`. Use the existing publisher and
 the [internal deployment guide](disturbance-benchmark-internal.md):
 
 ```bash
-RUN=/mnt/gsdata/projects/deadtrees/disturbances/11-Webviewer_visuals/runs/pylos-2026-11-13-v8
+RUN=/mnt/gsdata/projects/deadtrees/disturbances/11-Webviewer_visuals/runs/pylos-2026-11-14-v8-planet-qc
 PY=~/.local/share/deadtrees/benchmark-venv/bin/python
 export BENCHMARK_BUILDS_ROOT=/mnt/gsdata/projects/deadtrees/disturbances/11-Webviewer_visuals/builds
 $PY scripts/disturbance_benchmark_publish.py build "$RUN"
@@ -98,9 +124,9 @@ control remains required. This PR does not deploy production.
 
 ## Validation scope
 
-Five converter tests pass, including aggregate/per-polygon workbook separation,
+Thirteen converter tests pass, including aggregate/per-polygon workbook separation,
 original-grid counting, nodata and display resampling. The current frontend's
-benchmark tests, lint and full production build pass on Linux with Node 24.15.0.
+24 benchmark tests and lint pass locally; the full production build passes on Linux with Node 24.15.0. Windows build is blocked by the existing AccountJourney/accountJourney filename-case collision.
 The repository's ast-grep gate passes.
 
 Full isolated backend/auth regression could not run on Windows: bootstrap lacks

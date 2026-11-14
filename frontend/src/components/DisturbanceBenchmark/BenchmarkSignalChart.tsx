@@ -63,7 +63,7 @@ export default function BenchmarkSignalChart({
             : best,
         );
   const sentinelHover = nearest(visibleSentinel),
-    planetHover = nearest(visiblePlanet);
+    planetHover = nearest(visiblePlanet.filter((row) => row.value != null));
   return (
     <div className="db-signal-panel">
       <h3 className="db-time-range-title">

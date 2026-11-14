@@ -159,6 +159,6 @@ export function initialFrameStart(
 /** Methods text for how Planet GCC was aggregated; older exports have no basis. */
 export function planetGccMethod(basis?: PlanetSeriesBasis): string {
   return basis === "supplied aggregate workbooks"
-    ? "Values come from the supplied aggregate time-series workbooks for this polygon release. Per-polygon observations are retained separately in the export reports. No additional cloud-percentage filter is applied."
+    ? "Values come from the supplied aggregate time-series workbooks for this polygon release."
     : "Values are averaged per valid native pixel within the drone orthomosaic footprint; no supplied cloud mask is applied.";
 }
