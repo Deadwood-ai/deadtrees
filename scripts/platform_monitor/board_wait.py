@@ -2,10 +2,15 @@
 """What the Platform board thread waits on, with no model running.
 
 `board_wait.py wait` runs as a background command and exits with one JSON line
-when a note waits in the outbox or the two-hour reconcile is due. A tick cannot
-report its own stall, so the wait also leaves a note, once per stalled tick,
-when the last tick is too old. After reconciling thread states the thread runs
-`board_wait.py reconciled`.
+when a note waits in the outbox, or with `heartbeat` after 50 quiet minutes. A
+tick cannot report its own stall, so the wait also leaves a note, once per
+stalled tick, when the last tick is too old.
+
+The heartbeat exists only because a background command can run at most two
+hours. It comes before the one-hour prompt cache expires, so the thread's
+quiet wake (start the next wait, nothing else) reads its context from the cache
+instead of writing it again. A wake after the cache expired costs about twenty
+times as much (DT-1559).
 """
 
 from __future__ import annotations
@@ -23,8 +28,8 @@ from monitor_tick import DEFAULT_STATE_DIR, OUTBOX, TICK_STATE, iso, load_json, 
 WAIT_STATE = 'board-wait.json'
 BERLIN = ZoneInfo('Europe/Berlin')
 WORK_START, WORK_END = 6, 18
-# Just under the two-hour limit of a background command, so the wait ends first.
-RECONCILE_EVERY = timedelta(minutes=115)
+# Inside the one-hour prompt cache, with room for the poll and the wake itself.
+HEARTBEAT = timedelta(minutes=50)
 POLL_SECONDS = 60
 
 
@@ -57,36 +62,32 @@ def note_stall(state_dir: Path, now: datetime) -> None:
 	write_atomic(wait_file, json.dumps({**seen, 'stalled_tick': last_tick}) + '\n')
 
 
-def pending(state_dir: Path, now: datetime) -> dict[str, Any]:
+def pending(state_dir: Path, now: datetime, started: datetime) -> dict[str, Any]:
 	note_stall(state_dir, now)
-	reconciled = _time(load_json(state_dir / WAIT_STATE).get('reconciled_at'))
 	return {
 		'notes': sorted(str(path) for path in (state_dir / OUTBOX).glob('*.md')),
-		'reconcile_due': reconciled is None or now - reconciled >= RECONCILE_EVERY,
+		'heartbeat': now - started >= HEARTBEAT,
 	}
 
 
+def _now() -> datetime:
+	return datetime.now(timezone.utc).replace(microsecond=0)
+
+
 def wait(state_dir: Path, poll: int = POLL_SECONDS) -> dict[str, Any]:
+	started = _now()
 	while True:
-		found = pending(state_dir, datetime.now(timezone.utc).replace(microsecond=0))
-		if found['notes'] or found['reconcile_due']:
+		found = pending(state_dir, _now(), started)
+		if found['notes'] or found['heartbeat']:
 			return found
 		time.sleep(poll)
 
 
-def reconciled(state_dir: Path, now: datetime) -> None:
-	wait_file = state_dir / WAIT_STATE
-	write_atomic(wait_file, json.dumps({**load_json(wait_file), 'reconciled_at': iso(now)}) + '\n')
-
-
 def main(argv: list[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-	parser.add_argument('action', choices=('wait', 'reconciled'))
+	parser.add_argument('action', choices=('wait',))
 	parser.add_argument('--state-dir', type=Path, default=DEFAULT_STATE_DIR)
 	args = parser.parse_args(argv)
-	if args.action == 'reconciled':
-		reconciled(args.state_dir, datetime.now(timezone.utc).replace(microsecond=0))
-		return 0
 	print(json.dumps(wait(args.state_dir)))
 	return 0
 
