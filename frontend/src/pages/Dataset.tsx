@@ -286,15 +286,9 @@ export default function Dataset() {
           </div>
         )}
         <div className="flex items-center justify-end gap-2">
-          <Tooltip
-            title={
-              filterByViewport
-                ? "Only images in the current map view are listed. Click to list every match."
-                : "Every match is listed. Click to list only images in the current map view."
-            }
-          >
+          <Tooltip title="Filter list by map view.">
             <Button
-              aria-label="Only list images in the map view"
+              aria-label="Filter list by map view"
               aria-pressed={filterByViewport}
               data-testid="dataset-map-view-filter"
               type={filterByViewport ? "primary" : "default"}
