@@ -12,6 +12,7 @@ it). Start here, then open the linked docs that match the task.
 - Environment, credentials, and access selection: `docs/agents/environment-and-access.md`
 - Frontend changes: `frontend/AGENTS.md`
 - Platform monitoring: `docs/playbooks/platform-status-check.md`
+- Audit review, model checks and benchmarks (onboarding): `docs/playbooks/audit-and-benchmarks.md`
 - Failed or stuck processing: `docs/playbooks/dataset-debugging.md`
 - Security audit findings and risk acceptance: `docs/playbooks/security-audit.md`
 - Routine production database reads: `docs/playbooks/analyst-database-access.md`
