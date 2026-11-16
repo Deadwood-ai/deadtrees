@@ -5,8 +5,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { IAuditImage } from "../../../types/auditChecks";
 
 vi.mock("./CropImage", () => ({
-	default: ({ image, style }: { image: IAuditImage; style?: CSSProperties }) => (
-		<img data-testid={`image-${image.kind}`} alt={image.kind} style={style} />
+	default: ({ image, style, decorative }: { image: IAuditImage; style?: CSSProperties; decorative?: boolean }) => (
+		<img data-testid={`image-${image.kind}`} data-decorative={decorative ? "yes" : "no"} alt={decorative ? "" : image.kind} style={style} />
 	),
 }));
 
@@ -23,7 +23,8 @@ describe("the crop images", () => {
 		render(
 			<CropImages raw={raw} prediction={prediction} predictionLabel="Deadwood prediction" sideBySide={false} showPrediction opacity={0.4} resetKey={1} />,
 		);
-		expect(screen.getByTestId("image-raw")).toBeTruthy();
+		// the raw layer underneath is decorative, so the pane still reads as one image
+		expect(screen.getByTestId("image-raw").dataset.decorative).toBe("yes");
 		expect(screen.getByTestId("image-deadwood_overlay").style.opacity).toBe("0.4");
 	});
 

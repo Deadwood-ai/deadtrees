@@ -71,7 +71,7 @@ export default function CropImages({ raw, prediction, predictionLabel, sideBySid
 					style={{ maxWidth: sideBySide ? "50%" : "100%" }}
 				>
 					{image && under && (
-						<CropImage image={under} className="absolute inset-0 h-full w-full select-none object-contain" style={zoomStyle} />
+						<CropImage image={under} decorative className="absolute inset-0 h-full w-full select-none object-contain" style={zoomStyle} />
 					)}
 					{image ? (
 						<CropImage
