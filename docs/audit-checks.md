@@ -6,6 +6,8 @@ Dataset verdicts are derived from those rows by versioned rules, so thresholds
 and model combinations can change without new model calls. Everything lives in the
 `audit` schema: `supabase/migrations/20261029103000_audit_checks_base.sql`. Checks built
 on it: [dataset evaluation](dataset-evaluation.md), [prediction quality](prediction-quality.md).
+For the whole loop in plain words (review, benchmarks, how a change goes live), start with
+[the audit and benchmarks playbook](playbooks/audit-and-benchmarks.md).
 
 ## Model
 

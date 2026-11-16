@@ -36,6 +36,8 @@ folders are intentionally retired.
     use `docs/playbooks/upload-retry-contract.md`,
     `docs/playbooks/prepackaged-dataset-release-deploy.md` and
     `docs/playbooks/storage-nginx-http2-rollout.md`.
+18. For the audit review, its model checks and the benchmarks that score them,
+    start with `docs/playbooks/audit-and-benchmarks.md`.
 
     Repository skills live in `.agents/skills/`; `.claude/skills/` links to the
     same folders so Claude Code discovers them. Add new skills under
