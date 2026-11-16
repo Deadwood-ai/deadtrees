@@ -50,14 +50,20 @@ export function agreement(mine: AuditVerdict | null | undefined, theirs: AuditVe
 	return "other";
 }
 
-export type BenchmarkFilter = "open" | "all" | "disagree";
+export type BenchmarkFilter = "open" | "all" | "disagree" | "excluded";
 export const BENCHMARK_FILTERS: { value: BenchmarkFilter; label: string }[] = [
 	{ value: "open", label: "Open for me" },
 	{ value: "all", label: "All" },
 	{ value: "disagree", label: "Labelers disagree" },
+	{ value: "excluded", label: "Excluded datasets" },
 ];
 
-type Labeled = { people: IAuditAssessment[] };
+/** The filters a check's benchmark offers. Dataset evaluation labels exclusion itself, blind, so
+ * it never shows which datasets are excluded. */
+export const benchmarkFilters = (checkKey: AuditCheckKey) =>
+	checkKey === "dataset_evaluation" ? BENCHMARK_FILTERS.filter((f) => f.value !== "excluded") : BENCHMARK_FILTERS;
+
+type Labeled = { people: IAuditAssessment[]; excludedBy?: "person" | "model" | null };
 export const answeredBy = (target: Labeled, userId: string | undefined) => !!userId && target.people.some((p) => p.assessor_user_id === userId);
 
 /** The targets a filter steps through. `keep` holds targets answered in this visit, so an answer
@@ -69,7 +75,12 @@ export function filterTargets<T extends Labeled & { id: number }>(
 	userId: string | undefined,
 	keep: ReadonlySet<number> = new Set(),
 ): T[] {
-	const passes = (t: T) => filter === "all" || (filter === "open" ? !answeredBy(t, userId) : labelersDisagree(checkKey, t.people));
+	const passes = (t: T) => {
+		if (filter === "all") return true;
+		if (filter === "open") return !answeredBy(t, userId);
+		if (filter === "excluded") return !!t.excludedBy;
+		return labelersDisagree(checkKey, t.people);
+	};
 	return targets.filter((t) => passes(t) || keep.has(t.id));
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditAssessment } from "../types/auditChecks";
-import { agreement, cropVerdicts, evaluationAnswerRow, filterTargets, labelersDisagree, nextOpen } from "./benchmarkLabels";
+import { agreement, benchmarkFilters, cropVerdicts, evaluationAnswerRow, filterTargets, labelersDisagree, nextOpen } from "./benchmarkLabels";
 
 const person = (user: string, overrides: Partial<IAuditAssessment>): IAuditAssessment => ({
 	id: 1,
@@ -65,6 +65,22 @@ describe("stepping through a benchmark", () => {
 		expect(nextOpen(targets, 1, "me")?.id).toBe(3);
 		expect(nextOpen(targets, 3, "me")?.id).toBe(1);
 		expect(nextOpen([targets[1], targets[0]], 1, "me")).toBeNull();
+	});
+});
+
+describe("excluded datasets", () => {
+	it("steps through the crops whose dataset a person or a model excludes", () => {
+		const targets = [
+			{ id: 1, people: [], excludedBy: "person" as const },
+			{ id: 2, people: [], excludedBy: null },
+			{ id: 3, people: [], excludedBy: "model" as const },
+		];
+		expect(filterTargets(targets, "excluded", "prediction_quality", "me").map((t) => t.id)).toEqual([1, 3]);
+	});
+
+	it("is no filter of the dataset evaluation, which labels exclusion blind", () => {
+		expect(benchmarkFilters("prediction_quality").map((f) => f.value)).toContain("excluded");
+		expect(benchmarkFilters("dataset_evaluation").map((f) => f.value)).not.toContain("excluded");
 	});
 });
 
