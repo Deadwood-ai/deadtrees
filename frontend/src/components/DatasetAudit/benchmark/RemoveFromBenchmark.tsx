@@ -70,6 +70,7 @@ export default function RemoveFromBenchmark({ checkKey, benchmark, target, datas
 			)}
 			<Modal
 				open={confirming}
+				width={600}
 				title="Remove from the benchmark?"
 				onCancel={() => setConfirming(false)}
 				footer={[
