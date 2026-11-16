@@ -40,6 +40,9 @@ export interface IBenchmarkEvaluation {
 }
 export type BenchmarkIndex = "ndvi" | "ndii" | "evi" | "kndvi";
 export type ContextSource = "planet" | "google" | "esri";
+/** How the converter derived Planet GCC. Exports before v8 omit it and used native pixels. */
+export type PlanetSeriesBasis =
+  "supplied aggregate workbooks" | "native pixels within drone footprint";
 export interface IBenchmarkObservation {
   date: string;
   ndvi: number | null;
@@ -50,6 +53,17 @@ export interface IBenchmarkObservation {
 export interface IBenchmarkPlanetObservation {
   date: string;
   gcc: number | null;
+  /** Provenance only; charts consume gcc, never this original workbook value. */
+  gccSourceValue?: number | null;
+  visualizationQuality?: {
+    status: "accepted" | "excluded";
+    reasons: string[];
+    policyVersion: string;
+    meanPositiveBrightness?: number | null;
+    usableCoverage?: number;
+    positiveCoverage?: number;
+    positiveRows?: number;
+  };
   validPixels?: number;
   frameImage?: string;
 }
@@ -91,6 +105,7 @@ export interface IBenchmarkSite extends IBenchmarkSiteSummary {
   products: IBenchmarkEvaluation[];
   series: IBenchmarkObservation[];
   planetSeries?: IBenchmarkPlanetObservation[];
+  planetSeriesBasis?: PlanetSeriesBasis;
   contexts: Partial<Record<ContextSource, IBenchmarkFrame[]>>;
   notes: string[];
   datasetUrl?: string;

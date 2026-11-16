@@ -1,6 +1,6 @@
 import { Collapse } from "antd";
 import type { IBenchmarkProduct, IBenchmarkSite } from "./types";
-import { orderedBenchmarkProducts } from "./benchmarkData";
+import { orderedBenchmarkProducts, planetGccMethod } from "./benchmarkData";
 import { PRODUCT_REFERENCES } from "./productReferences";
 interface BenchmarkMethodsProps {
   site: IBenchmarkSite;
@@ -159,9 +159,8 @@ export default function BenchmarkMethods({
               </p>
               <h3>Temporal evidence</h3>
               <p>
-                Planet GCC is an RGB greenness proxy, G / (R + G + B), averaged
-                per valid native pixel within the drone orthomosaic footprint.
-                It is not NDVI, and no supplied cloud mask is applied. Planet
+                Planet GCC is an RGB greenness proxy, G / (R + G + B).{" "}
+                {planetGccMethod(site.planetSeriesBasis)} GCC is not NDVI. Planet
                 records are monthly and quarterly composites; their periods can
                 overlap. Sentinel index aggregation footprints may differ from
                 the displayed drone extent. Dated imagery provides context,

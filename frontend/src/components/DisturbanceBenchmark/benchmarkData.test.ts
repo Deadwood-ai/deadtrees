@@ -4,6 +4,7 @@ import {
   benchmarkTime,
   filterBenchmarkSites,
   initialFrameStart,
+  planetGccMethod,
 } from "./benchmarkData";
 import type { IBenchmarkFrame, IBenchmarkSiteSummary } from "./types";
 
@@ -98,5 +99,18 @@ describe("benchmark geographical filters", () => {
     expect(
       filterBenchmarkSites(sites, "tropical").map((item) => item.country),
     ).toEqual(["Indonesia", "Panama"]);
+  });
+});
+
+describe("Planet GCC methods text", () => {
+  it("names the supplied workbooks for v8 exports and keeps the pixel mean for older ones", () => {
+    expect(planetGccMethod("supplied aggregate workbooks")).toMatch(
+      /supplied aggregate time-series workbooks/,
+    );
+    const legacy = /averaged per valid native pixel/;
+    expect(planetGccMethod("native pixels within drone footprint")).toMatch(
+      legacy,
+    );
+    expect(planetGccMethod(undefined)).toMatch(legacy);
   });
 });
