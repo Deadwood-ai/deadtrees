@@ -31,17 +31,18 @@ from ..utils.stored_inputs import (
 from . import store
 from .check import run_prediction_quality
 from .judge import PROMPT_VERSION
-from .render import CROP_PX
+from .render import CROP_PX, RENDER_VERSION
 from .rule import RULE_CONFIG, RULE_VERSION
 from .tiles import EXCLUDE_SET_SIZE, TILE_M, Tile
 
-VERSION = 'v1'
+VERSION = 'v2'
 CONFIG = {
 	'models': {
 		'luna-medium': {'transport': 'codex', 'model': 'gpt-6-luna', 'effort': 'medium'},
 		'haiku-5.5': {'transport': 'claude', 'model': 'claude-haiku-5-5'},
 	},
 	'prompt_version': PROMPT_VERSION,
+	'render': RENDER_VERSION,
 	'rule': RULE_VERSION,
 	'rule_config': RULE_CONFIG,
 	'crops': {'picker': store.SELECTED_BY, 'exclude_set': EXCLUDE_SET_SIZE, 'tile_m': TILE_M, 'crop_px': CROP_PX},

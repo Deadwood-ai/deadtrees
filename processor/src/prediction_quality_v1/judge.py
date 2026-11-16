@@ -5,6 +5,9 @@ deadwood) with an area % next to each mode's likelihood, because adding the mode
 likelihood ranked the reviewer's major crops better on the gold set (plan, session 4). Model
 calls are not made here: a backend is any function (prompt, images) -> answer text, so the
 subscription worker (DT-1482) and the benchmark harness share the same prompt and parser.
+
+Prompt v6 (DT-1560) adds each layer's share of the crop: a crop the forest fills shows a gold
+frame and tint without an inner edge, which the judges took for "no gold".
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from typing import Callable, Sequence
 
 from PIL import Image
 
-PROMPT_VERSION = 'pq-v5'
+PROMPT_VERSION = 'pq-v6'
 LAYERS = ('deadwood', 'forest')
 VERDICTS = ('ok', 'minor', 'major')
 MODES = {
@@ -41,8 +44,11 @@ _MODE_JSON = {
 }
 
 PROMPT = f"""Aerial drone image crop, about 51 m by 51 m at about 5 cm per pixel. Image 1 is raw RGB,
-Image 2 the DEADWOOD prediction (blue fill with outline), Image 3 the FOREST prediction (gold).
+Image 2 the DEADWOOD prediction (blue fill with outline), Image 3 the FOREST prediction (gold
+fill with outline). A layer that reaches the crop border is outlined along the border too, so a
+crop the forest fills completely shows a gold frame and a gold tint everywhere.
 Darkened areas are outside the area of interest; ignore them.
+{{cover}}
 
 Rules: deadwood means standing dead trees and dead parts of standing trees (grey, white, brown
 or burnt crowns and branches); lying trunks, logs and debris are never deadwood. Forest means
@@ -141,11 +147,28 @@ def parse(judge: str, text: str) -> Answer:
 	return Answer(judge=judge, assessable=bool(assessable), layers=layers, raw=text)
 
 
-def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: int = 1) -> Answer:
-	"""One judge on one crop; a malformed answer is retried, then raised."""
+def cover_line(cover: dict | None) -> str:
+	"""The layers' shares of the crop, measured on the masks the overlays are drawn from."""
+	if not cover:
+		return ''
+	return (
+		f'Measured on the predictions: deadwood covers {round(cover["deadwood"] * 100)}% of the crop, '
+		f'forest covers {round(cover["forest"] * 100)}%.'
+	)
+
+
+def prompt_for(cover: dict | None = None) -> str:
+	"""The prompt with the crop's measured layer shares."""
+	return PROMPT.replace('{cover}', cover_line(cover))
+
+
+def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: int = 1, cover: dict | None = None) -> Answer:
+	"""One judge on one crop; a malformed answer is retried, then raised. `cover` holds each
+	layer's share of the crop (0-1), stated in the prompt."""
 	last = None
+	prompt = prompt_for(cover)
 	for _ in range(retries + 1):
-		text = backend(PROMPT, images)
+		text = backend(prompt, images)
 		try:
 			return parse(judge, text)
 		except AnswerError as e:

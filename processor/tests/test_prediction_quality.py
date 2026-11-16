@@ -580,3 +580,26 @@ def test_the_handler_waits_for_its_inputs(monkeypatch):
 	aoi = {'geometry': {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 0]]]}, 'source': 'manual'}
 	with_aoi = handler.inputs(_FakeClient(_dataset([{**aoi, 'dataset_id': 42}])), 42)
 	assert with_aoi['aoi'] and with_aoi != handler.inputs(_FakeClient(_dataset()), 42)
+
+
+def test_a_forest_that_fills_the_crop_is_framed_and_its_share_is_in_the_prompt():
+	"""DT-1560: a full-cover forest overlay had no edge, and the judges reported the forest missing."""
+	from processor.src.prediction_quality_v1.render import Crop, outline, overlay
+
+	full = np.ones((8, 8), bool)
+	frame = outline(full, 2)
+	assert frame[0].all() and frame[:, -1].all() and frame[1, 1:-1].all(), 'the crop border is outlined'
+	assert not frame[2:-2, 2:-2].any(), 'the inside stays fill only'
+
+	rgb = np.full((CROP_PX, CROP_PX, 3), 100, 'uint8')
+	crop = Crop(rgb=rgb, valid=np.ones((CROP_PX, CROP_PX), bool), masks={'deadwood': np.zeros((CROP_PX, CROP_PX), bool), 'forest': np.ones((CROP_PX, CROP_PX), bool)}, mpp=0.05)
+	fc = np.asarray(overlay(crop, 'forest'))
+	assert tuple(fc[0, 500]) == (255, 202, 50), 'gold frame at the border'
+	assert fc[500, 500, 0] > 150, 'clearly gold inside'
+
+	prompt = judge.prompt_for({'deadwood': 0.004, 'forest': 0.97})
+	assert 'deadwood covers 0% of the crop, forest covers 97%' in prompt
+	assert '{cover}' not in prompt and '{cover}' in judge.PROMPT
+	seen = []
+	judge.ask('luna', lambda p, images: seen.append(p) or _answer(), [], cover={'deadwood': 0.1, 'forest': 0.5})
+	assert 'forest covers 50%' in seen[0]

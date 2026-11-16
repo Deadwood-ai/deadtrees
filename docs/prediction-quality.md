@@ -45,7 +45,7 @@ review page lists and what a later rule version is recomputed from.
 
 | Assessor | Kind | Target | Verdict |
 |---|---|---|---|
-| `luna-medium/pq-v5`, `haiku-5.5/pq-v5` | model | crop, layer `image` | `major` when the model cannot assess the crop (mode `m0_not_assessable`) |
+| `luna-medium/pq-v6`, `haiku-5.5/pq-v6` (version v2; v1 ran `pq-v5`) | model | crop, layer `image` | `major` when the model cannot assess the crop (mode `m0_not_assessable`) |
 | same | model | crop, layers `deadwood` and `forest_cover` | the model's `ok`, `minor` or `major`, its `major_likelihood`, and per failure mode a likelihood and the affected area |
 | `pq-rule/pq-rule-v1` | rule | dataset, one row per layer | `major` when 2 or more exclude-set crops are major, else `ok`; `unsure` when no crop could be judged |
 
@@ -58,9 +58,15 @@ registered with. The rule row's `details` hold the counts
 the review page shows. `audit.review_queue` reads the rule rows. The version starts in
 `review_all`. Nothing is written to `dataset_audit` yet.
 
-The failure modes (prompt `pq-v5`): dead trees missed, deadwood on live vegetation, on
+The failure modes (prompts `pq-v5` and `pq-v6`): dead trees missed, deadwood on live vegetation, on
 non-vegetation, on lying wood, deadwood artifacts; trees missed, forest on non-trees,
 forest artifacts. Lying wood is never deadwood.
+
+Version v2 (render `overlay-v2`, prompt `pq-v6`, DT-1560): in v1 a forest prediction that
+filled the crop showed only a faint gold tint with no edge, and the judges claimed most of
+the crop as trees missed. v2 outlines each layer along the crop border too, draws the
+forest with a stronger fill and a 3-pixel outline, and states each layer's measured share
+of the crop in the prompt. The rule and its cuts are unchanged.
 
 ## Run
 
