@@ -303,4 +303,18 @@ test.describe("benchmark labeling", () => {
     ]);
     await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 1");
   });
+
+  test("the confirm step holds its crop while the keys behind it are pressed", async ({ page }) => {
+    await mockSupabase(page, { operator: true });
+    await page.goto("/dataset-audit/benchmark/prediction_quality?filter=all");
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 1 of 2");
+    await page.keyboard.press("Delete");
+    await expect(page.getByRole("dialog")).toContainText("Crop 101 of dataset 501");
+    // the crop review's keys do not reach the page while the dialog asks
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("dialog")).toContainText("Crop 101 of dataset 501");
+    await page.getByTestId("benchmark-remove-confirm").click();
+    await expect.poll(() => rpcCalls.map((c) => [c.name, c.body.p_dataset_id, c.body.p_crop_id])).toEqual([["remove_benchmark_target", 501, 101]]);
+  });
 });
