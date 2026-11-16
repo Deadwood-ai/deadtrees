@@ -11,6 +11,8 @@ interface CropImagesProps {
 	sideBySide: boolean;
 	/** in single view: the prediction (T switches) */
 	showPrediction: boolean;
+	/** how strongly the prediction shows over the raw image: 0 raw only, 1 the prediction image alone */
+	opacity: number;
 	/** a new crop starts unzoomed */
 	resetKey: number | null;
 }
@@ -26,9 +28,10 @@ const NO_ZOOM: IZoom = { scale: 1, x: 50, y: 50 };
 const MAX_SCALE = 6;
 
 /** A crop as the models saw it: the raw image and the prediction over it, one at a time or side
- * by side. The wheel zooms both at once into the point under the cursor, so the same spot can be
- * compared. */
-export default function CropImages({ raw, prediction, predictionLabel, sideBySide, showPrediction, resetKey }: CropImagesProps) {
+ * by side. The prediction pane lays the stored prediction image over the raw one at the chosen
+ * opacity, so the imagery under the prediction stays visible. The wheel zooms both at once into
+ * the point under the cursor, so the same spot can be compared. */
+export default function CropImages({ raw, prediction, predictionLabel, sideBySide, showPrediction, opacity, resetKey }: CropImagesProps) {
 	const [zoom, setZoom] = useState<IZoom>(NO_ZOOM);
 	const box = useRef<HTMLDivElement>(null);
 	useEffect(() => setZoom(NO_ZOOM), [resetKey]);
@@ -53,27 +56,28 @@ export default function CropImages({ raw, prediction, predictionLabel, sideBySid
 		return () => el.removeEventListener("wheel", onWheel);
 	}, []);
 
-	const panes = sideBySide
-		? [
-				{ label: "Raw", image: raw },
-				{ label: predictionLabel, image: prediction },
-			]
-		: [showPrediction ? { label: predictionLabel, image: prediction } : { label: "Raw", image: raw }];
+	const rawPane = { label: "Raw", image: raw, under: null };
+	const predictionPane = { label: predictionLabel, image: prediction, under: raw };
+	const panes = sideBySide ? [rawPane, predictionPane] : [showPrediction ? predictionPane : rawPane];
+	const zoomStyle = { transform: `scale(${zoom.scale})`, transformOrigin: `${zoom.x}% ${zoom.y}%` };
 
 	return (
 		<div ref={box} className="flex min-h-0 flex-1 items-center justify-center gap-2" data-testid="crop-images">
-			{panes.map(({ label, image }) => (
+			{panes.map(({ label, image, under }) => (
 				<div
 					key={label}
 					data-crop-pane
 					className="relative flex aspect-square max-h-full min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-slate-900"
 					style={{ maxWidth: sideBySide ? "50%" : "100%" }}
 				>
+					{image && under && (
+						<CropImage image={under} className="absolute inset-0 h-full w-full select-none object-contain" style={zoomStyle} />
+					)}
 					{image ? (
 						<CropImage
 							image={image}
-							className="h-full w-full select-none object-contain"
-							style={{ transform: `scale(${zoom.scale})`, transformOrigin: `${zoom.x}% ${zoom.y}%` }}
+							className={`h-full w-full select-none object-contain ${under ? "relative" : ""}`}
+							style={under ? { ...zoomStyle, opacity } : zoomStyle}
 						/>
 					) : (
 						<span className="text-xs text-slate-300">No stored image</span>
