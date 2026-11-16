@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildArchiveNotesIndex,
   createDatasetArchiveTextMatcher,
   matchesDatasetArchiveTextSearch,
   matchesSearchText,
@@ -8,6 +9,7 @@ import {
 } from "./archiveTextSearch";
 
 const dataset = {
+  id: 1,
   authors: ["Primary Author", "Jose\u0301 García"],
   admin_level_1: "España",
   admin_level_2: "Andalucía",
@@ -38,7 +40,7 @@ describe("archive text search", () => {
   });
 
   it("reuses one matcher across datasets and queries without changing results", () => {
-    const other = { ...dataset, authors: ["Different Author"], admin_level_3: "Freiburg im Breisgau" };
+    const other = { ...dataset, id: 2, authors: ["Different Author"], admin_level_3: "Freiburg im Breisgau" };
     for (const query of ["garcia", "sierra andalucia", "primary garcia", "freiburg breisgau", " ", "nowhere"]) {
       const matches = createDatasetArchiveTextMatcher(query);
       for (const item of [dataset, other]) {
@@ -48,5 +50,20 @@ describe("archive text search", () => {
     expect(createDatasetArchiveTextMatcher("primary garcia")(dataset)).toBe(false);
     expect(createDatasetArchiveTextMatcher("sierra andalucia")(dataset)).toBe(true);
     expect(createDatasetArchiveTextMatcher("freiburg")(dataset)).toBe(false);
+  });
+
+  it("matches the notes (additional information, project id) when they are loaded", () => {
+    const notes = buildArchiveNotesIndex([
+      { id: 1, search_text: "Bark beetle Décline after drought; FLUX tower site" },
+      { id: 2, search_text: null },
+    ]);
+    expect(createDatasetArchiveTextMatcher("decline", notes)(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("flux tower", notes)(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("flux decline", notes)(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("flux windthrow", notes)(dataset)).toBe(false);
+    // Without the notes loaded yet, authors and places still match.
+    expect(createDatasetArchiveTextMatcher("decline")(dataset)).toBe(false);
+    expect(createDatasetArchiveTextMatcher("garcia", notes)(dataset)).toBe(true);
+    expect(notes.has(2)).toBe(false);
   });
 });

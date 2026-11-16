@@ -10,22 +10,14 @@ import {
   getBiomeTagColor,
   truncateBiomeLabel,
 } from "../utils/biomeDisplay";
+import type { ArchiveChipFilter } from "../utils/datasetArchiveFilters";
 
 interface ListItemProps {
   item: IDataset | IDatasetArchiveItem;
   index: number;
   setHoveredItem: ((id: number | null) => void) | undefined;
   isHovered: boolean;
-  onFilterClick: (
-    filterValue: string,
-    filterType:
-      | "platform"
-      | "license"
-      | "authors_image"
-      | "admin_level_1"
-      | "admin_level_3"
-      | "biome",
-  ) => void;
+  onFilterClick: (key: ArchiveChipFilter, value: string) => void;
   // Open-vocabulary search relevance (0..1) when a semantic query is active.
   score?: number | null;
   // Active semantic query, forwarded to the details page to highlight tiles.
@@ -82,16 +74,10 @@ const ListItem = ({
 
   const onClickFilterHandler = (
     e: React.MouseEvent,
-    filter: string,
-    filterType:
-      | "platform"
-      | "license"
-      | "authors_image"
-      | "admin_level_1"
-      | "admin_level_3"
-      | "biome",
+    key: ArchiveChipFilter,
+    value: string,
   ) => {
-    onFilterClick(filter, filterType);
+    onFilterClick(key, value);
     e.stopPropagation();
   };
 
@@ -144,7 +130,7 @@ const ListItem = ({
                 size="small"
                 className="relative z-20 max-content m-0 p-0 font-semibold truncate"
                 onClick={(e) =>
-                  onClickFilterHandler(e, adminLevel3, "admin_level_3")
+                  onClickFilterHandler(e, "places", adminLevel3)
                 }
               >
                 {adminLevel3.slice(0, 16) +
@@ -158,7 +144,7 @@ const ListItem = ({
                 size="small"
                 className="relative z-20 max-content m-0 p-0 font-semibold shrink-0"
                 onClick={(e) =>
-                  onClickFilterHandler(e, adminLevel1, "admin_level_1")
+                  onClickFilterHandler(e, "countries", adminLevel1)
                 }
               >
                 {countryList[adminLevel1 as keyof typeof countryList]}
@@ -200,7 +186,7 @@ const ListItem = ({
                 size="small"
                 className="relative z-20 inline-block max-w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left font-medium"
                 onClick={(e) =>
-                  onClickFilterHandler(e, firstAuthor, "authors_image")
+                  onClickFilterHandler(e, "authors", firstAuthor)
                 }
               >
                 {truncatedFirstAuthor}
@@ -220,7 +206,7 @@ const ListItem = ({
               className="relative z-20 m-0 inline-flex w-fit shrink-0 cursor-pointer select-none"
               onClick={(e) => {
                 if (!biomeName) return;
-                onClickFilterHandler(e, biomeName, "biome");
+                onClickFilterHandler(e, "biomes", biomeName);
               }}
             >
               {`${biomeIcon} `}

@@ -170,3 +170,31 @@ def test_archive_resolves_exclusions_once_per_query(db, world):
 		WHERE schemaname='public' AND tablename IN ('v2_datasets','v2_labels')"""
 	).fetchone()[0]
 	assert 'is_dataset_excluded_from_public_surface' not in policies
+
+
+def test_archive_lists_ground_resolution_and_searchable_notes(db):
+	"""The archive filters on ground resolution and searches the uploader's notes."""
+	owner = account(db)
+	row = archive_dataset(db, owner)
+	plain = archive_dataset(db, owner)
+	db.execute(
+		"""UPDATE public.v2_datasets SET additional_information=' Bark beetle decline ', project_id='FLUX site'
+		WHERE id=%s""",
+		(row,),
+	)
+	# COGs are web mercator: 0.05 m per pixel at 52.505°N is about 3.0 cm on the ground.
+	db.execute(
+		"""INSERT INTO public.v2_cogs (dataset_id,cog_file_name,version,cog_file_size,cog_processing_runtime,cog_path,cog_info)
+		VALUES (%s,'c.tif',1,1,0.1,'c.tif','{"GEO":{"CRS":"EPSG:3857","Resolution":[0.05,-0.05]}}')""",
+		(row,),
+	)
+	act_as(db, None)
+	found = {
+		id_: (gsd, text)
+		for id_, gsd, text in db.execute(
+			'SELECT id,gsd_cm,search_text FROM public.public_dataset_archive_items WHERE id = ANY(%s)',
+			([row, plain],),
+		)
+	}
+	assert found[row] == (pytest.approx(3.0, abs=0.05), 'Bark beetle decline FLUX site')
+	assert found[plain] == (None, None)

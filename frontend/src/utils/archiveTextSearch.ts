@@ -14,8 +14,20 @@ export const matchesSearchText = (value: string, query: string): boolean =>
 
 type SearchableDataset = Pick<
   IDatasetArchiveItem,
-  "authors" | "admin_level_1" | "admin_level_2" | "admin_level_3"
+  "id" | "authors" | "admin_level_1" | "admin_level_2" | "admin_level_3"
 >;
+
+/** Normalized notes (additional information, project id) by dataset id. */
+export type ArchiveNotesIndex = ReadonlyMap<number, string>;
+
+export const buildArchiveNotesIndex = (
+  rows: { id: number; search_text: string | null }[],
+): ArchiveNotesIndex =>
+  new Map(
+    rows
+      .filter((row) => row.search_text)
+      .map((row) => [row.id, normalizeSearchText(row.search_text ?? "")]),
+  );
 
 interface DatasetSearchIndex {
   authors: string[];
@@ -42,12 +54,17 @@ const getSearchIndex = (dataset: SearchableDataset): DatasetSearchIndex => {
   return index;
 };
 
+const matchesNotes = (text: string | undefined, terms: string[]) =>
+  !!text && terms.every((term) => text.includes(term));
+
 /**
  * Builds the archive text filter for one query: every term must appear in a
- * single author name, or each term in some word of the place names.
+ * single author name, or each term in some word of the place names, or every
+ * term in the dataset's notes.
  */
 export const createDatasetArchiveTextMatcher = (
   query: string,
+  notes?: ArchiveNotesIndex,
 ): ((dataset: SearchableDataset) => boolean) => {
   const searchTerms = normalizeSearchText(query).split(/\s+/).filter(Boolean);
   if (searchTerms.length === 0) return () => true;
@@ -60,7 +77,8 @@ export const createDatasetArchiveTextMatcher = (
       ) ||
       searchTerms.every((term) =>
         locationWords.some((word) => word.includes(term)),
-      )
+      ) ||
+      matchesNotes(notes?.get(dataset.id), searchTerms)
     );
   };
 };

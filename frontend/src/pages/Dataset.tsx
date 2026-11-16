@@ -1,10 +1,9 @@
 import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
-import { Button, Tag, Tooltip, Checkbox, Drawer } from "antd";
+import { Badge, Button, Tag, Tooltip, Checkbox, Drawer } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   FilterOutlined,
-  CloseOutlined,
   UploadOutlined,
   UnorderedListOutlined,
   MenuFoldOutlined,
@@ -22,10 +21,10 @@ import DatasetMapOL, {
 } from "../components/DatasetMap/DatasetMap";
 import DatasetTimelineControl from "../components/DatasetMap/DatasetTimelineControl";
 import { useNavigate } from "react-router-dom";
-import { useFilteredDatasets } from "../hooks/useFilteredDatasets";
-import { usePublicDatasetArchiveItems } from "../hooks/useDatasets";
+import { useArchiveSearchNotes, usePublicDatasetArchiveItems } from "../hooks/useDatasets";
 import { useUploadTimeline } from "../hooks/useUploadTimeline";
-import FilterModal, { AdvancedFilters } from "../components/FilterModal";
+import FilterModal from "../components/FilterModal";
+import ActiveFilterChips from "../components/DatasetMap/ActiveFilterChips";
 import { useDatasetFilter } from "../hooks/useDatasetFilterProvider";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
@@ -33,14 +32,14 @@ import { useAnalytics } from "../hooks/useAnalytics";
 import { useArchiveSearch } from "../hooks/useArchiveSearch";
 import ArchiveSearch from "../components/DatasetMap/ArchiveSearch";
 import { createDatasetArchiveTextMatcher } from "../utils/archiveTextSearch";
-
-type FilterTag =
-  | "platform"
-  | "license"
-  | "authors_image"
-  | "admin_level_1"
-  | "admin_level_3"
-  | "biome";
+import {
+  EMPTY_ARCHIVE_FILTERS,
+  createArchiveFilter,
+  describeActiveFilters,
+  toggleChipFilter,
+  type ArchiveChipFilter,
+  type ArchiveFilters,
+} from "../utils/datasetArchiveFilters";
 
 const SIDEBAR_LEFT_PX = 16;
 const SIDEBAR_WIDTH_PX = 360;
@@ -72,15 +71,9 @@ export default function Dataset() {
     addedInQuarter,
   } = useUploadTimeline(allData ?? null);
 
-  const { filteredData } = useFilteredDatasets(timeFilteredData ?? undefined);
-
-  // Get filter state from context
   const {
-    filter,
-    setFilter,
-    setFilterTag,
-    advancedFilters,
-    setAdvancedFilters,
+    filters,
+    setFilters,
     sortDirection,
     setSortDirection,
     filterByViewport,
@@ -96,8 +89,9 @@ export default function Dataset() {
   const isMobile = useIsMobile();
   const { runDesktopOnlyAction } = useDesktopOnlyFeature();
   const { track } = useAnalytics("dataset_archive");
-  // Incremented on explicit filter actions to trigger map zoom
+  // Incremented to frame the current results on the map.
   const [filterZoomTrigger, setFilterZoomTrigger] = useState(0);
+  const zoomToMatches = useCallback(() => setFilterZoomTrigger((n) => n + 1), []);
 
   // Open-vocabulary (CLIP) search is public; the ranking RPC only returns
   // datasets visible to the caller.
@@ -106,6 +100,7 @@ export default function Dataset() {
   // The committed text query: it trails the search field by a short debounce,
   // so the list and map are not re-filtered on every keystroke.
   const activeTextSearch = search.text;
+  const { data: notes } = useArchiveSearchNotes(!!activeTextSearch.trim());
 
   useEffect(() => {
     track("dataset_archive_viewed", {});
@@ -122,19 +117,24 @@ export default function Dataset() {
     setSortDirection(sortDirection === "asc" ? "desc" : "asc");
   };
 
+  // A filter change frames the new results on the map, unless the list follows
+  // the map view: then the visitor's region is the point and the map stays put.
+  const changeFilters = useCallback(
+    (next: ArchiveFilters) => {
+      setFilters(next);
+      if (!filterByViewport) zoomToMatches();
+    },
+    [setFilters, filterByViewport, zoomToMatches],
+  );
+
   // Stable identity keeps the memoised DataList/DatasetMapOL from re-rendering on
   // every keystroke in the search box.
   const handleFilterClick = useCallback(
-    (filterValue: string, filterType: FilterTag) => {
-      setFilter(filterValue);
-      setFilterTag(filterType);
-      setFilterZoomTrigger((n) => n + 1);
-      track("dataset_filter_applied", {
-        filter_type: filterType,
-        filter_value: filterValue,
-      });
+    (key: ArchiveChipFilter, value: string) => {
+      changeFilters(toggleChipFilter(filters, key, value));
+      track("dataset_filter_applied", { filter_type: key, filter_value: value });
     },
-    [setFilter, setFilterTag, track],
+    [changeFilters, filters, track],
   );
 
   const handleMapInteracted = useCallback(() => {
@@ -145,27 +145,26 @@ export default function Dataset() {
     setIsFilterModalVisible(true);
   };
 
-  const handleApplyFilters = (newFilters: AdvancedFilters) => {
-    setAdvancedFilters(newFilters);
-    setFilterZoomTrigger((n) => n + 1);
-    const appliedFilters = Object.entries(newFilters).filter(([, value]) => {
-      if (Array.isArray(value)) return value.length > 0;
-      return value !== null && value !== undefined && value !== "";
-    });
+  const activeFilters = useMemo(() => describeActiveFilters(filters), [filters]);
+
+  const handleApplyFilters = (next: ArchiveFilters) => {
+    changeFilters(next);
+    const applied = describeActiveFilters(next);
     track("dataset_filter_applied", {
-      filter_type: appliedFilters.map(([key]) => key).join(",") || "advanced",
-      filter_value: String(appliedFilters.length),
+      filter_type: [...new Set(applied.map((chip) => chip.id.split(":")[0]))].join(",") || "none",
+      filter_value: String(applied.length),
     });
   };
 
-  // Text/semantic search and sorting are applied on top of the already
-  // filtered data, so they affect only which datasets are shown — never the
-  // timeline.
+  // Filters, text/semantic search and sorting apply on top of the timeline
+  // slice, so they affect only which datasets are shown — never the timeline.
   const displayData = useMemo(() => {
-    if (!filteredData) return null;
+    if (!timeFilteredData) return null;
 
-    const filtered = filteredData.filter(
-      createDatasetArchiveTextMatcher(activeTextSearch),
+    const matchesFilters = createArchiveFilter(filters);
+    const matchesText = createDatasetArchiveTextMatcher(activeTextSearch, notes);
+    const filtered = timeFilteredData.filter(
+      (item) => matchesFilters(item) && matchesText(item),
     );
 
     // When a semantic query is active, restrict to matched datasets and order
@@ -181,17 +180,7 @@ export default function Dataset() {
     return filtered.sort((a, b) => {
       return sortDirection === "asc" ? a.id - b.id : b.id - a.id;
     });
-  }, [filteredData, activeTextSearch, sortDirection, semantic.scores]);
-
-  // Reset visibleFeatures when data changes
-  useEffect(() => {
-    if (displayData?.length && displayData.length > 0) {
-      // When data changes, start with all features visible
-      setVisibleFeatures(displayData.map((item) => item.id.toString()));
-    }
-  }, [displayData]);
-
-  const filterDisplay = typeof filter === "string" ? filter : String(filter);
+  }, [timeFilteredData, filters, activeTextSearch, notes, sortDirection, semantic.scores]);
   const desktopTimelineStyle = isMobile
     ? {
         left: "50%",
@@ -230,27 +219,11 @@ export default function Dataset() {
               <span>{displayData?.length}</span>
             </Tag>
           </div>
-          {filter && (
-            <div className="flex items-center mt-2">
-              <span className="text-xs text-gray-500 mr-2">Filtered by:</span>
-              <Tag className="m-0 flex items-center gap-1" color="blue">
-                <span className="text-xs font-medium">
-                  {filterDisplay.slice(0, 15) +
-                    (filterDisplay.length > 15 ? "..." : "")}
-                </span>
-                <Button
-                  data-testid="dataset-active-filter-clear"
-                  className="border-none bg-transparent h-auto p-0 ml-1 flex items-center justify-center text-blue-500 hover:text-blue-700"
-                  size="small"
-                  onClick={() => {
-                    setFilter("");
-                    setFilterTag("platform");
-                  }}
-                  icon={<CloseOutlined className="text-[10px]" />}
-                />
-              </Tag>
-            </div>
-          )}
+          <ActiveFilterChips
+            chips={activeFilters}
+            onRemove={(chip) => changeFilters(chip.clear(filters))}
+            onClearAll={() => changeFilters(EMPTY_ARCHIVE_FILTERS)}
+          />
         </div>
         {!isMobile && (
           <Button
@@ -315,12 +288,14 @@ export default function Dataset() {
           </Checkbox>
 
           <div className="flex items-center gap-2 sm:pl-2">
-            <Tooltip title="Open advanced filtering options">
-              <Button
-                aria-label="Advanced filters"
-                icon={<FilterOutlined />}
-                onClick={handleFilterButtonClick}
-              />
+            <Tooltip title="Filter by author, country, season, resolution and more">
+              <Badge count={activeFilters.length} size="small" color="#1B5E35">
+                <Button
+                  aria-label="Filters"
+                  icon={<FilterOutlined />}
+                  onClick={handleFilterButtonClick}
+                />
+              </Badge>
             </Tooltip>
             <Tooltip
               title={`Sort by addition order ${sortDirection === "asc" ? "oldest first" : "newest first"}`}
@@ -347,8 +322,8 @@ export default function Dataset() {
           setHoveredItem={setHoveredItem}
           visibleFeatures={visibleFeatures}
           onFilterClick={handleFilterClick}
-          searchValue={activeTextSearch}
           filterByViewport={filterByViewport}
+          onZoomToMatches={zoomToMatches}
           scores={semantic.scores}
           semanticQuery={semantic.query}
         />
@@ -478,8 +453,9 @@ export default function Dataset() {
           setIsFilterModalVisible(false);
           if (isMobile) setIsMobileListOpen(true);
         }}
-        onApplyFilters={handleApplyFilters}
-        currentFilters={advancedFilters}
+        filters={filters}
+        onChange={handleApplyFilters}
+        data={timeFilteredData ?? []}
       />
     </div>
   );
