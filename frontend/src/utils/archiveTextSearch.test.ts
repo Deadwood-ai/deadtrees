@@ -77,6 +77,10 @@ describe("archive text search", () => {
     // Three letters: no typo allowed, or "jos" would match "joe", "job", ...
     expect(createDatasetArchiveTextMatcher("jso")(dataset)).toBe(false);
     expect(createDatasetArchiveTextMatcher("garxyz")(dataset)).toBe(false);
+    // Numbers are ids, years or plot numbers: no typos.
+    const plot = { ...dataset, admin_level_3: "Plot 5001" };
+    expect(createDatasetArchiveTextMatcher("5002")(plot)).toBe(false);
+    expect(createDatasetArchiveTextMatcher("5001")(plot)).toBe(true);
   });
 
   it("matches half-typed words, with a typo, against word starts", () => {

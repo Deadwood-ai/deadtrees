@@ -286,7 +286,7 @@ export default function Dataset() {
           </div>
         )}
         <div className="flex items-center justify-end gap-2">
-          <Tooltip title="Filter list by map view.">
+          <Tooltip title="Filter list by map view." placement="bottom">
             <Button
               aria-label="Filter list by map view"
               aria-pressed={filterByViewport}
@@ -296,7 +296,7 @@ export default function Dataset() {
               onClick={() => setFilterByViewport(!filterByViewport)}
             />
           </Tooltip>
-          <Tooltip title="Filter by author, country, season, resolution and more">
+          <Tooltip title="Filter by author, country, season, resolution and more" placement="bottom">
             <Badge count={activeFilters.length} size="small" color="#1B5E35">
               <Button
                 aria-label="Filters"
@@ -307,6 +307,7 @@ export default function Dataset() {
           </Tooltip>
           <Tooltip
             title={`Sort by addition order ${sortDirection === "asc" ? "oldest first" : "newest first"}`}
+            placement="bottom"
           >
             <Button
               icon={

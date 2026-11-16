@@ -80,8 +80,10 @@ const getSearchIndex = (dataset: SearchableDataset): DatasetSearchIndex => {
 };
 
 // Typos allowed per query word: none for short words, where one edit already
-// matches almost anything, then one, and two for long words.
-const allowedTypos = (term: string) => (term.length >= 8 ? 2 : term.length >= 4 ? 1 : 0);
+// matches almost anything, then one, and two for long words. Words with digits
+// (ids, years, plot numbers) must match exactly: 5002 is not 5001.
+const allowedTypos = (term: string) =>
+  /\d/.test(term) ? 0 : term.length >= 8 ? 2 : term.length >= 4 ? 1 : 0;
 
 /**
  * Edit distance (with swapped neighbours as one edit) between `term` and the

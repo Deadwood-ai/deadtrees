@@ -80,6 +80,7 @@ const FilterModal: React.FC<FilterModalProps> = ({ isVisible, onClose, filters, 
         <Select
           mode="multiple"
           placeholder="Any author"
+          aria-label="Authors"
           allowClear
           options={authors}
           value={filters.authors}
@@ -93,6 +94,7 @@ const FilterModal: React.FC<FilterModalProps> = ({ isVisible, onClose, filters, 
         <Select
           mode="multiple"
           placeholder="Any country"
+          aria-label="Country"
           allowClear
           options={countryOptions}
           value={filters.countries}
@@ -106,6 +108,7 @@ const FilterModal: React.FC<FilterModalProps> = ({ isVisible, onClose, filters, 
         <Select
           mode="multiple"
           placeholder="Any biome"
+          aria-label="Biome"
           allowClear
           options={biomeOptions}
           value={filters.biomes}
