@@ -603,3 +603,13 @@ def test_a_forest_that_fills_the_crop_is_framed_and_its_share_is_in_the_prompt()
 	seen = []
 	judge.ask('luna', lambda p, images: seen.append(p) or _answer(), [], cover={'deadwood': 0.1, 'forest': 0.5})
 	assert 'forest covers 50%' in seen[0]
+
+
+def test_a_run_queued_for_the_older_version_fails_instead_of_being_judged_with_this_drawing():
+	from types import SimpleNamespace
+
+	from processor.src.prediction_quality_v1 import handler
+
+	ctx = SimpleNamespace(run={'id': 5, 'dataset_id': 42}, version={'version': 'v1', 'config': {}})
+	with pytest.raises(ValueError, match='the run is of version v1; this code judges v2'):
+		handler.handle(ctx)
