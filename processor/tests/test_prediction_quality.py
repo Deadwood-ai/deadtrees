@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 import json
 import re
 
@@ -523,7 +524,7 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	from processor.src.audit_worker import worker
 	from processor.src.prediction_quality_v1 import handler
 
-	monkeypatch.setattr(handler, 'local_cog', lambda *args: ortho_file)
+	monkeypatch.setattr(handler, 'readable_cog', lambda *args: nullcontext(str(ortho_file)))
 	client, stored, refreshed = _FakeClient(_dataset()), {}, []
 	judges = {
 		'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major'),

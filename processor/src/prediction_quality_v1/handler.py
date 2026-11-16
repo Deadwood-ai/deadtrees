@@ -21,7 +21,7 @@ from shared.settings import settings
 from ..audit_worker.worker import default_ready
 from ..utils.stored_inputs import (
 	aoi_key,
-	local_cog,
+	readable_cog,
 	ortho_sha256,
 	read_geometry,
 	stored_aoi,
@@ -101,11 +101,13 @@ def handle(ctx) -> dict:
 	predictions = {layer: prediction_polygons(client, table, label_ids[layer]) for layer, (_, table) in LAYERS.items()}
 	# The thresholds the version was registered with (a version before they were recorded runs with today's).
 	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
-	with tempfile.TemporaryDirectory(prefix='prediction-quality-') as folder:
-		cog_file = local_cog(cog, Path(folder), ctx.token, dataset_id, log)
+	with (
+		tempfile.TemporaryDirectory(prefix='prediction-quality-') as folder,
+		readable_cog(cog, Path(folder), ctx.token, dataset_id, log) as cog_source,
+	):
 		result = run_prediction_quality(
 			dataset_id,
-			str(cog_file),
+			cog_source,
 			tiles,
 			shape(aoi) if aoi else None,
 			predictions,
