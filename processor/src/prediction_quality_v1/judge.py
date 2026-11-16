@@ -7,7 +7,9 @@ calls are not made here: a backend is any function (prompt, images) -> answer te
 subscription worker (DT-1482) and the benchmark harness share the same prompt and parser.
 
 Prompt v6 (DT-1560) adds each layer's share of the crop: a crop the forest fills shows a gold
-frame and tint without an inner edge, which the judges took for "no gold".
+frame and tint without an inner edge, which the judges took for "no gold". It also splits gaps
+between crowns that the forest covers (m9, common in forest cover; Janusch, 16 Nov 2026) from
+non-tree areas marked as forest (m6).
 """
 
 from __future__ import annotations
@@ -32,7 +34,8 @@ MODES = {
 	},
 	'forest': {
 		'm5_fc_trees_missed': 'Trees missed: clearly visible tree canopy has no gold.',
-		'm6_fc_on_non_trees': 'Non-trees marked as forest: gold covers shrubs, crops, grass, bare ground or roofs, or fills open gaps between crowns.',
+		'm6_fc_on_non_trees': 'Non-trees marked as forest: gold covers areas without trees, such as shrubs, fields, grass, bare ground, roads or roofs, outside the stand.',
+		'm9_fc_gaps_filled': 'Gaps not identified: gold also covers the open gaps between crowns inside a stand, where ground, grass or shadow shows between the trees.',
 		'm7_fc_artifact': 'Processing artifact in the forest layer: straight tile seams, rectangular holes or blocks, or the gold cut off or missing.',
 	},
 }
