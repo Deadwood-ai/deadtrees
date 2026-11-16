@@ -8,17 +8,20 @@ interface CropImageProps {
 	image: IAuditImage;
 	className?: string;
 	style?: CSSProperties;
+	/** a layer under another image: hidden from screen readers */
+	decorative?: boolean;
 }
 
 /** One stored check image behind the auditors' signed link; mounting it is what asks for the ticket. */
-export default function CropImage({ image, className = "h-auto w-full rounded border border-gray-200", style }: CropImageProps) {
+export default function CropImage({ image, className = "h-auto w-full rounded border border-gray-200", style, decorative = false }: CropImageProps) {
 	const access = useAuditImageAccess();
 	if (access.isError) return <InlineLoadError message="The images couldn’t load." onRetry={() => void access.refetch()} />;
 	if (!access.data) return <InlineSkeleton label="Loading the model's image" className="aspect-square w-full" />;
 	return (
 		<img
 			src={auditImageUrl(access.data, image.storage_path)}
-			alt={`What the model saw: ${image.kind.replace(/_/g, " ")}`}
+			alt={decorative ? "" : `What the model saw: ${image.kind.replace(/_/g, " ")}`}
+			aria-hidden={decorative || undefined}
 			className={className}
 			style={style}
 			width={image.width}
