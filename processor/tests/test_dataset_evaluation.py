@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 """Dataset evaluation check v1: inputs from the COG, band and duplicate rules, the model
 answer, the dataset rule and the model transports (external models faked at their
 process and HTTP boundaries)."""
@@ -612,7 +614,7 @@ class FakeClient:
 
 @pytest.mark.unit
 def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path, monkeypatch):
-	monkeypatch.setattr(handler, 'local_cog', lambda *args: cog)
+	monkeypatch.setattr(handler, 'readable_cog', lambda *args: nullcontext(str(cog)))
 	monkeypatch.setattr(
 		handler, 'pull_file_from_storage_server', lambda remote, local, *a: Path(local).write_bytes(thumbnail_bytes())
 	)
@@ -736,7 +738,7 @@ def test_a_cog_without_a_usable_image_is_excluded_by_rule_without_a_model(tmp_pa
 @pytest.mark.unit
 def test_the_handler_skips_the_duplicate_lookup_for_an_empty_cog(tmp_path, monkeypatch):
 	empty = write_cog(tmp_path / 'empty.tif', np.zeros((800, 800, 3), np.uint8))
-	monkeypatch.setattr(handler, 'local_cog', lambda *args: empty)
+	monkeypatch.setattr(handler, 'readable_cog', lambda *args: nullcontext(str(empty)))
 	client = FakeClient(
 		{
 			'v2_cogs': [

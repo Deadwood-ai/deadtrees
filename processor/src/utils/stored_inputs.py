@@ -3,7 +3,13 @@ georeferencing check, dataset evaluation, prediction quality)."""
 
 import hashlib
 import json
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
+
+import httpx
+import rasterio
+from rasterio.errors import RasterioIOError
 
 from shapely import wkb
 from shapely.geometry import shape
@@ -41,6 +47,56 @@ def local_cog(cog: Cog, temp_dir: Path, token: str, dataset_id: int, ctx: LogCon
 	logger.info(f'Pulling COG from {remote}', ctx)
 	pull_file_from_storage_server(remote, str(local), token, dataset_id)
 	return local
+
+
+STREAM_ENV = dict(GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='60', GDAL_HTTP_MAX_RETRY='2')
+STREAMED = '<streamed COG>'  # stands in for the link in errors: a private COG's link carries a ticket
+
+
+def cog_url(cog: Cog, token: str, dataset_id: int) -> str | None:
+	"""The COG as a link that serves range requests, so a check reads only the overview and
+	crops it needs instead of the whole file. A private COG gets a signed link from the API (the
+	processor may view every private dataset); a public or view-only one keeps its static URL.
+	None when the API cannot be asked."""
+	api = settings.API_ENDPOINT.rstrip('/')
+	try:
+		response = httpx.post(
+			f'{api}/datasets/files/tickets',
+			json={'dataset_ids': [dataset_id]},
+			headers={'Authorization': f'Bearer {token}'},
+			timeout=30,
+		)
+		response.raise_for_status()
+		signed = (response.json().get('files') or {}).get(str(dataset_id)) or {}
+	except (httpx.HTTPError, ValueError):
+		return None
+	if signed.get('cog_url'):
+		return api + signed['cog_url']
+	return api.removesuffix('/api/v1') + '/cogs/v1/' + cog.cog_path
+
+
+@contextmanager
+def readable_cog(cog: Cog, temp_dir: Path, token: str, dataset_id: int, ctx: LogContext) -> Iterator[str]:
+	"""Where a check reads the COG from: its link, streamed with range requests, else (no link,
+	or the link does not open) a copy of the whole file. Errors raised while the streamed COG is
+	read name it without its link."""
+	url = cog_url(cog, token, dataset_id)
+	if url:
+		try:
+			with rasterio.Env(**STREAM_ENV), rasterio.open(url):
+				pass
+		except RasterioIOError:
+			logger.warning('The COG link did not open; copying the file instead', ctx)
+			url = None
+	if not url:
+		yield str(local_cog(cog, temp_dir, token, dataset_id, ctx))
+		return
+	try:
+		yield url
+	except Exception as e:
+		if url not in str(e):
+			raise
+		raise RuntimeError(str(e).replace(url, STREAMED)) from None
 
 
 def stored_cog(client, dataset_id: int) -> Cog:
