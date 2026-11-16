@@ -26,6 +26,8 @@ services:
       # Persist the OpenCLIP text-encoder weights on the /data mount so the
       # ~3.9GB download happens once and survives container restarts.
       OPENCLIP_CACHE_DIR: /data/assets/openclip_cache
+      # Load it at start-up so the first AI search after a deploy does not wait.
+      SEARCH_MODEL_WARMUP: ${SEARCH_MODEL_WARMUP:-true}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_KEY: ${SUPABASE_KEY}
       DEV_MODE: false
