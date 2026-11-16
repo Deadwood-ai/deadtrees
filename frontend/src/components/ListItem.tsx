@@ -10,26 +10,21 @@ import {
   getBiomeTagColor,
   truncateBiomeLabel,
 } from "../utils/biomeDisplay";
+import type { ArchiveChipFilter } from "../utils/datasetArchiveFilters";
+import type { InfoSnippet } from "../utils/archiveTextSearch";
 
 interface ListItemProps {
   item: IDataset | IDatasetArchiveItem;
   index: number;
   setHoveredItem: ((id: number | null) => void) | undefined;
   isHovered: boolean;
-  onFilterClick: (
-    filterValue: string,
-    filterType:
-      | "platform"
-      | "license"
-      | "authors_image"
-      | "admin_level_1"
-      | "admin_level_3"
-      | "biome",
-  ) => void;
+  onFilterClick: (key: ArchiveChipFilter, value: string) => void;
   // Open-vocabulary search relevance (0..1) when a semantic query is active.
   score?: number | null;
   // Active semantic query, forwarded to the details page to highlight tiles.
   semanticQuery?: string | null;
+  // Matched additional information, shown under the card's details.
+  infoSnippet?: InfoSnippet | null;
 }
 
 const ListItem = ({
@@ -40,6 +35,7 @@ const ListItem = ({
   onFilterClick,
   score,
   semanticQuery,
+  infoSnippet,
 }: ListItemProps) => {
   const navigate = useNavigate();
   const { setNavigationSource } = useDatasetDetailsMap();
@@ -82,16 +78,10 @@ const ListItem = ({
 
   const onClickFilterHandler = (
     e: React.MouseEvent,
-    filter: string,
-    filterType:
-      | "platform"
-      | "license"
-      | "authors_image"
-      | "admin_level_1"
-      | "admin_level_3"
-      | "biome",
+    key: ArchiveChipFilter,
+    value: string,
   ) => {
-    onFilterClick(filter, filterType);
+    onFilterClick(key, value);
     e.stopPropagation();
   };
 
@@ -112,7 +102,7 @@ const ListItem = ({
     <div
       key={index}
       data-testid="dataset-list-item"
-      className={`relative flex rounded-md p-2 transition duration-150 ease-in-out ${
+      className={`relative flex flex-col rounded-md p-2 transition duration-150 ease-in-out ${
         isHovered ? "bg-gray-200" : "bg-white hover:bg-gray-100"
       }`}
       onMouseEnter={handleMouseEnter}
@@ -127,110 +117,141 @@ const ListItem = ({
         aria-label={`Open dataset ${adminLevel3 || item.id}`}
         className="absolute inset-0 z-10 cursor-pointer rounded-md"
       />
-      <div className="relative h-16 w-16 min-h-16 min-w-16 shrink-0 overflow-hidden rounded-lg">
-        <img
-          src={thumbnailUrl ?? "/assets/tree-icon.png"}
-          alt={`Thumbnail of the orthophoto of ${adminLevel3 || `dataset ${item.id}`}`}
-          className="m-0 h-full w-full scale-150 object-cover transition-transform hover:z-10"
-          loading="lazy"
-        />
-      </div>
-      <div className="flex flex-1 flex-col justify-between pl-3 min-w-0">
-        <div className="flex justify-between items-start gap-1">
-          <div className="flex items-baseline min-w-0 flex-1 truncate">
-            <Tooltip title={adminLevel3}>
-              <Button
-                type="text"
-                size="small"
-                className="relative z-20 max-content m-0 p-0 font-semibold truncate"
-                onClick={(e) =>
-                  onClickFilterHandler(e, adminLevel3, "admin_level_3")
-                }
-              >
-                {adminLevel3.slice(0, 16) +
-                  (adminLevel3.length > 16 ? "..." : "")}
-              </Button>
-            </Tooltip>
-            {adminLevel3 && <span className="mr-1">,</span>}
-            <Tooltip title={adminLevel1}>
-              <Button
-                type="text"
-                size="small"
-                className="relative z-20 max-content m-0 p-0 font-semibold shrink-0"
-                onClick={(e) =>
-                  onClickFilterHandler(e, adminLevel1, "admin_level_1")
-                }
-              >
-                {countryList[adminLevel1 as keyof typeof countryList]}
-              </Button>
-            </Tooltip>
-          </div>
-          <div className="flex flex-col items-end shrink-0 pl-1">
-            {typeof score === "number" && (
-              <Tag
-                color="purple"
-                className="m-0 mb-0.5 px-1 py-0 text-[10px] leading-4"
-                data-testid="dataset-semantic-score"
-              >
-                {Math.round(score * 100)}% match
-              </Tag>
-            )}
-            {isPrivate && (
-              <Tag color="gold" className="mb-1 mr-0">
-                Private
-              </Tag>
-            )}
-            <div className="pt-0.5 text-xs whitespace-nowrap">
-              {new Date(
-                parseInt(item.aquisition_year),
-                item.aquisition_month ? parseInt(item.aquisition_month) - 1 : 0,
-                item.aquisition_day ? parseInt(item.aquisition_day) : 1,
-              ).toLocaleDateString("en-GB", {
-                year: "numeric",
-                ...(item.aquisition_month && { month: "numeric" }),
-                ...(item.aquisition_day && { day: "numeric" }),
-              })}
+      <div className="flex">
+        <div className="relative h-16 w-16 min-h-16 min-w-16 shrink-0 overflow-hidden rounded-lg">
+          <img
+            src={thumbnailUrl ?? "/assets/tree-icon.png"}
+            alt={`Thumbnail of the orthophoto of ${adminLevel3 || `dataset ${item.id}`}`}
+            className="m-0 h-full w-full scale-150 object-cover transition-transform hover:z-10"
+            loading="lazy"
+          />
+        </div>
+        <div className="flex flex-1 flex-col justify-between pl-3 min-w-0">
+          <div className="flex justify-between items-start gap-1">
+            <div className="flex items-baseline min-w-0 flex-1 truncate">
+              <Tooltip title={adminLevel3}>
+                <Button
+                  type="text"
+                  size="small"
+                  className="relative z-20 max-content m-0 p-0 font-semibold truncate"
+                  onClick={(e) =>
+                    onClickFilterHandler(e, "places", adminLevel3)
+                  }
+                >
+                  {adminLevel3.slice(0, 16) +
+                    (adminLevel3.length > 16 ? "..." : "")}
+                </Button>
+              </Tooltip>
+              {adminLevel3 && <span className="mr-1">,</span>}
+              <Tooltip title={adminLevel1}>
+                <Button
+                  type="text"
+                  size="small"
+                  className="relative z-20 max-content m-0 p-0 font-semibold shrink-0"
+                  onClick={(e) =>
+                    onClickFilterHandler(e, "countries", adminLevel1)
+                  }
+                >
+                  {countryList[adminLevel1 as keyof typeof countryList]}
+                </Button>
+              </Tooltip>
+            </div>
+            <div className="flex flex-col items-end shrink-0 pl-1">
+              {typeof score === "number" && (
+                <Tag
+                  color="purple"
+                  className="m-0 mb-0.5 px-1 py-0 text-[10px] leading-4"
+                  data-testid="dataset-semantic-score"
+                >
+                  {Math.round(score * 100)}% match
+                </Tag>
+              )}
+              {isPrivate && (
+                <Tag color="gold" className="mb-1 mr-0">
+                  Private
+                </Tag>
+              )}
+              <div className="pt-0.5 text-xs whitespace-nowrap">
+                {new Date(
+                  parseInt(item.aquisition_year),
+                  item.aquisition_month
+                    ? parseInt(item.aquisition_month) - 1
+                    : 0,
+                  item.aquisition_day ? parseInt(item.aquisition_day) : 1,
+                ).toLocaleDateString("en-GB", {
+                  year: "numeric",
+                  ...(item.aquisition_month && { month: "numeric" }),
+                  ...(item.aquisition_day && { day: "numeric" }),
+                })}
+              </div>
             </div>
           </div>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="min-w-0 flex-1">
-            <Tooltip title={item.authors?.join(", ")}>
-              <Button
-                size="small"
-                className="relative z-20 inline-block max-w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left font-medium"
-                onClick={(e) =>
-                  onClickFilterHandler(e, firstAuthor, "authors_image")
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <Tooltip title={item.authors?.join(", ")}>
+                <Button
+                  size="small"
+                  className="relative z-20 inline-block max-w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left font-medium"
+                  onClick={(e) =>
+                    onClickFilterHandler(e, "authors", firstAuthor)
+                  }
+                >
+                  {truncatedFirstAuthor}
+                  {item.authors && item.authors.length > 1
+                    ? ` +${item.authors.length - 1}`
+                    : ""}
+                </Button>
+              </Tooltip>
+            </div>
+
+            <Tooltip title={biomeName || "Unknown biome"}>
+              <Tag
+                data-testid={
+                  biomeName ? "dataset-biome-filter" : "dataset-biome-label"
                 }
+                color={biomeColor}
+                className="relative z-20 m-0 inline-flex w-fit shrink-0 cursor-pointer select-none"
+                onClick={(e) => {
+                  if (!biomeName) return;
+                  onClickFilterHandler(e, "biomes", biomeName);
+                }}
               >
-                {truncatedFirstAuthor}
-                {item.authors && item.authors.length > 1
-                  ? ` +${item.authors.length - 1}`
-                  : ""}
-              </Button>
+                {`${biomeIcon} `}
+                {truncateBiomeLabel(biomeLabel)}
+              </Tag>
             </Tooltip>
           </div>
-
-          <Tooltip title={biomeName || "Unknown biome"}>
-            <Tag
-              data-testid={
-                biomeName ? "dataset-biome-filter" : "dataset-biome-label"
-              }
-              color={biomeColor}
-              className="relative z-20 m-0 inline-flex w-fit shrink-0 cursor-pointer select-none"
-              onClick={(e) => {
-                if (!biomeName) return;
-                onClickFilterHandler(e, biomeName, "biome");
-              }}
-            >
-              {`${biomeIcon} `}
-              {truncateBiomeLabel(biomeLabel)}
-            </Tag>
-          </Tooltip>
         </div>
       </div>
+      {infoSnippet && <InfoSnippetText snippet={infoSnippet} />}
     </div>
   );
 };
+
+// The part of the additional information that matched the search, matched
+// words marked.
+function InfoSnippetText({ snippet }: { snippet: InfoSnippet }) {
+  return (
+    <p
+      className="m-0 mt-1.5 line-clamp-3 border-l-2 border-gray-200 pl-2 text-xs leading-snug text-gray-600"
+      data-testid="dataset-info-snippet"
+    >
+      {snippet.truncatedStart && "…"}
+      {snippet.parts.map((part, i) =>
+        part.match ? (
+          <mark
+            key={i}
+            className="rounded-sm bg-yellow-100 px-0.5 text-gray-900"
+          >
+            {part.text}
+          </mark>
+        ) : (
+          part.text
+        ),
+      )}
+      {snippet.truncatedEnd && "…"}
+    </p>
+  );
+}
 
 export default memo(ListItem);

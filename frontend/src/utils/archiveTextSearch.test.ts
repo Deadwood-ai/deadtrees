@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildArchiveInfoIndex,
   createDatasetArchiveTextMatcher,
+  createInfoSnippetFinder,
   matchesDatasetArchiveTextSearch,
   matchesSearchText,
   normalizeSearchText,
+  prefixTypoDistance,
 } from "./archiveTextSearch";
 
 const dataset = {
+  id: 1,
   authors: ["Primary Author", "Jose\u0301 García"],
   admin_level_1: "España",
   admin_level_2: "Andalucía",
@@ -38,7 +42,7 @@ describe("archive text search", () => {
   });
 
   it("reuses one matcher across datasets and queries without changing results", () => {
-    const other = { ...dataset, authors: ["Different Author"], admin_level_3: "Freiburg im Breisgau" };
+    const other = { ...dataset, id: 2, authors: ["Different Author"], admin_level_3: "Freiburg im Breisgau" };
     for (const query of ["garcia", "sierra andalucia", "primary garcia", "freiburg breisgau", " ", "nowhere"]) {
       const matches = createDatasetArchiveTextMatcher(query);
       for (const item of [dataset, other]) {
@@ -48,5 +52,59 @@ describe("archive text search", () => {
     expect(createDatasetArchiveTextMatcher("primary garcia")(dataset)).toBe(false);
     expect(createDatasetArchiveTextMatcher("sierra andalucia")(dataset)).toBe(true);
     expect(createDatasetArchiveTextMatcher("freiburg")(dataset)).toBe(false);
+  });
+
+  it("matches the additional information once it is loaded", () => {
+    const notes = buildArchiveInfoIndex([
+      { id: 1, additional_information: "Bark beetle Décline after drought; FLUX tower site" },
+      { id: 2, additional_information: null },
+    ]);
+    expect(createDatasetArchiveTextMatcher("decline", notes)(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("flux tower", notes)(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("flux decline", notes)(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("flux windthrow", notes)(dataset)).toBe(false);
+    // Without the notes loaded yet, authors and places still match.
+    expect(createDatasetArchiveTextMatcher("decline")(dataset)).toBe(false);
+    expect(createDatasetArchiveTextMatcher("garcia", notes)(dataset)).toBe(true);
+    expect(notes.has(2)).toBe(false);
+  });
+
+  it("forgives a typo or a swapped pair in longer words, but not in short ones", () => {
+    expect(createDatasetArchiveTextMatcher("garica")(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("nevda")(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("andalusia")(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("sierra nevda")(dataset)).toBe(true);
+    // Three letters: no typo allowed, or "jos" would match "joe", "job", ...
+    expect(createDatasetArchiveTextMatcher("jso")(dataset)).toBe(false);
+    expect(createDatasetArchiveTextMatcher("garxyz")(dataset)).toBe(false);
+    // Numbers are ids, years or plot numbers: no typos.
+    const plot = { ...dataset, admin_level_3: "Plot 5001" };
+    expect(createDatasetArchiveTextMatcher("5002")(plot)).toBe(false);
+    expect(createDatasetArchiveTextMatcher("5001")(plot)).toBe(true);
+  });
+
+  it("matches half-typed words, with a typo, against word starts", () => {
+    expect(prefixTypoDistance("decl", "decline", 1)).toBe(0);
+    expect(prefixTypoDistance("dclin", "decline", 1)).toBe(1);
+    expect(prefixTypoDistance("drougth", "drought", 1)).toBe(1);
+    expect(prefixTypoDistance("flux", "beetle", 1)).toBeGreaterThan(1);
+  });
+
+  it("finds a typo in the additional information and marks the matched words", () => {
+    const info = buildArchiveInfoIndex([
+      {
+        id: 1,
+        additional_information:
+          "Plot established in 2019 as part of a long-term monitoring network. Strong spruce décline after the 2018 drought, eddy covariance flux tower nearby.",
+      },
+    ]);
+    expect(createDatasetArchiveTextMatcher("declne", info)(dataset)).toBe(true);
+    const snippet = createInfoSnippetFinder("flux declne", info)(1);
+    expect(snippet?.parts.filter((part) => part.match).map((part) => part.text)).toEqual(["décline", "flux"]);
+    expect(snippet?.truncatedStart).toBe(true);
+    expect(snippet?.parts.map((part) => part.text).join("")).toContain("Strong spruce décline after");
+    // Author-only matches show no snippet.
+    expect(createInfoSnippetFinder("garcia", info)(1)).toBeNull();
+    expect(createInfoSnippetFinder("decline", info)(2)).toBeNull();
   });
 });

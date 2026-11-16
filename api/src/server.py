@@ -1,8 +1,11 @@
 import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from shared.__version__ import __version__
+from shared.settings import settings
 from .routers import (
 	process,
 	upload,
@@ -23,7 +26,16 @@ from .access.tickets import redact_file_tickets
 
 logging.getLogger('uvicorn.access').addFilter(redact_file_tickets)
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+	if settings.SEARCH_MODEL_WARMUP:
+		search.warm_up_search_model()
+	yield
+
+
 app = FastAPI(
+	lifespan=lifespan,
 	title='Deadwood-AI API',
 	description='This is the Deadwood-AI API. It is used to manage files uploads to the Deadwood-AI backend and the preprocessing of uploads. Note that the download is managed by a sub-application at `/download/`.',
 	version=__version__,

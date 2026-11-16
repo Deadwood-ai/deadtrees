@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 import { acceptCookieConsent } from "./support/localAuth";
 
-// Regression for lost keystrokes in the archive "Author or place" field. The
+// Regression for lost keystrokes in the archive text search field. The
 // archive is mocked at production scale (~7.5k datasets) so every keystroke pays
 // the real filtering, list and map cost. No seeded DB is needed.
 

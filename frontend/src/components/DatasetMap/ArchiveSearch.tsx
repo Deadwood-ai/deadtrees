@@ -17,13 +17,14 @@ interface Props {
 }
 
 const MODE_LABEL: Record<ArchiveSearchMode, string> = {
-  text: "Author / place",
+  text: "Text",
   ai: "AI search",
 };
 
 /**
- * One search field for the archive. It searches authors and places by default;
- * the in-field mode menu switches it to open-vocabulary AI search.
+ * One search field for the archive. It searches authors, places and the
+ * uploaders' additional information by default; the in-field mode menu switches it to
+ * open-vocabulary AI search.
  */
 export default function ArchiveSearch({
   mode,
@@ -39,8 +40,8 @@ export default function ArchiveSearch({
       <SearchOutlined aria-hidden className="dt-archive-search-icon" />
       <Input
         variant="borderless"
-        aria-label={isAi ? "AI search" : "Search authors or places"}
-        placeholder={isAi ? "Describe, e.g. standing dead trees" : "Author or place"}
+        aria-label={isAi ? "AI search" : "Search authors, places or descriptions"}
+        placeholder={isAi ? "Describe, e.g. standing dead trees" : "Author, place or description"}
         data-testid="dataset-search-input"
         value={value}
         onChange={(event) => onChange(event.target.value)}

@@ -27,7 +27,7 @@ const archiveItems = [
     aquisition_month: "5",
     aquisition_day: "6",
     data_access: "public",
-    bbox: null,
+    bbox: "BOX(13.40 52.50,13.41 52.51)",
     thumbnail_path: null,
     admin_level_1: "ESP",
     admin_level_2: "Andalucía",
@@ -46,7 +46,7 @@ const archiveItems = [
     aquisition_month: "5",
     aquisition_day: "7",
     data_access: "public",
-    bbox: null,
+    bbox: "BOX(13.40 52.50,13.41 52.51)",
     thumbnail_path: null,
     admin_level_1: "DEU",
     admin_level_2: "Baden-Württemberg",
@@ -139,12 +139,9 @@ test("archive search and author suggestions match every author without accents",
   await expect(page.getByTestId("dataset-list-item")).toHaveCount(1);
 
   await search.clear();
-  await page.getByRole("button", { name: "Advanced filters" }).click();
-  const dialog = page.getByRole("dialog", { name: "Advanced Filters" });
-  const authorSelect = dialog
-    .locator(".ant-form-item")
-    .filter({ hasText: "Authors" })
-    .getByRole("combobox");
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Filters" });
+  const authorSelect = dialog.getByRole("combobox", { name: "Authors" });
   await authorSelect.click();
   await authorSelect.fill("garcia");
   await expect(

@@ -138,7 +138,10 @@ export type IDatasetArchiveItem = Pick<
       | "forest_cover_quality"
       | "has_major_issue"
     >
-  >;
+  > & {
+    // Ground sampling distance in cm per pixel, from the COG.
+    gsd_cm?: number | null;
+  };
 
 export interface ILabels {
   id: number;

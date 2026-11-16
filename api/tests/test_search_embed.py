@@ -353,3 +353,31 @@ def test_unusable_authorization_headers_resolve_to_anonymous(monkeypatch, header
 	monkeypatch.setattr(search_module, 'verify_token', _should_not_be_called)
 
 	assert _verified_user_id(header) is None
+
+
+def test_warm_up_loads_the_model_off_the_request_path(monkeypatch):
+	"""Start-up warm-up loads the text encoder in a background thread and never raises."""
+	import threading
+
+	loaded = threading.Event()
+	monkeypatch.setattr(search_module, 'get_text_bundle', loaded.set)
+	search_module.warm_up_search_model()
+	assert loaded.wait(5)
+
+
+def test_warm_up_failure_is_only_logged(monkeypatch, caplog):
+	import threading
+
+	done = threading.Event()
+
+	def broken():
+		done.set()
+		raise RuntimeError('weights missing')
+
+	monkeypatch.setattr(search_module, 'get_text_bundle', broken)
+	search_module.warm_up_search_model()
+	assert done.wait(5)
+	for thread in threading.enumerate():
+		if thread.name == 'search-model-warmup':
+			thread.join(5)
+	assert 'Search model warm-up failed' in caplog.text
