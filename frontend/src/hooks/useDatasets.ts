@@ -48,8 +48,8 @@ export function usePublicDatasetArchiveItems(options: DatasetQueryOptions = {}) 
   });
 }
 
-// The notes column (search_text) is left out: it would double the feed that
-// every archive visit waits for, and only text search reads it.
+// additional_information is left out: it would double the feed that every
+// archive visit waits for, and only text search reads it.
 const ARCHIVE_ITEM_COLUMNS = [
   "id", "created_at", "license", "platform", "authors",
   "aquisition_year", "aquisition_month", "aquisition_day", "bbox",
@@ -57,7 +57,7 @@ const ARCHIVE_ITEM_COLUMNS = [
   "biome_name", "has_labels", "has_deadwood_prediction", "data_access", "gsd_cm",
 ].join(",");
 
-/** Archive notes for text search, fetched once the visitor first searches. */
+/** Additional information for text search, fetched once the visitor first searches. */
 export function useArchiveSearchNotes(enabled: boolean) {
   const { status, user } = useAuth();
 
@@ -66,10 +66,10 @@ export function useArchiveSearchNotes(enabled: boolean) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from(Settings.DATASET_ARCHIVE_ITEMS_VIEW)
-        .select("id,search_text")
-        .not("search_text", "is", null);
+        .select("id,additional_information")
+        .not("additional_information", "is", null);
       if (error) throw error;
-      return buildArchiveNotesIndex(data as { id: number; search_text: string | null }[]);
+      return buildArchiveNotesIndex(data as { id: number; additional_information: string | null }[]);
     },
     enabled: enabled && status !== "checking",
     staleTime: 5 * 60 * 1000,

@@ -12,7 +12,6 @@ export interface ArchiveFilters {
   biomes: string[];
   platforms: string[];
   access: IDataAccess[];
-  hasLabels: boolean;
   years: [number, number] | null;
   months: [number, number] | null;
   gsdCm: [number, number] | null;
@@ -27,7 +26,6 @@ export const EMPTY_ARCHIVE_FILTERS: ArchiveFilters = {
   biomes: [],
   platforms: [],
   access: [],
-  hasLabels: false,
   years: null,
   months: null,
   gsdCm: null,
@@ -46,7 +44,6 @@ export type ArchiveFilterable = Pick<
   | "biome_name"
   | "platform"
   | "data_access"
-  | "has_labels"
   | "aquisition_year"
   | "aquisition_month"
   | "created_at"
@@ -90,7 +87,7 @@ export function createArchiveFilter(filters: ArchiveFilters) {
   const biomes = new Set(filters.biomes);
   const platforms = new Set(filters.platforms);
   const access = new Set<string>(filters.access);
-  const { years, months, gsdCm, uploaded, hasLabels } = filters;
+  const { years, months, gsdCm, uploaded } = filters;
 
   return (item: ArchiveFilterable): boolean => {
     if (authors.size && !item.authors?.some((author) => authors.has(author))) return false;
@@ -99,7 +96,6 @@ export function createArchiveFilter(filters: ArchiveFilters) {
     if (biomes.size && !biomes.has(item.biome_name ?? "")) return false;
     if (platforms.size && !platforms.has(item.platform)) return false;
     if (access.size && !access.has(item.data_access)) return false;
-    if (hasLabels && !item.has_labels) return false;
     if (years) {
       const year = Number(item.aquisition_year);
       const from = years[0] <= ACQUISITION_YEAR_FLOOR ? 0 : years[0];
@@ -170,9 +166,6 @@ export function describeActiveFilters(filters: ArchiveFilters): ActiveArchiveFil
       clear: (f: ArchiveFilters) => ({ ...f, access: f.access.filter((v) => v !== value) }),
     })),
   ];
-  if (filters.hasLabels) {
-    chips.push({ id: "hasLabels", label: "Manual labels", clear: (f) => ({ ...f, hasLabels: false }) });
-  }
   if (filters.years) {
     const [from, to] = filters.years;
     const label = from <= ACQUISITION_YEAR_FLOOR ? `Until ${to}` : formatRange(filters.years);

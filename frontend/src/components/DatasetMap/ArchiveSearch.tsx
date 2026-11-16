@@ -23,7 +23,7 @@ const MODE_LABEL: Record<ArchiveSearchMode, string> = {
 
 /**
  * One search field for the archive. It searches authors, places and the
- * uploaders' notes by default; the in-field mode menu switches it to
+ * uploaders' additional information by default; the in-field mode menu switches it to
  * open-vocabulary AI search.
  */
 export default function ArchiveSearch({
@@ -40,7 +40,7 @@ export default function ArchiveSearch({
       <SearchOutlined aria-hidden className="dt-archive-search-icon" />
       <Input
         variant="borderless"
-        aria-label={isAi ? "AI search" : "Search authors, places or notes"}
+        aria-label={isAi ? "AI search" : "Search authors, places or additional information"}
         placeholder={isAi ? "Describe, e.g. standing dead trees" : "Author, place or keyword"}
         data-testid="dataset-search-input"
         value={value}

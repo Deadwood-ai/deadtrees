@@ -1,7 +1,7 @@
--- Dataset archive filters: ground resolution and searchable notes.
+-- Dataset archive filters: ground resolution and searchable additional information.
 --
 -- The archive list filters by ground sampling distance and searches the uploader's
--- additional information and project id. The view keeps its columns and order;
+-- additional information. The view keeps its columns and order;
 -- CREATE OR REPLACE VIEW only appends.
 
 begin;
@@ -61,7 +61,7 @@ create or replace view public.public_dataset_archive_items with (security_invoke
             ((meta.metadata ->> 'biome'::text)::jsonb) ->> 'biome_name'::text AS biome_name,
             d.data_access,
             resolution.gsd_cm,
-            NULLIF(concat_ws(' '::text, NULLIF(btrim(d.additional_information), ''::text), NULLIF(btrim(d.project_id), ''::text)), ''::text) AS search_text
+            NULLIF(btrim(d.additional_information), ''::text) AS additional_information
            FROM v2_datasets d
              JOIN latest_status s ON s.dataset_id = d.id
              JOIN v2_orthos o ON o.dataset_id = d.id
@@ -92,7 +92,7 @@ create or replace view public.public_dataset_archive_items with (security_invoke
           WHERE label.dataset_id = base.id AND label.label_source = 'model_prediction'::"LabelSource" AND label.label_data = 'deadwood'::"LabelData")) AS has_deadwood_prediction,
     base.data_access,
     base.gsd_cm,
-    base.search_text
+    base.additional_information
    FROM archive_base base
   WHERE base.admin_level_1 IS NOT NULL;
 

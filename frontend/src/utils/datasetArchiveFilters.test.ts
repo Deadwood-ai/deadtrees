@@ -18,7 +18,6 @@ const item = (overrides: Partial<ArchiveFilterable> = {}): ArchiveFilterable => 
   biome_name: "Temperate Broadleaf and Mixed Forests",
   platform: "drone",
   data_access: IDataAccess.public,
-  has_labels: false,
   aquisition_year: "2022",
   aquisition_month: "7",
   created_at: "2024-03-05T10:00:00+00:00",
@@ -41,7 +40,6 @@ describe("archive filters", () => {
     expect(matches({ authors: ["Bo Sample"], countries: ["France"] })).toBe(false);
     expect(matches({ platforms: ["airborne", "drone"] })).toBe(true);
     expect(matches({ access: [IDataAccess.viewonly] })).toBe(false);
-    expect(matches({ hasLabels: true })).toBe(false);
   });
 
   it("filters a range of acquisition months and drops datasets without a month", () => {

@@ -199,9 +199,6 @@ const FilterModal: React.FC<FilterModalProps> = ({ isVisible, onClose, filters, 
         />
       </Section>
 
-      <Checkbox checked={filters.hasLabels} onChange={(e) => set({ hasLabels: e.target.checked })}>
-        Has manual deadwood labels
-      </Checkbox>
 
       <div className="mt-6 flex justify-end gap-2">
         <Button onClick={() => onChange(EMPTY_ARCHIVE_FILTERS)}>Reset filters</Button>

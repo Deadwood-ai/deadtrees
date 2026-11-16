@@ -52,10 +52,10 @@ describe("archive text search", () => {
     expect(createDatasetArchiveTextMatcher("freiburg")(dataset)).toBe(false);
   });
 
-  it("matches the notes (additional information, project id) when they are loaded", () => {
+  it("matches the additional information once it is loaded", () => {
     const notes = buildArchiveNotesIndex([
-      { id: 1, search_text: "Bark beetle Décline after drought; FLUX tower site" },
-      { id: 2, search_text: null },
+      { id: 1, additional_information: "Bark beetle Décline after drought; FLUX tower site" },
+      { id: 2, additional_information: null },
     ]);
     expect(createDatasetArchiveTextMatcher("decline", notes)(dataset)).toBe(true);
     expect(createDatasetArchiveTextMatcher("flux tower", notes)(dataset)).toBe(true);

@@ -17,16 +17,16 @@ type SearchableDataset = Pick<
   "id" | "authors" | "admin_level_1" | "admin_level_2" | "admin_level_3"
 >;
 
-/** Normalized notes (additional information, project id) by dataset id. */
+/** Normalized additional information by dataset id. */
 export type ArchiveNotesIndex = ReadonlyMap<number, string>;
 
 export const buildArchiveNotesIndex = (
-  rows: { id: number; search_text: string | null }[],
+  rows: { id: number; additional_information: string | null }[],
 ): ArchiveNotesIndex =>
   new Map(
     rows
-      .filter((row) => row.search_text)
-      .map((row) => [row.id, normalizeSearchText(row.search_text ?? "")]),
+      .filter((row) => row.additional_information)
+      .map((row) => [row.id, normalizeSearchText(row.additional_information ?? "")]),
   );
 
 interface DatasetSearchIndex {
@@ -60,7 +60,7 @@ const matchesNotes = (text: string | undefined, terms: string[]) =>
 /**
  * Builds the archive text filter for one query: every term must appear in a
  * single author name, or each term in some word of the place names, or every
- * term in the dataset's notes.
+ * term in the dataset's additional information.
  */
 export const createDatasetArchiveTextMatcher = (
   query: string,

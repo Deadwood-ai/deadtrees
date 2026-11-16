@@ -172,13 +172,13 @@ def test_archive_resolves_exclusions_once_per_query(db, world):
 	assert 'is_dataset_excluded_from_public_surface' not in policies
 
 
-def test_archive_lists_ground_resolution_and_searchable_notes(db):
-	"""The archive filters on ground resolution and searches the uploader's notes."""
+def test_archive_lists_ground_resolution_and_additional_information(db):
+	"""The archive filters on ground resolution and searches the uploader's additional information."""
 	owner = account(db)
 	row = archive_dataset(db, owner)
 	plain = archive_dataset(db, owner)
 	db.execute(
-		"""UPDATE public.v2_datasets SET additional_information=' Bark beetle decline ', project_id='FLUX site'
+		"""UPDATE public.v2_datasets SET additional_information=' Bark beetle decline near a FLUX site '
 		WHERE id=%s""",
 		(row,),
 	)
@@ -192,9 +192,9 @@ def test_archive_lists_ground_resolution_and_searchable_notes(db):
 	found = {
 		id_: (gsd, text)
 		for id_, gsd, text in db.execute(
-			'SELECT id,gsd_cm,search_text FROM public.public_dataset_archive_items WHERE id = ANY(%s)',
+			'SELECT id,gsd_cm,additional_information FROM public.public_dataset_archive_items WHERE id = ANY(%s)',
 			([row, plain],),
 		)
 	}
-	assert found[row] == (pytest.approx(3.0, abs=0.05), 'Bark beetle decline FLUX site')
+	assert found[row] == (pytest.approx(3.0, abs=0.05), 'Bark beetle decline near a FLUX site')
 	assert found[plain] == (None, None)
