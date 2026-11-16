@@ -99,6 +99,29 @@ function runImages(target: TargetRef, run: IAuditRun, loaded: { models: IAuditAs
   return target.crop_id === null ? evidence.images.filter((i) => i.crop_id === null || i.kind === "raw") : evidence.images.filter((i) => i.crop_id === target.crop_id);
 }
 
+/** Datasets the dataset evaluation excludes (latest verdict "major"): by a person, which includes
+ * the imported audit calls, or else only by a model or rule. */
+async function excludedDatasets(datasetIds: number[]): Promise<Map<number, IBenchmarkTarget["excludedBy"]>> {
+  const rows = await byIds<{ dataset_id: number; assessor_kind: string }>(datasetIds, (chunk, from, to) =>
+    audit()
+      .from("latest_assessments")
+      .select("dataset_id, assessor_kind")
+      .eq("check_key", "dataset_evaluation")
+      .eq("layer", "image")
+      .is("crop_id", null)
+      .eq("verdict", "major")
+      .in("dataset_id", chunk)
+      .order("id")
+      .range(from, to),
+  );
+  const excluded = new Map<number, IBenchmarkTarget["excludedBy"]>();
+  for (const row of rows) {
+    if (row.assessor_kind === "person") excluded.set(row.dataset_id, "person");
+    else if (!excluded.has(row.dataset_id)) excluded.set(row.dataset_id, "model");
+  }
+  return excluded;
+}
+
 async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData> {
   const members = await allRows<Pick<IBenchmarkTarget, "id" | "dataset_id" | "crop_id" | "split">>((from, to) =>
     audit().from("benchmark_members").select("id, dataset_id, crop_id, split").eq("benchmark_id", benchmark.id).order("id").range(from, to),
@@ -129,7 +152,7 @@ async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData
       .order("id")
       .range(from, to),
   );
-  const [images, people, models, current] = await Promise.all([
+  const [images, people, models, current, exclusions] = await Promise.all([
     onCrops
       ? byIds<IAuditImage>(cropIds, (chunk, from, to) => audit().from("images").select(IMAGE_COLUMNS).in("crop_id", chunk).order("id").range(from, to))
       : Promise.all([
@@ -146,6 +169,8 @@ async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData
     byIds<{ dataset_id: number; run_id: number }>(datasetIds, (chunk, from, to) =>
       audit().from("current_runs").select("dataset_id, run_id").eq("check_key", benchmark.check_key).in("dataset_id", chunk).order("dataset_id").range(from, to),
     ),
+    // who calls a crop's dataset excluded; the dataset evaluation benchmark labels that blind
+    onCrops ? excludedDatasets(datasetIds) : Promise.resolve(new Map<number, IBenchmarkTarget["excludedBy"]>()),
   ]);
   const currentRuns = new Map(current.map((c) => [c.dataset_id, c.run_id]));
   const labelRuns = new Map(members.map((m) => [m.id, labelRun(m, currentRuns, models)]));
@@ -166,6 +191,7 @@ async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData
         images: run ? runImages(m, run, { models, crops, images }) : targetImages(m, images),
         people: named.filter((r) => isOnTarget(m, r)),
         models: latestModels.filter((r) => isOnTarget(m, r)),
+        excludedBy: exclusions.get(m.dataset_id) ?? null,
       };
     }),
   };
@@ -246,6 +272,27 @@ export function useAddBenchmarkTarget() {
     onSuccess: (_, { datasetId }) => {
       queryClient.invalidateQueries({ queryKey: ["audit-benchmark-membership", datasetId] });
       queryClient.invalidateQueries({ queryKey: ["audit-benchmark"] });
+    },
+  });
+}
+
+/** Takes a crop, or a dataset with all its crops (cropId null), out of the open benchmark of a
+ * check again (audit.remove_benchmark_target, operators only). The labels stay, so adding the
+ * target back restores it. Removing what is not there removes nothing. */
+export function useRemoveBenchmarkTarget(benchmarkId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ checkKey, datasetId, cropId = null }: { checkKey: AuditCheckKey; datasetId: number; cropId?: number | null }) => {
+      const { data, error } = await audit().rpc("remove_benchmark_target", { p_check_key: checkKey, p_dataset_id: datasetId, p_crop_id: cropId });
+      if (error) throw error;
+      return (data ?? []) as TargetRef[];
+    },
+    onSuccess: (removed, { datasetId }) => {
+      // the target leaves the loaded benchmark at once; a reload confirms it
+      queryClient.setQueryData<IBenchmarkData>(benchmarkKey(benchmarkId), (data) =>
+        data && { ...data, targets: data.targets.filter((t) => !removed.some((r) => r.dataset_id === t.dataset_id && r.crop_id === t.crop_id)) },
+      );
+      queryClient.invalidateQueries({ queryKey: ["audit-benchmark-membership", datasetId] });
     },
   });
 }

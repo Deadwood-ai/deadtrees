@@ -1,17 +1,16 @@
 import { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Button, Segmented, Spin, message } from "antd";
+import { Button, Segmented, Spin, Tag, message } from "antd";
 import { useAuth } from "../hooks/useAuthProvider";
 import { useCanAudit } from "../hooks/useUserPrivileges";
 import { BENCHMARK_CHECKS, useBenchmark, useOpenBenchmarks, useSaveBenchmarkLabel } from "../hooks/useAuditBenchmarks";
 import type { AuditCheckKey, IAuditAnswerInput, IBenchmarkTarget } from "../types/auditChecks";
 import { stepCrop } from "../utils/auditChecks";
-import { BENCHMARK_FILTERS, answeredBy, filterTargets, nextOpen, type BenchmarkFilter } from "../utils/benchmarkLabels";
+import { answeredBy, benchmarkFilters, filterTargets, nextOpen, type BenchmarkFilter } from "../utils/benchmarkLabels";
 import StatusPage from "../components/StatusPage";
 import BenchmarkCropReview from "../components/DatasetAudit/benchmark/BenchmarkCropReview";
 import EvaluationReviewer from "../components/DatasetAudit/benchmark/EvaluationReviewer";
-
-const isFilter = (value: string | null): value is BenchmarkFilter => BENCHMARK_FILTERS.some((f) => f.value === value);
+import RemoveFromBenchmark from "../components/DatasetAudit/benchmark/RemoveFromBenchmark";
 
 /** Full-screen labeling of one check's open benchmark, across datasets (Benchmark tab of the audit). */
 export default function BenchmarkLabeling() {
@@ -34,7 +33,8 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 	const benchmark = open?.find((b) => b.check_key === checkKey);
 	const { data, isLoading, isError } = useBenchmark(benchmark);
 	const { save, isPending } = useSaveBenchmarkLabel(benchmark?.id);
-	const filter: BenchmarkFilter = isFilter(params.get("filter")) ? (params.get("filter") as BenchmarkFilter) : "open";
+	const filters = benchmarkFilters(checkKey);
+	const filter: BenchmarkFilter = filters.find((f) => f.value === params.get("filter"))?.value ?? "open";
 	// answered in this visit: they stay in "open for me" so ← goes back to them
 	const [keep, setKeep] = useState<Set<number>>(new Set());
 	const targets = useMemo(() => data?.targets ?? [], [data]);
@@ -73,6 +73,13 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 		return true;
 	};
 
+	/** After a removal: on to the next target the filter still shows. */
+	const onRemoved = (removed: { dataset_id: number; crop_id: number | null }[]) => {
+		const gone = (t: IBenchmarkTarget) => removed.some((r) => r.dataset_id === t.dataset_id && r.crop_id === t.crop_id);
+		const at = current ? shown.indexOf(current) : -1;
+		go(shown.slice(at + 1).find((t) => !gone(t)) ?? [...shown].reverse().find((t) => !gone(t)) ?? null);
+	};
+
 	if (openLoading || isLoading) return <Spin className="m-12" />;
 	if (!benchmark) return <StatusPage kind="not-found" title={`No open ${title.toLowerCase()} benchmark`} description="An operator opens a new version when the current one is frozen." />;
 	if (isError || !data) return <StatusPage kind="offline" title="The benchmark couldn’t load" description="Try again in a moment." />;
@@ -87,7 +94,7 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 				<div className="font-semibold">
 					{title} · {benchmark.name} {benchmark.version}
 				</div>
-				<Segmented size="small" value={filter} onChange={(v) => go(null, v as BenchmarkFilter)} options={BENCHMARK_FILTERS} />
+				<Segmented size="small" value={filter} onChange={(v) => go(null, v as BenchmarkFilter)} options={filters} />
 				<span className="text-sm text-gray-600" data-testid="benchmark-position">
 					{current ? `${index + 1} / ${shown.length}` : `0 / ${shown.length}`}
 				</span>
@@ -96,6 +103,25 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 						Dataset {current.dataset_id} ↗
 					</a>
 				)}
+				{current?.excludedBy && (
+					<Tag
+						color={current.excludedBy === "person" ? "red" : "orange"}
+						className="m-0"
+						title="The dataset evaluation's latest call on this dataset is exclude"
+						data-testid="benchmark-excluded"
+					>
+						{current.excludedBy === "person" ? "Dataset excluded" : "Model says exclude"}
+					</Tag>
+				)}
+				{/* mounted without a target too, so Undo survives a filter the removal emptied */}
+				<RemoveFromBenchmark
+					checkKey={checkKey}
+					benchmark={benchmark}
+					target={current}
+					datasetTargets={current ? targets.filter((t) => t.dataset_id === current.dataset_id).length : 0}
+					onRemoved={onRemoved}
+					active
+				/>
 				<span className="ml-auto text-sm" data-testid="benchmark-left">
 					<b>{left}</b> of {targets.length} left for you
 				</span>

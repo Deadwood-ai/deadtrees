@@ -100,8 +100,17 @@ A benchmark fixes which targets a check is scored on; truth stays in
    person and target across runs: a label without it would hide the same person's review
    of that run. Gold crops no run judged get no run. Open now:
    `pq-gold-dt1272` v2 (v1's 197 crops with their frozen splits, migration
-   `20261113150000_open_benchmark_versions.sql`) and `dataset-evaluation-gold` v1,
-   whose picked datasets are added by `scripts/audit_import.py evaluation-gold`.
+   `20261113150000_open_benchmark_versions.sql`; 168 after the off-scale test views and
+   the crops of excluded datasets left on 16 Nov 2026) and `dataset-evaluation-gold` v1
+   (the 250 picked datasets of `scripts/dataset_evaluation/gold_set.py`).
+   `audit.remove_benchmark_target(check_key, dataset_id, crop_id)` takes a target out of
+   the open version again (operators; `crop_id` null removes the dataset with all its
+   crops; removing what is not there removes nothing). The labels stay, so adding the
+   target back restores it. On the Benchmark tab operators remove with Remove (Del)
+   after a confirm step, with Undo while the page is open. Crops whose dataset the
+   dataset evaluation excludes (latest verdict major: a person, which includes the
+   imported audit call, or only a model) are marked, with an Excluded datasets filter;
+   the dataset evaluation benchmark labels exclusion blind and shows neither.
 3. A candidate version runs on the members in the `benchmark` queue. Benchmark runs
    stay out of the production queues and cost caps and never become the current run.
 4. The check's scorer compares the candidate's rows with the truth rows and records
