@@ -81,13 +81,14 @@ complete ones first. Each dataset has 7 steps:
 3. Georeferencing
 4. Acquisition date
 5. Phenology
-6. Deadwood prediction
-7. Tree cover prediction
+6. Tree cover prediction
+7. Deadwood prediction
 
 Every step is prefilled with what the checks suggest, so mostly you confirm or correct.
 Your answer is stored as your own row next to the models' rows; nothing overwrites
-anything. Other people's and the models' answers show after you answer, so your first look
-stays independent ("Show now" reveals them earlier).
+anything. The review is model-assisted: you see the checks' calls while you answer, and
+other reviewers' answers sit folded under Details. Blind answers, where the models stay
+hidden until you answer, are only given in the Benchmark tab.
 
 | Key | Where | Does |
 |---|---|---|
@@ -126,8 +127,9 @@ The review list is a stream, not a fixed set. Datasets join it when their checks
   fully processed datasets without an audit) were queued on 16 Nov 2026. Each batch first
   gets the georeferencing and date checks on the processors at low priority, then the
   dataset evaluation and the prediction check in the audit worker.
-- **New uploads.** Once a check version is active, every newly processed dataset gets a
-  run of it automatically.
+- **New uploads.** Once a version of a judged check is active, the audit worker gives
+  every newly processed dataset a run of it. The date estimate runs as an upload stage.
+  The georeferencing check does not run on uploads yet and is queued explicitly.
 - **The backfill.** Later, every historical dataset is run through the checks. Old audits
   are imported as history, marked as imported, and are not treated as truth.
 
@@ -167,8 +169,9 @@ Rules:
 | Dataset evaluation, `dataset-evaluation-gold` | Whole datasets: keep, fix or exclude | 125 past exclusions spread by reason (blurry 35, no trees 25, artifacts 18, not RGB 15, broken ortho 12, too dark 8, other 12) and 125 kept (85 without issues, 40 fixable, the hard cases) | v1 open with 250 (207 dev, 43 holdout); not labeled yet |
 
 The past audit decisions only make sure every reason is represented; the labels people give
-in the Benchmark tab are the truth. The tab shows the images a run of the check stored, so
-a target needs one run before it can be labeled.
+in the Benchmark tab are the truth. The tab shows stored images: the gold crops carry their
+own, and a dataset target shows the overview and crops a dataset evaluation run stored, so
+it needs one such run before it can be labeled.
 
 Targets for prediction quality (DT-1272): at the dataset level, catch at least 90% of bad
 layers and wrongly exclude at most 20% of good ones. The judges reach a crop-level AUC of
@@ -192,8 +195,9 @@ Every change to a judged check follows the same loop. Fix A is the current examp
 5. **Activate.** An operator makes the new version active. New uploads then get it.
 6. **Rerun, with his go.** Rerunning datasets that already have a result is a production
    rerun and needs Janusch's go, with the count and the expected model calls. Runs queued
-   for the old version fail with a clear "wrong version" error instead of being judged
-   with the new drawing.
+   for the old version should fail with a clear "wrong version" error instead of being
+   judged with the new code. The dataset evaluation already does this; fix A adds the same
+   guard to prediction quality.
 
 A new rule alone (new thresholds, a new way to combine judges) needs no model calls: it is
 recomputed from the stored answers.
