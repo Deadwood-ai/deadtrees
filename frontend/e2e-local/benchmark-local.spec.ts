@@ -287,4 +287,20 @@ test.describe("benchmark labeling", () => {
     await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 2");
     await expect(page.getByTestId("benchmark-undo-remove")).toHaveCount(0);
   });
+
+  test("Undo still works after removing the last crop a filter shows", async ({ page }) => {
+    await mockSupabase(page, { operator: true });
+    await page.goto("/dataset-audit/benchmark/prediction_quality?filter=excluded");
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 1");
+    await page.keyboard.press("Delete");
+    await page.getByTestId("benchmark-remove-confirm").click();
+    await expect(page.getByText("No target matches this filter.")).toBeVisible();
+    await expect(page.getByTestId("benchmark-remove")).toHaveCount(0);
+    await page.getByTestId("benchmark-undo-remove").click();
+    await expect.poll(() => rpcCalls.map((c) => [c.name, c.body.p_crop_id])).toEqual([
+      ["remove_benchmark_target", 102],
+      ["add_benchmark_target", 102],
+    ]);
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 1");
+  });
 });

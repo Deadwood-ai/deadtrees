@@ -10,7 +10,8 @@ type Removed = { dataset_id: number; crop_id: number | null };
 interface RemoveFromBenchmarkProps {
 	checkKey: AuditCheckKey;
 	benchmark: { id: number; name: string; version: string };
-	target: IBenchmarkTarget;
+	/** the target on screen; null when the filter shows none, while Undo stays */
+	target: IBenchmarkTarget | null;
 	/** how many targets of the loaded benchmark sit on the target's dataset */
 	datasetTargets: number;
 	/** the targets that left, so the page can move on */
@@ -28,12 +29,13 @@ export default function RemoveFromBenchmark({ checkKey, benchmark, target, datas
 	const add = useAddBenchmarkTarget();
 	const [confirming, setConfirming] = useState(false);
 	const [undo, setUndo] = useState<Removed[][]>([]);
-	const onCrop = target.crop_id !== null;
+	const onCrop = target?.crop_id != null;
 	// Delete, or the Mac's delete key (Backspace); the crop review uses neither
-	useAuditShortcuts({ Delete: () => setConfirming(true), Backspace: () => setConfirming(true) }, canOperate && active && !confirming);
+	useAuditShortcuts({ Delete: () => setConfirming(true), Backspace: () => setConfirming(true) }, canOperate && active && !!target && !confirming);
 	if (!canOperate) return null;
 
 	const run = async (cropId: number | null) => {
+		if (!target) return;
 		try {
 			const removed = await remove.mutateAsync({ checkKey, datasetId: target.dataset_id, cropId });
 			setConfirming(false);
@@ -57,19 +59,21 @@ export default function RemoveFromBenchmark({ checkKey, benchmark, target, datas
 		}
 	};
 
-	const what = onCrop ? `Crop ${target.crop_id} of dataset ${target.dataset_id}` : `Dataset ${target.dataset_id}`;
+	const what = !target ? "" : onCrop ? `Crop ${target.crop_id} of dataset ${target.dataset_id}` : `Dataset ${target.dataset_id}`;
 	return (
 		<>
-			<Button size="small" danger onClick={() => setConfirming(true)} data-testid="benchmark-remove">
-				Remove (Del)
-			</Button>
+			{target && (
+				<Button size="small" danger onClick={() => setConfirming(true)} data-testid="benchmark-remove">
+					Remove (Del)
+				</Button>
+			)}
 			{undo.length > 0 && (
 				<Button size="small" loading={add.isPending} onClick={() => void restore()} data-testid="benchmark-undo-remove">
 					Undo remove
 				</Button>
 			)}
 			<Modal
-				open={confirming}
+				open={confirming && !!target}
 				width={600}
 				title="Remove from the benchmark?"
 				onCancel={() => setConfirming(false)}
@@ -79,10 +83,10 @@ export default function RemoveFromBenchmark({ checkKey, benchmark, target, datas
 					</Button>,
 					onCrop && datasetTargets > 1 && (
 						<Button key="dataset" danger loading={remove.isPending} onClick={() => void run(null)} data-testid="benchmark-remove-dataset">
-							Remove all {datasetTargets} crops of dataset {target.dataset_id}
+							Remove all {datasetTargets} crops of dataset {target?.dataset_id}
 						</Button>
 					),
-					<Button key="one" type="primary" danger autoFocus loading={remove.isPending} onClick={() => void run(target.crop_id)} data-testid="benchmark-remove-confirm">
+					<Button key="one" type="primary" danger autoFocus loading={remove.isPending} onClick={() => void run(target?.crop_id ?? null)} data-testid="benchmark-remove-confirm">
 						Remove {onCrop ? "crop" : "dataset"}
 					</Button>,
 				]}

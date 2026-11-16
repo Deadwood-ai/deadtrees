@@ -12,7 +12,6 @@ import BenchmarkCropReview from "../components/DatasetAudit/benchmark/BenchmarkC
 import EvaluationReviewer from "../components/DatasetAudit/benchmark/EvaluationReviewer";
 import RemoveFromBenchmark from "../components/DatasetAudit/benchmark/RemoveFromBenchmark";
 
-
 /** Full-screen labeling of one check's open benchmark, across datasets (Benchmark tab of the audit). */
 export default function BenchmarkLabeling() {
 	const { check } = useParams();
@@ -114,16 +113,15 @@ function Labeler({ checkKey, title }: { checkKey: AuditCheckKey; title: string }
 						{current.excludedBy === "person" ? "Dataset excluded" : "Model says exclude"}
 					</Tag>
 				)}
-				{current && (
-					<RemoveFromBenchmark
-						checkKey={checkKey}
-						benchmark={benchmark}
-						target={current}
-						datasetTargets={targets.filter((t) => t.dataset_id === current.dataset_id).length}
-						onRemoved={onRemoved}
-						active
-					/>
-				)}
+				{/* mounted without a target too, so Undo survives a filter the removal emptied */}
+				<RemoveFromBenchmark
+					checkKey={checkKey}
+					benchmark={benchmark}
+					target={current}
+					datasetTargets={current ? targets.filter((t) => t.dataset_id === current.dataset_id).length : 0}
+					onRemoved={onRemoved}
+					active
+				/>
 				<span className="ml-auto text-sm" data-testid="benchmark-left">
 					<b>{left}</b> of {targets.length} left for you
 				</span>
