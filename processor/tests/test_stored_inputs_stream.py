@@ -13,7 +13,15 @@ from shared.models import Cog
 
 pytestmark = pytest.mark.unit
 
-COG = Cog(dataset_id=7, cog_file_name='a.tif', cog_path='7/a.tif', version=1, cog_info={}, cog_processing_runtime=0, cog_file_size=1)
+COG = Cog(
+	dataset_id=7,
+	cog_file_name='a.tif',
+	cog_path='7/a.tif',
+	version=1,
+	cog_info={},
+	cog_processing_runtime=0,
+	cog_file_size=1,
+)
 CTX = LogContext(category=LogCategory.PROCESS, dataset_id=7)
 
 
@@ -30,7 +38,9 @@ class Response:
 
 def test_a_private_cog_gets_its_signed_link_and_a_public_one_its_static_url(monkeypatch):
 	monkeypatch.setattr(stored_inputs.settings, 'API_ENDPOINT', 'https://data2.example/api/v1/')
-	monkeypatch.setattr(stored_inputs.httpx, 'post', lambda *a, **k: Response({'7': {'cog_url': '/datasets/7/files/cog/T'}}))
+	monkeypatch.setattr(
+		stored_inputs.httpx, 'post', lambda *a, **k: Response({'7': {'cog_url': '/datasets/7/files/cog/T'}})
+	)
 	assert stored_inputs.cog_url(COG, 'tok', 7) == 'https://data2.example/api/v1/datasets/7/files/cog/T'
 	monkeypatch.setattr(stored_inputs.httpx, 'post', lambda *a, **k: Response({}))
 	assert stored_inputs.cog_url(COG, 'tok', 7) == 'https://data2.example/cogs/v1/7/a.tif'
@@ -43,7 +53,17 @@ def test_a_private_cog_gets_its_signed_link_and_a_public_one_its_static_url(monk
 
 
 def _tif(path: Path) -> Path:
-	with rasterio.open(path, 'w', driver='GTiff', width=4, height=4, count=3, dtype='uint8', crs='EPSG:32632', transform=from_origin(0, 4, 1, 1)) as dst:
+	with rasterio.open(
+		path,
+		'w',
+		driver='GTiff',
+		width=4,
+		height=4,
+		count=3,
+		dtype='uint8',
+		crs='EPSG:32632',
+		transform=from_origin(0, 4, 1, 1),
+	) as dst:
 		dst.write(np.zeros((3, 4, 4), 'uint8'))
 	return path
 
@@ -67,3 +87,30 @@ def test_an_error_while_streaming_does_not_carry_the_signed_link(monkeypatch, tm
 		with stored_inputs.readable_cog(COG, tmp_path, 'tok', 7, CTX) as source:
 			raise ValueError(f'could not read {source}')
 	assert 'SECRET' not in str(raised.value) and stored_inputs.STREAMED in str(raised.value)
+
+
+def test_a_runs_images_share_one_sftp_session_and_a_broken_one_is_opened_again(monkeypatch):
+	from contextlib import contextmanager
+
+	from processor.src.utils import ssh
+
+	opened, pushed = [], []
+
+	@contextmanager
+	def session(token, dataset_id):
+		opened.append(1)
+		yield f'sftp-{len(opened)}'
+
+	def push_over(sftp, local, remote, token, dataset_id):
+		if remote == 'breaks' and sftp == 'sftp-1':
+			raise EOFError('connection closed')
+		pushed.append((sftp, remote))
+
+	monkeypatch.setattr(ssh, '_storage_sftp', session)
+	monkeypatch.setattr(ssh, '_push_over', push_over)
+	connection = ssh.StorageConnection()
+	for remote in ('a', 'b', 'c'):
+		connection.push('/tmp/x', remote, 'tok', 7)
+	assert len(opened) == 1 and [r for _, r in pushed] == ['a', 'b', 'c']
+	connection.push('/tmp/x', 'breaks', 'tok', 7)
+	assert len(opened) == 2 and pushed[-1] == ('sftp-2', 'breaks')

@@ -42,16 +42,16 @@ def sign_in_again(client) -> None:
 
 def put_image_with(token_source):
 	"""Store an image on the storage server below its data directory, as the processor does for files."""
-	from processor.src.utils.ssh import push_file_to_storage_server
+	from processor.src.utils.ssh import StorageConnection
 	from shared.settings import settings
+
+	connection = StorageConnection()  # one session for the run's images, not one per image
 
 	def put(path: str, data: bytes, dataset_id: int = 0) -> None:
 		with tempfile.NamedTemporaryFile(suffix=Path(path).suffix) as tmp:
 			tmp.write(data)
 			tmp.flush()
-			push_file_to_storage_server(
-				tmp.name, f'{settings.STORAGE_SERVER_DATA_PATH}/{path}', token_source(), dataset_id
-			)
+			connection.push(tmp.name, f'{settings.STORAGE_SERVER_DATA_PATH}/{path}', token_source(), dataset_id)
 
 	return put
 
