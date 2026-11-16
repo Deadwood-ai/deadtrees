@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildArchiveNotesIndex,
+  buildArchiveInfoIndex,
   createDatasetArchiveTextMatcher,
+  createInfoSnippetFinder,
   matchesDatasetArchiveTextSearch,
   matchesSearchText,
   normalizeSearchText,
+  prefixTypoDistance,
 } from "./archiveTextSearch";
 
 const dataset = {
@@ -53,7 +55,7 @@ describe("archive text search", () => {
   });
 
   it("matches the additional information once it is loaded", () => {
-    const notes = buildArchiveNotesIndex([
+    const notes = buildArchiveInfoIndex([
       { id: 1, additional_information: "Bark beetle Décline after drought; FLUX tower site" },
       { id: 2, additional_information: null },
     ]);
@@ -65,5 +67,40 @@ describe("archive text search", () => {
     expect(createDatasetArchiveTextMatcher("decline")(dataset)).toBe(false);
     expect(createDatasetArchiveTextMatcher("garcia", notes)(dataset)).toBe(true);
     expect(notes.has(2)).toBe(false);
+  });
+
+  it("forgives a typo or a swapped pair in longer words, but not in short ones", () => {
+    expect(createDatasetArchiveTextMatcher("garica")(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("nevda")(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("andalusia")(dataset)).toBe(true);
+    expect(createDatasetArchiveTextMatcher("sierra nevda")(dataset)).toBe(true);
+    // Three letters: no typo allowed, or "jos" would match "joe", "job", ...
+    expect(createDatasetArchiveTextMatcher("jso")(dataset)).toBe(false);
+    expect(createDatasetArchiveTextMatcher("garxyz")(dataset)).toBe(false);
+  });
+
+  it("matches half-typed words, with a typo, against word starts", () => {
+    expect(prefixTypoDistance("decl", "decline", 1)).toBe(0);
+    expect(prefixTypoDistance("dclin", "decline", 1)).toBe(1);
+    expect(prefixTypoDistance("drougth", "drought", 1)).toBe(1);
+    expect(prefixTypoDistance("flux", "beetle", 1)).toBeGreaterThan(1);
+  });
+
+  it("finds a typo in the additional information and marks the matched words", () => {
+    const info = buildArchiveInfoIndex([
+      {
+        id: 1,
+        additional_information:
+          "Plot established in 2019 as part of a long-term monitoring network. Strong spruce décline after the 2018 drought, eddy covariance flux tower nearby.",
+      },
+    ]);
+    expect(createDatasetArchiveTextMatcher("declne", info)(dataset)).toBe(true);
+    const snippet = createInfoSnippetFinder("flux declne", info)(1);
+    expect(snippet?.parts.filter((part) => part.match).map((part) => part.text)).toEqual(["décline", "flux"]);
+    expect(snippet?.truncatedStart).toBe(true);
+    expect(snippet?.parts.map((part) => part.text).join("")).toContain("Strong spruce décline after");
+    // Author-only matches show no snippet.
+    expect(createInfoSnippetFinder("garcia", info)(1)).toBeNull();
+    expect(createInfoSnippetFinder("decline", info)(2)).toBeNull();
   });
 });

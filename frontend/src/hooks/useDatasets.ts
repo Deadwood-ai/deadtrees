@@ -5,7 +5,7 @@ import { Settings } from "../config";
 import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 import { fixTextEncoding } from "../utils/textUtils";
 import { getPublicDatasetByIdQueryKey } from "../utils/datasetDetailNavigation";
-import { buildArchiveNotesIndex } from "../utils/archiveTextSearch";
+import { buildArchiveInfoIndex } from "../utils/archiveTextSearch";
 
 interface DatasetQueryOptions {
   enabled?: boolean;
@@ -58,18 +58,18 @@ const ARCHIVE_ITEM_COLUMNS = [
 ].join(",");
 
 /** Additional information for text search, fetched once the visitor first searches. */
-export function useArchiveSearchNotes(enabled: boolean) {
+export function useArchiveSearchInfo(enabled: boolean) {
   const { status, user } = useAuth();
 
   return useQuery({
-    queryKey: ["public-dataset-archive-notes", status, user?.id ?? "anonymous"],
+    queryKey: ["public-dataset-archive-info", status, user?.id ?? "anonymous"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from(Settings.DATASET_ARCHIVE_ITEMS_VIEW)
         .select("id,additional_information")
         .not("additional_information", "is", null);
       if (error) throw error;
-      return buildArchiveNotesIndex(data as { id: number; additional_information: string | null }[]);
+      return buildArchiveInfoIndex(data as { id: number; additional_information: string | null }[]);
     },
     enabled: enabled && status !== "checking",
     staleTime: 5 * 60 * 1000,

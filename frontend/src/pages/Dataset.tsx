@@ -1,8 +1,9 @@
 import { useMemo, useState, useEffect, useCallback, type ReactNode } from "react";
-import { Badge, Button, Tag, Tooltip, Checkbox, Drawer } from "antd";
+import { Badge, Button, Tag, Tooltip, Drawer } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  EyeOutlined,
   FilterOutlined,
   UploadOutlined,
   UnorderedListOutlined,
@@ -21,7 +22,7 @@ import DatasetMapOL, {
 } from "../components/DatasetMap/DatasetMap";
 import DatasetTimelineControl from "../components/DatasetMap/DatasetTimelineControl";
 import { useNavigate } from "react-router-dom";
-import { useArchiveSearchNotes, usePublicDatasetArchiveItems } from "../hooks/useDatasets";
+import { useArchiveSearchInfo, usePublicDatasetArchiveItems } from "../hooks/useDatasets";
 import { useUploadTimeline } from "../hooks/useUploadTimeline";
 import FilterModal from "../components/FilterModal";
 import ActiveFilterChips from "../components/DatasetMap/ActiveFilterChips";
@@ -31,7 +32,7 @@ import { useDesktopOnlyFeature } from "../hooks/useDesktopOnlyFeature";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { useArchiveSearch } from "../hooks/useArchiveSearch";
 import ArchiveSearch from "../components/DatasetMap/ArchiveSearch";
-import { createDatasetArchiveTextMatcher } from "../utils/archiveTextSearch";
+import { createDatasetArchiveTextMatcher, createInfoSnippetFinder } from "../utils/archiveTextSearch";
 import {
   EMPTY_ARCHIVE_FILTERS,
   createArchiveFilter,
@@ -100,7 +101,12 @@ export default function Dataset() {
   // The committed text query: it trails the search field by a short debounce,
   // so the list and map are not re-filtered on every keystroke.
   const activeTextSearch = search.text;
-  const { data: notes } = useArchiveSearchNotes(!!activeTextSearch.trim());
+  const { data: info } = useArchiveSearchInfo(!!activeTextSearch.trim());
+  // Cards whose additional information matched the search show the matched text.
+  const findInfoSnippet = useMemo(
+    () => (activeTextSearch.trim() && info ? createInfoSnippetFinder(activeTextSearch, info) : undefined),
+    [activeTextSearch, info],
+  );
 
   useEffect(() => {
     track("dataset_archive_viewed", {});
@@ -162,7 +168,7 @@ export default function Dataset() {
     if (!timeFilteredData) return null;
 
     const matchesFilters = createArchiveFilter(filters);
-    const matchesText = createDatasetArchiveTextMatcher(activeTextSearch, notes);
+    const matchesText = createDatasetArchiveTextMatcher(activeTextSearch, info);
     const filtered = timeFilteredData.filter(
       (item) => matchesFilters(item) && matchesText(item),
     );
@@ -180,7 +186,7 @@ export default function Dataset() {
     return filtered.sort((a, b) => {
       return sortDirection === "asc" ? a.id - b.id : b.id - a.id;
     });
-  }, [timeFilteredData, filters, activeTextSearch, notes, sortDirection, semantic.scores]);
+  }, [timeFilteredData, filters, activeTextSearch, info, sortDirection, semantic.scores]);
   const desktopTimelineStyle = isMobile
     ? {
         left: "50%",
@@ -279,39 +285,46 @@ export default function Dataset() {
             )}
           </div>
         )}
-        <div className="flex items-center justify-between gap-2">
-          <Checkbox
-            checked={filterByViewport}
-            onChange={(e) => setFilterByViewport(e.target.checked)}
+        <div className="flex items-center justify-end gap-2">
+          <Tooltip
+            title={
+              filterByViewport
+                ? "Only images in the current map view are listed. Click to list every match."
+                : "Every match is listed. Click to list only images in the current map view."
+            }
           >
-            Filter list by map view
-          </Checkbox>
-
-          <div className="flex items-center gap-2 sm:pl-2">
-            <Tooltip title="Filter by author, country, season, resolution and more">
-              <Badge count={activeFilters.length} size="small" color="#1B5E35">
-                <Button
-                  aria-label="Filters"
-                  icon={<FilterOutlined />}
-                  onClick={handleFilterButtonClick}
-                />
-              </Badge>
-            </Tooltip>
-            <Tooltip
-              title={`Sort by addition order ${sortDirection === "asc" ? "oldest first" : "newest first"}`}
-            >
+            <Button
+              aria-label="Only list images in the map view"
+              aria-pressed={filterByViewport}
+              data-testid="dataset-map-view-filter"
+              type={filterByViewport ? "primary" : "default"}
+              icon={<EyeOutlined />}
+              onClick={() => setFilterByViewport(!filterByViewport)}
+            />
+          </Tooltip>
+          <Tooltip title="Filter by author, country, season, resolution and more">
+            <Badge count={activeFilters.length} size="small" color="#1B5E35">
               <Button
-                icon={
-                  sortDirection === "asc" ? (
-                    <ArrowDownOutlined />
-                  ) : (
-                    <ArrowUpOutlined />
-                  )
-                }
-                onClick={toggleSort}
+                aria-label="Filters"
+                icon={<FilterOutlined />}
+                onClick={handleFilterButtonClick}
               />
-            </Tooltip>
-          </div>
+            </Badge>
+          </Tooltip>
+          <Tooltip
+            title={`Sort by addition order ${sortDirection === "asc" ? "oldest first" : "newest first"}`}
+          >
+            <Button
+              icon={
+                sortDirection === "asc" ? (
+                  <ArrowDownOutlined />
+                ) : (
+                  <ArrowUpOutlined />
+                )
+              }
+              onClick={toggleSort}
+            />
+          </Tooltip>
         </div>
       </div>
 
@@ -324,6 +337,7 @@ export default function Dataset() {
           onFilterClick={handleFilterClick}
           filterByViewport={filterByViewport}
           onZoomToMatches={zoomToMatches}
+          findInfoSnippet={findInfoSnippet}
           scores={semantic.scores}
           semanticQuery={semantic.query}
         />

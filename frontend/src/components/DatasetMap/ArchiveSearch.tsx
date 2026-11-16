@@ -40,8 +40,8 @@ export default function ArchiveSearch({
       <SearchOutlined aria-hidden className="dt-archive-search-icon" />
       <Input
         variant="borderless"
-        aria-label={isAi ? "AI search" : "Search authors, places or additional information"}
-        placeholder={isAi ? "Describe, e.g. standing dead trees" : "Author, place or keyword"}
+        aria-label={isAi ? "AI search" : "Search authors, places or descriptions"}
+        placeholder={isAi ? "Describe, e.g. standing dead trees" : "Author, place or description"}
         data-testid="dataset-search-input"
         value={value}
         onChange={(event) => onChange(event.target.value)}

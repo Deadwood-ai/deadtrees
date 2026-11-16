@@ -5,6 +5,7 @@ import { SearchOutlined } from "@ant-design/icons";
 import EmptyStatePanel from "./EmptyStatePanel";
 import { IDataset, IDatasetArchiveItem } from "../types/dataset";
 import type { ArchiveChipFilter } from "../utils/datasetArchiveFilters";
+import type { InfoSnippet } from "../utils/archiveTextSearch";
 
 type ListDataset = IDataset | IDatasetArchiveItem;
 
@@ -17,6 +18,8 @@ interface DataListProps {
   filterByViewport: boolean;
   // Frames every match on the map when the current view hides them all.
   onZoomToMatches?: () => void;
+  // The matched part of a dataset's additional information, when it matched.
+  findInfoSnippet?: (datasetId: number) => InfoSnippet | null;
   scores?: Map<number, number> | null;
   semanticQuery?: string | null;
 }
@@ -29,6 +32,7 @@ function DataList({
   onFilterClick,
   filterByViewport,
   onZoomToMatches,
+  findInfoSnippet,
   scores,
   semanticQuery,
 }: DataListProps) {
@@ -90,6 +94,7 @@ function DataList({
                     setHoveredItem={setHoveredItem}
                     onFilterClick={onFilterClick}
                     score={scores?.get(item.id) ?? null}
+                    infoSnippet={findInfoSnippet?.(item.id) ?? null}
                     semanticQuery={semanticQuery ?? null}
                   />
                 ),
