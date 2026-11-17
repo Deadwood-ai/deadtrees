@@ -49,8 +49,6 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-import psycopg
-
 ANALYST_ENV = 'DEADTREES_ANALYST_DATABASE_URL'
 SOURCE_PREFIX = 'doy_estimation'
 # processor/src/process_doy_estimation.SUGGESTED_FIELDS
@@ -218,19 +216,21 @@ def check_bundle(estimates: dict[int, dict], suggestions: dict[int, list[dict]],
 		raise SystemExit(f'{len(both)} datasets are both estimated and cleared, e.g. {sorted(both)[:5]}')
 
 
-def connect(env_name: str) -> psycopg.Connection:
+def connect(env_name: str):
 	"""A transaction for one batch. Not READ ONLY even for the dry run: staging needs temporary
 	tables, which a read-only transaction refuses. The dry run issues no write to a real
 	table, always rolls back, and uses the analyst login, which cannot write anyway."""
 	url = os.environ.get(env_name)
 	if not url:
 		raise SystemExit(f'{env_name} is not set')
+	import psycopg  # only for the database steps; the bundle checks run without it
+
 	conn = psycopg.connect(url, prepare_threshold=None, connect_timeout=10)
 	conn.execute("SET LOCAL statement_timeout = '300s'")
 	return conn
 
 
-def stage(conn: psycopg.Connection, ids: list[int], estimates, suggestions, clears) -> None:
+def stage(conn, ids: list[int], estimates, suggestions, clears) -> None:
 	conn.execute(STAGE_SQL)
 	with conn.cursor() as cur:
 		with cur.copy('COPY doy_est_in (dataset_id, row) FROM STDIN') as copy:
@@ -248,7 +248,7 @@ def stage(conn: psycopg.Connection, ids: list[int], estimates, suggestions, clea
 	conn.execute(ELIGIBLE_SQL)
 
 
-def plan(conn: psycopg.Connection) -> Counter:
+def plan(conn) -> Counter:
 	c = Counter()
 	c['rows'] = conn.execute('SELECT count(*) FROM doy_est_in').fetchone()[0]
 	c['write'] = conn.execute('SELECT count(*) FROM doy_ok').fetchone()[0]
@@ -262,7 +262,7 @@ def plan(conn: psycopg.Connection) -> Counter:
 	return c
 
 
-def write(conn: psycopg.Connection) -> Counter:
+def write(conn) -> Counter:
 	c = Counter()
 	params = {'prefix': f'{SOURCE_PREFIX}%', 'fields': list(SUGGESTED_FIELDS)}
 	c['estimates upserted'] = conn.execute(UPSERT_ESTIMATES_SQL).rowcount
