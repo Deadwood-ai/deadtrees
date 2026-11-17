@@ -62,7 +62,7 @@ def _sync_directory(path: Path):
 		os.close(directory)
 
 
-def _measure_chunk(stream: BinaryIO) -> ChunkReceipt:
+def measure_chunk(stream: BinaryIO) -> ChunkReceipt:
 	"""Size and hash a chunk in blocks; reject it once it passes MAX_CHUNK_BYTES."""
 	stream.seek(0)
 	digest = hashlib.sha256()
@@ -127,14 +127,16 @@ class ChunkSession:
 			raise HTTPException(status_code=409, detail='Chunk size does not match the declared chunk size')
 		return index * self.chunk_size
 
-	def accept(self, index: int, content: bytes | BinaryIO) -> dict | None:
+	def accept(self, index: int, content: bytes | BinaryIO, measured: ChunkReceipt | None = None) -> dict | None:
 		"""Return an existing reply, or None when all bytes are here and need finalization.
 
 		`content` is the chunk's bytes or a seekable binary file. A file is hashed
-		and copied in blocks, so a chunk never sits in memory as a whole.
+		and copied in blocks, so a chunk never sits in memory as a whole. Pass
+		`measured` (from measure_chunk) to hash before taking the session lock, so
+		parallel chunks of one upload only take turns for the write.
 		"""
 		stream = io.BytesIO(content) if isinstance(content, (bytes, bytearray)) else content
-		chunk = _measure_chunk(stream)
+		chunk = measured or measure_chunk(stream)
 		if not chunk.size:
 			raise HTTPException(status_code=422, detail='Empty upload chunk')
 		chunks = self.receipt.chunks

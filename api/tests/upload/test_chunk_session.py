@@ -200,6 +200,8 @@ def test_uncommitted_parallel_write_is_overwritten_by_its_retry(tmp_path):
 
 
 def wait_for_lock_in_another_process(tmp_path):
+	# Tell the parent this process is about to ask for the lock.
+	(tmp_path / 'child-ready').touch()
 	with open_session(tmp_path) as session:
 		return session.accept(1, b'last')
 
@@ -211,6 +213,11 @@ def test_a_parallel_request_waits_for_the_lock_instead_of_failing(tmp_path):
 		with open_session(tmp_path) as session:
 			session.accept(0, b'first')
 			waiting = pool.submit(wait_for_lock_in_another_process, tmp_path)
-			time.sleep(1)
+			deadline = time.monotonic() + 30
+			while not (tmp_path / 'child-ready').exists():
+				assert time.monotonic() < deadline, 'child never started'
+				time.sleep(0.05)
+			time.sleep(0.5)
+			# The child holds no answer yet: it waits for the lock instead of failing fast.
 			assert not waiting.done()
 		assert waiting.result(timeout=20) is None

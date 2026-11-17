@@ -413,7 +413,7 @@ export async function transferUpload(options: TransferOptions): Promise<UploadOr
   if (cause) throw cause;
   if (final) return final;
   // The chunk that completed the set answered, but another worker's reply carried the dataset.
-  const settled = await withRetries(() => fetchUploadStatus(uploadId, token));
+  const settled = await withRetries(() => fetchUploadStatus(uploadId, token), options.signal);
   if (settled?.state === "complete" && settled.response) return settled.response;
   throw new Error("Upload did not return a dataset response");
 }

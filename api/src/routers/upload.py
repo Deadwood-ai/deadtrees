@@ -21,7 +21,7 @@ from shared.zip_utils import (
 
 from ..upload.upload import create_dataset_entry
 from ..upload.abandoned_uploads import UPLOAD_ID_PATTERN, retention_days
-from ..upload.chunk_session import MAX_CHUNK_BYTES, UPLOAD_SESSIONS_DIR, locked_chunk_session
+from ..upload.chunk_session import MAX_CHUNK_BYTES, UPLOAD_SESSIONS_DIR, locked_chunk_session, measure_chunk
 from ..upload.upload_status import UploadStatus, list_unfinished_uploads, read_upload_status
 from ..upload.geotiff_processor import process_geotiff_upload
 from ..upload.raw_images_processor import process_raw_images_upload
@@ -148,6 +148,8 @@ def upload_chunk(
 		'data_access': data_access,
 		'citation_doi': citation_doi,
 	}
+	# Hash outside the session lock: parallel chunks of one upload only take turns to write.
+	measured = measure_chunk(file.file)
 	# This synchronous route runs in FastAPI's worker pool. The lock remains held
 	# through all disk/DB work, including when the caller disconnects.
 	with locked_chunk_session(
@@ -164,7 +166,7 @@ def upload_chunk(
 			**metadata,
 		},
 	) as session:
-		response = session.accept(chunk_index, file.file)
+		response = session.accept(chunk_index, file.file, measured)
 		if response is not None:
 			return response
 		session.begin_finalization(

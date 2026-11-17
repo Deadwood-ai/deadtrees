@@ -45,19 +45,23 @@ def find(uploads, form=FORM, status=200):
 
 
 def test_continues_after_the_received_chunks_of_the_same_file():
-	assert find([unfinished([b'aaaa', b'bbbb'])]) == ('up-1', [2, 3])
+	assert find([unfinished([b'aaaa', b'bbbb'])]) == ('up-1', [2, 3], True)
 
 
 def test_continues_a_parallel_upload_with_its_gaps():
-	assert find([unfinished([b'aaaa', None, b'cccc'])]) == ('up-1', [1, 3])
+	assert find([unfinished([b'aaaa', None, b'cccc'])]) == ('up-1', [1, 3], True)
+
+
+def test_upload_started_before_parallel_sending_continues_in_order():
+	assert find([unfinished([b'aaaa', b'bbbb'], chunk_size=None)]) == ('up-1', [2, 3], False)
 
 
 def test_single_author_given_as_text_still_matches():
-	assert find([unfinished([b'aaaa', b'bbbb'])], form={**FORM, 'authors': 'A'}) == ('up-1', [2, 3])
+	assert find([unfinished([b'aaaa', b'bbbb'])], form={**FORM, 'authors': 'A'}) == ('up-1', [2, 3], True)
 
 
 def test_resends_the_last_chunk_when_only_its_reply_was_lost():
-	assert find([unfinished([b'aaaa', b'bbbb', b'cccc', b'dd'])]) == ('up-1', [3])
+	assert find([unfinished([b'aaaa', b'bbbb', b'cccc', b'dd'])]) == ('up-1', [3], True)
 
 
 @pytest.mark.parametrize(
@@ -70,7 +74,7 @@ def test_resends_the_last_chunk_when_only_its_reply_was_lost():
 		unfinished([b'aaaa', b'bbbb'], aquisition_year=2024),
 		{**unfinished([b'aaaa', b'bbbb']), 'state': 'finalizing'},
 		{**unfinished([b'aaaa', b'bbbb']), 'chunks_total': 5},
-		unfinished([b'aaaa', b'bbbb'], chunk_size=None),  # started before parallel sending
+		unfinished([b'aaaa', b'bbbb'], chunk_size=8),  # another chunk size
 	],
 )
 def test_starts_fresh_for_any_other_upload(upload):

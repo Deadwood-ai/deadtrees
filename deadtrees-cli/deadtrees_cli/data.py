@@ -1,6 +1,5 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
-import os
 from pathlib import Path
 import sys
 from typing import Optional, List, Dict, Any, Union
@@ -55,13 +54,19 @@ _OPTIONAL_FIELDS = [
 	'additional_information',
 	'citation_doi',
 ]
-_CONTRACT_FIELDS = ['license', 'platform', 'data_access', 'chunk_size', *_OPTIONAL_FIELDS]
+_CONTRACT_FIELDS = ['license', 'platform', 'data_access', *_OPTIONAL_FIELDS]
 # Chunks in flight at once (DT-1568); the server places each at index * chunk_size.
 PARALLEL_CHUNKS = 3
 
 
 def _same_metadata(contract: dict, form_data: dict) -> bool:
-	"""The server binds an upload ID to its metadata; a resume must send exactly the same."""
+	"""The server binds an upload ID to its metadata; a resume must send exactly the same.
+
+	An upload started before parallel sending has no chunk size in its contract; it
+	still matches, and continues in order (see _find_resumable_upload).
+	"""
+	if contract.get('chunk_size') not in (None, int(form_data['chunk_size'])):
+		return False
 	authors = form_data['authors']
 	# Fire passes a single `--authors` value as a string, which the form sends as one author.
 	if list(contract.get('authors') or []) != ([authors] if isinstance(authors, str) else list(authors)):
@@ -87,8 +92,8 @@ def _received_bytes_match(file, chunks: list[dict | None], chunk_size: int) -> b
 
 def _find_resumable_upload(
 	client: httpx.Client, token: str, file, file_name: str, chunk_size: int, form_data: dict
-) -> tuple[str, list[int]] | None:
-	"""(upload ID, chunks still to send) of the caller's unfinished upload of this file, if the server holds one."""
+) -> tuple[str, list[int], bool] | None:
+	"""(upload ID, chunks still to send, parallel) of the caller's unfinished upload of this file, if any."""
 	api = settings.API_ENDPOINT.rstrip('/') + '/datasets/uploads'
 	headers = {'Authorization': f'Bearer {token}'}
 	try:
@@ -112,7 +117,7 @@ def _find_resumable_upload(
 				continue
 			missing = [index for index in range(chunks_total) if index >= len(chunks) or chunks[index] is None]
 			# All chunks arrived but the last reply was lost: send the last chunk again to finish.
-			return upload['upload_id'], missing or [chunks_total - 1]
+			return upload['upload_id'], missing or [chunks_total - 1], contract.get('chunk_size') is not None
 	except httpx.TransportError:
 		return None
 	return None
@@ -269,15 +274,20 @@ class DataCommands:
 		logger.info(f'Uploading file: {file_path}, to endpoint: {settings.API_ENDPOINT}')
 		with open(file_path, 'rb') as f, httpx.Client(timeout=httpx.Timeout(timeout=300.0)) as client:
 			resumable = _find_resumable_upload(client, token, f, file_path.name, chunk_size, form_data)
-			upload_id, missing = resumable or (str(uuid.uuid4()), list(range(chunks_total)))
+			upload_id, missing, parallel = resumable or (str(uuid.uuid4()), list(range(chunks_total)), True)
+			if not parallel:
+				# Started before parallel sending: continue in order, without a chunk size.
+				del form_data['chunk_size']
 			if resumable:
 				logger.info(f'Continuing upload {upload_id} of {file_path.name}: {len(missing)} of {chunks_total} chunks to send')
 			done = file_size - sum(min(chunk_size, file_size - index * chunk_size) for index in missing)
 			progress = tqdm(total=file_size, initial=max(done, 0), unit='B', unit_scale=True, desc=f'Uploading {file_path.name}')
 
 			def send(index: int) -> dict:
-				# Each worker reads its own slice; the file object is not shared across threads.
-				data = os.pread(f.fileno(), chunk_size, index * chunk_size)
+				# Each worker opens the file itself: no shared position across threads.
+				with open(file_path, 'rb') as chunk_file:
+					chunk_file.seek(index * chunk_size)
+					data = chunk_file.read(chunk_size)
 				response = self._send_chunk(
 					client,
 					{**form_data, 'chunk_index': str(index), 'upload_id': upload_id},
@@ -287,8 +297,15 @@ class DataCommands:
 				return response.json()
 
 			try:
-				with ThreadPoolExecutor(max_workers=PARALLEL_CHUNKS) as pool:
-					replies = list(pool.map(send, missing))
+				pool = ThreadPoolExecutor(max_workers=PARALLEL_CHUNKS if parallel else 1)
+				try:
+					futures = [pool.submit(send, index) for index in missing]
+					replies = []
+					for future in as_completed(futures):
+						# The first failure stops the chunks that have not started yet.
+						replies.append(future.result())
+				finally:
+					pool.shutdown(wait=True, cancel_futures=True)
 				final = next((reply for reply in replies if reply.get('id')), None)
 				if final is None:
 					# Another chunk than the last completed the upload; its dataset is in the status.
