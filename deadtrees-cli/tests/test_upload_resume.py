@@ -12,19 +12,20 @@ from deadtrees_cli.data import DataCommands, _find_resumable_upload
 pytestmark = pytest.mark.unit
 CHUNK = 4
 CONTENT = b'aaaabbbbccccdd'
-FORM = {'chunks_total': '4', 'license': 'CC BY', 'platform': 'drone', 'authors': ['A'], 'data_access': 'public'}
-CONTRACT = {'file_name': 'flight.zip', 'license': 'CC BY', 'platform': 'drone', 'authors': ['A'], 'data_access': 'public', 'aquisition_year': None}
+FORM = {'chunks_total': '4', 'license': 'CC BY', 'platform': 'drone', 'authors': ['A'], 'data_access': 'public', 'chunk_size': '4'}
+CONTRACT = {'file_name': 'flight.zip', 'license': 'CC BY', 'platform': 'drone', 'authors': ['A'], 'data_access': 'public', 'aquisition_year': None, 'chunk_size': 4}
 
 
 def unfinished(parts, **overrides):
-	"""An unfinished upload whose received chunks hold `parts`."""
-	chunks = [{'size': len(part), 'sha256': hashlib.sha256(part).hexdigest()} for part in parts]
+	"""An unfinished upload whose received chunks hold `parts` (None for a missing one)."""
+	chunks = [None if part is None else {'size': len(part), 'sha256': hashlib.sha256(part).hexdigest()} for part in parts]
+	received = [chunk for chunk in chunks if chunk]
 	return {
 		'upload_id': 'up-1',
 		'state': 'receiving',
 		'chunks_total': 4,
-		'chunks_received': len(parts),
-		'last_chunk': chunks[-1] if chunks else None,
+		'chunks_received': len(received),
+		'last_chunk': received[-1] if received else None,
 		'chunks': chunks,
 		'contract': {**CONTRACT, **overrides},
 	}
@@ -44,15 +45,19 @@ def find(uploads, form=FORM, status=200):
 
 
 def test_continues_after_the_received_chunks_of_the_same_file():
-	assert find([unfinished([b'aaaa', b'bbbb'])]) == ('up-1', 2)
+	assert find([unfinished([b'aaaa', b'bbbb'])]) == ('up-1', [2, 3])
+
+
+def test_continues_a_parallel_upload_with_its_gaps():
+	assert find([unfinished([b'aaaa', None, b'cccc'])]) == ('up-1', [1, 3])
 
 
 def test_single_author_given_as_text_still_matches():
-	assert find([unfinished([b'aaaa', b'bbbb'])], form={**FORM, 'authors': 'A'}) == ('up-1', 2)
+	assert find([unfinished([b'aaaa', b'bbbb'])], form={**FORM, 'authors': 'A'}) == ('up-1', [2, 3])
 
 
 def test_resends_the_last_chunk_when_only_its_reply_was_lost():
-	assert find([unfinished([b'aaaa', b'bbbb', b'cccc', b'dd'])]) == ('up-1', 3)
+	assert find([unfinished([b'aaaa', b'bbbb', b'cccc', b'dd'])]) == ('up-1', [3])
 
 
 @pytest.mark.parametrize(
@@ -65,6 +70,7 @@ def test_resends_the_last_chunk_when_only_its_reply_was_lost():
 		unfinished([b'aaaa', b'bbbb'], aquisition_year=2024),
 		{**unfinished([b'aaaa', b'bbbb']), 'state': 'finalizing'},
 		{**unfinished([b'aaaa', b'bbbb']), 'chunks_total': 5},
+		unfinished([b'aaaa', b'bbbb'], chunk_size=None),  # started before parallel sending
 	],
 )
 def test_starts_fresh_for_any_other_upload(upload):
