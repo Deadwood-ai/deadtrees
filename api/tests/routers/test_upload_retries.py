@@ -215,3 +215,43 @@ def test_rejected_zip_returns_same_validation_error_on_retry(upload, auth_token)
 		assert db.table(settings.datasets_table).select('id').eq('file_name', filename).execute().data == []
 	# The bytes stay under a receiving receipt until the abandoned-upload retention job removes them.
 	assert (settings.raw_images_path / f'{upload_id}.tmp').read_bytes() == content
+
+
+def test_owner_can_read_and_resume_an_unfinished_upload(upload, auth_token, test_user2):
+	"""DT-1567: the status calls report what arrived, so a client continues instead of restarting."""
+	send, upload_id = upload
+	assert send(0, b'first').status_code == 200
+	assert send(1, b'second').status_code == 200
+
+	def get(path, token=auth_token):
+		with TestClient(app) as client:
+			return client.get(path, headers={'Authorization': f'Bearer {token}'})
+
+	status = get(f'/datasets/uploads/{upload_id}')
+	assert status.status_code == 200, status.text
+	body = status.json()
+	assert (body['state'], body['chunks_total'], body['chunks_received'], body['bytes_received']) == ('receiving', 3, 2, 11)
+	assert body['last_chunk']['size'] == 6
+	assert body['contract']['file_name'] == 'retry.tif'
+	assert body['contract']['authors'] == ['Retry test']
+	assert upload_id in [item['upload_id'] for item in get('/datasets/uploads').json()]
+
+	other_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	assert verify_token(other_token).id == test_user2
+	assert get(f'/datasets/uploads/{upload_id}', other_token).status_code == 404
+	assert upload_id not in [item['upload_id'] for item in get('/datasets/uploads', other_token).json()]
+	assert get('/datasets/uploads/missing-upload').status_code == 404
+
+	# The resumed client sends only the missing chunk; the upload then leaves the list.
+	final = send(2, b'third')
+	assert final.status_code == 200, final.text
+	done = get(f'/datasets/uploads/{upload_id}').json()
+	assert (done['state'], done['response']['id']) == ('complete', final.json()['id'])
+	assert upload_id not in [item['upload_id'] for item in get('/datasets/uploads').json()]
+	assert (settings.archive_path / f"{final.json()['id']}_ortho.tif").read_bytes() == b'firstsecondthird'
+
+
+def test_status_calls_need_a_valid_login(upload):
+	with TestClient(app) as client:
+		assert client.get('/datasets/uploads').status_code == 401
+		assert client.get('/datasets/uploads', headers={'Authorization': 'Bearer nonsense'}).status_code == 401
