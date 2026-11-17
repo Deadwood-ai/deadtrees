@@ -401,6 +401,8 @@ class Ortho(BaseModel):
 	sha256: Optional[str] = None
 	ortho_info: Optional[Dict] = None
 	ortho_upload_runtime: Optional[float] = None
+	# Ground size of one pixel in cm (shared.utils.ground_resolution_cm)
+	gsd_cm: Optional[float] = None
 
 	@field_serializer('created_at', mode='plain')
 	def datetime_to_isoformat(field: datetime | None) -> str | None:

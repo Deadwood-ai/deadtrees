@@ -121,6 +121,24 @@ export function useDatasetById(datasetId: number | undefined) {
   });
 }
 
+// Ground resolution of the uploaded orthophoto in cm per pixel; null when it is
+// unknown or the caller may not see the dataset.
+export function useDatasetGroundResolution(datasetId: number | undefined) {
+  const { status, user } = useAuth();
+
+  return useQuery({
+    queryKey: ["dataset-ground-resolution", datasetId, user?.id ?? "anonymous"],
+    enabled: !!datasetId && status !== "checking",
+    queryFn: async () => {
+      // Row security hides orthos of datasets the caller may not see.
+      const { data, error } = await supabase.from("v2_orthos").select("gsd_cm").eq("dataset_id", datasetId!).maybeSingle();
+      if (error) throw error;
+      return (data?.gsd_cm as number | null | undefined) ?? null;
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
 // Owner account includes excluded datasets; archived rows remain accessible by direct status link.
 export function useUserDatasets(options: DatasetQueryOptions = {}) {
   const { session, status } = useAuth();

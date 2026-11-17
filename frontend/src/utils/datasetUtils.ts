@@ -9,6 +9,12 @@ export const formatOrthoFileSize = (sizeMb: number | null): string => {
     : `${sizeMb.toFixed(0)} MB`;
 };
 
+/** Ground resolution of the orthophoto: cm per pixel, or m per pixel from 1 m. */
+export const formatGroundResolution = (gsdCm: number | null | undefined): string => {
+  if (gsdCm == null) return "Not available";
+  return gsdCm >= 100 ? `${(gsdCm / 100).toFixed(1)} m/px` : `${gsdCm.toFixed(1)} cm/px`;
+};
+
 /**
  * Checks if a dataset is from GeoNadir provider
  * @param dataset - The dataset to check
