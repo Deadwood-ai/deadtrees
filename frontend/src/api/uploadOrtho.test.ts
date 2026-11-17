@@ -50,6 +50,16 @@ const status = (overrides: Partial<UploadStatus>): UploadStatus => ({
   ...overrides,
 });
 
+const received = (parts: string[]) => {
+  const chunks = parts.map((part) => ({ size: part.length, sha256: sha(part) }));
+  return status({
+    chunks_received: parts.length,
+    bytes_received: parts.join("").length,
+    last_chunk: chunks[chunks.length - 1],
+    chunks,
+  });
+};
+
 const sentChunks = () => post.mock.calls.map(([, form]) => Number((form as FormData).get("chunk_index")));
 
 async function run(extra: Partial<Parameters<typeof transferUpload>[0]> = {}) {
@@ -100,7 +110,7 @@ describe("resumable chunk upload", () => {
   });
 
   it("continues after the chunks the server holds, once the last one matches the file", async () => {
-    get.mockResolvedValue({ data: status({ chunks_received: 2, bytes_received: 8, last_chunk: { size: 4, sha256: sha("bbbb") } }) });
+    get.mockResolvedValue({ data: received(["aaaa", "bbbb"]) });
     const { promise, events } = await run();
     await expect(promise).resolves.toEqual({ id: "42" });
     expect(sentChunks()).toEqual([2, 3]);
@@ -108,14 +118,21 @@ describe("resumable chunk upload", () => {
   });
 
   it("refuses a different file without sending anything", async () => {
-    get.mockResolvedValue({ data: status({ chunks_received: 2, bytes_received: 8, last_chunk: { size: 4, sha256: sha("xxxx") } }) });
+    get.mockResolvedValue({ data: received(["aaaa", "xxxx"]) });
+    const { promise } = await run();
+    await expect(promise).rejects.toBeInstanceOf(UploadFileMismatchError);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("refuses a file whose earlier chunks differ, even when the last received one matches", async () => {
+    get.mockResolvedValue({ data: received(["xxxx", "bbbb"]) });
     const { promise } = await run();
     await expect(promise).rejects.toBeInstanceOf(UploadFileMismatchError);
     expect(post).not.toHaveBeenCalled();
   });
 
   it("resends the last chunk when every chunk arrived but the reply was lost", async () => {
-    get.mockResolvedValue({ data: status({ chunks_received: 4, bytes_received: 14, last_chunk: { size: 2, sha256: sha("dd") } }) });
+    get.mockResolvedValue({ data: received(["aaaa", "bbbb", "cccc", "dd"]) });
     const { promise } = await run();
     await expect(promise).resolves.toEqual({ id: "42" });
     expect(sentChunks()).toEqual([3]);
@@ -129,7 +146,7 @@ describe("resumable chunk upload", () => {
   });
 
   it.each(["expired", "finalizing"] as const)("stops on an upload that is %s", async (state) => {
-    get.mockResolvedValue({ data: status({ state, chunks_received: 1, last_chunk: { size: 4, sha256: sha("aaaa") } }) });
+    get.mockResolvedValue({ data: { ...received(["aaaa"]), state } });
     const { promise } = await run();
     await expect(promise).rejects.toBeInstanceOf(UploadNotResumableError);
   });

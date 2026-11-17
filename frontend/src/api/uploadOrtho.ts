@@ -50,6 +50,8 @@ export interface UploadStatus {
   chunks_received: number;
   bytes_received: number;
   last_chunk: ChunkReceipt | null;
+  /** Every received chunk in order; only the single-upload call returns it. */
+  chunks?: ChunkReceipt[] | null;
   contract: Record<string, unknown> | null;
   response: UploadOrthoResponse | null;
   created_at: number | null;
@@ -130,8 +132,20 @@ async function withRetries<T>(read: () => Promise<T>, signal?: AbortSignal, atte
   }
 }
 
-/** Where to continue, after checking that the server's bytes came from this file. */
-async function firstChunkToSend(status: UploadStatus | null, file: File, chunkSize: number, chunksTotal: number) {
+/**
+ * Where to continue, after checking that every byte the server holds came from
+ * this file. Each received chunk is hashed and compared with its receipt, so a
+ * resume never appends one file's bytes to another's. `onChecked` reports the
+ * bytes checked so far; for a 25 GB upload the check reads the whole received part.
+ */
+async function firstChunkToSend(
+  status: UploadStatus | null,
+  file: File,
+  chunkSize: number,
+  chunksTotal: number,
+  onChecked: (bytes: number) => void,
+  signal?: AbortSignal,
+) {
   if (!status || status.chunks_received === 0) return 0;
   if (status.state === "expired") {
     throw new UploadNotResumableError(
@@ -143,19 +157,19 @@ async function firstChunkToSend(status: UploadStatus | null, file: File, chunkSi
       "This upload stopped while it was being finished. Please contact info@deadtrees.earth before uploading it again.",
     );
   }
-  const received = status.chunks_received;
-  const last = status.last_chunk;
-  const start = (received - 1) * chunkSize;
-  const matches =
-    status.chunks_total === chunksTotal &&
-    last !== null &&
-    last.size === Math.min(chunkSize, file.size - start) &&
-    (await sha256Hex(file.slice(start, start + last.size))) === last.sha256;
-  if (!matches) {
-    throw new UploadFileMismatchError("This file does not match the unfinished upload. Pick the same file you started with.");
+  const mismatch = () =>
+    new UploadFileMismatchError("This file does not match the unfinished upload. Pick the same file you started with.");
+  const chunks = status.chunks ?? [];
+  if (status.chunks_total !== chunksTotal || chunks.length !== status.chunks_received) throw mismatch();
+  for (const [index, chunk] of chunks.entries()) {
+    if (signal?.aborted) throw abortError();
+    const start = index * chunkSize;
+    if (chunk.size !== Math.min(chunkSize, file.size - start)) throw mismatch();
+    if ((await sha256Hex(file.slice(start, start + chunk.size))) !== chunk.sha256) throw mismatch();
+    onChecked(start + chunk.size);
   }
   // Every chunk arrived but the reply to the last was lost or rejected: send it again to finish.
-  return Math.min(received, chunksTotal - 1);
+  return Math.min(chunks.length, chunksTotal - 1);
 }
 
 function chunkForm(file: File, uploadId: string, index: number, chunksTotal: number, chunkSize: number, metadata: UploadMetadata) {
@@ -299,7 +313,14 @@ export async function transferUpload(options: TransferOptions): Promise<UploadOr
   let token = await getAccessToken();
   const status = options.isNew ? null : await withRetries(() => fetchUploadStatus(uploadId, token), signal);
   if (status?.state === "complete" && status.response) return status.response;
-  const first = await firstChunkToSend(status, file, chunkSize, chunksTotal);
+  const first = await firstChunkToSend(
+    status,
+    file,
+    chunkSize,
+    chunksTotal,
+    (bytes) => onProgress(Math.min(100, Math.round((bytes / file.size) * 100))),
+    signal,
+  );
   if (first > 0) onEvent?.({ type: "resumed", chunkIndex: first, chunksTotal });
 
   let response: AxiosResponse<UploadOrthoResponse> | undefined;

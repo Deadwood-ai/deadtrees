@@ -69,35 +69,44 @@ def _same_metadata(contract: dict, form_data: dict) -> bool:
 	)
 
 
+def _received_bytes_match(file, chunks: list[dict], chunk_size: int) -> bool:
+	"""Every received chunk has this file's size and SHA-256 at its offset, so a resume never mixes two files."""
+	file.seek(0)
+	for chunk in chunks:
+		data = file.read(chunk_size)
+		if len(data) != chunk['size'] or hashlib.sha256(data).hexdigest() != chunk['sha256']:
+			return False
+	return True
+
+
 def _find_resumable_upload(
 	client: httpx.Client, token: str, file, file_name: str, chunk_size: int, form_data: dict
 ) -> tuple[str, int] | None:
 	"""(upload ID, next chunk) of the caller's unfinished upload of this file, if the server holds one."""
+	api = settings.API_ENDPOINT.rstrip('/') + '/datasets/uploads'
+	headers = {'Authorization': f'Bearer {token}'}
 	try:
-		response = client.get(
-			settings.API_ENDPOINT.rstrip('/') + '/datasets/uploads', headers={'Authorization': f'Bearer {token}'}
-		)
+		response = client.get(api, headers=headers)
+		# An API without resume support answers 404 or 405: upload from the start.
+		if response.status_code != 200:
+			return None
+		chunks_total = int(form_data['chunks_total'])
+		for upload in response.json():
+			contract = upload.get('contract') or {}
+			if upload.get('state') != 'receiving' or contract.get('file_name') != file_name:
+				continue
+			if upload.get('chunks_total') != chunks_total or not _same_metadata(contract, form_data):
+				continue
+			detail = client.get(f"{api}/{upload['upload_id']}", headers=headers)
+			if detail.status_code != 200:
+				continue
+			chunks = detail.json().get('chunks') or []
+			if len(chunks) != detail.json()['chunks_received'] or not _received_bytes_match(file, chunks, chunk_size):
+				continue
+			# All chunks arrived but the last reply was lost: send the last chunk again to finish.
+			return upload['upload_id'], min(len(chunks), chunks_total - 1)
 	except httpx.TransportError:
 		return None
-	# An API without resume support answers 404 or 405: upload from the start.
-	if response.status_code != 200:
-		return None
-	for upload in response.json():
-		contract = upload.get('contract') or {}
-		if upload.get('state') != 'receiving' or contract.get('file_name') != file_name:
-			continue
-		chunks_total = int(form_data['chunks_total'])
-		if upload.get('chunks_total') != chunks_total or not _same_metadata(contract, form_data):
-			continue
-		received, last = upload['chunks_received'], upload.get('last_chunk')
-		if received and last:
-			start = (received - 1) * chunk_size
-			file.seek(start)
-			data = file.read(last['size'])
-			if len(data) != last['size'] or hashlib.sha256(data).hexdigest() != last['sha256']:
-				continue
-		# All chunks arrived but the last reply was lost: send the last chunk again to finish.
-		return upload['upload_id'], min(received, chunks_total - 1)
 	return None
 
 

@@ -25,9 +25,11 @@ class UploadStatus(BaseModel):
 	chunks_total: int | None
 	chunks_received: int
 	bytes_received: int
-	# The client compares this with the same slice of its file before it sends
-	# the next chunk, so a resume never appends a different file.
 	last_chunk: ChunkReceipt | None
+	# Size and SHA-256 of every received chunk, in order. Before it resumes, a
+	# client compares them with its file, so a resume never appends one file's
+	# bytes to another's. Left out of the list call.
+	chunks: list[ChunkReceipt] | None = None
 	# The fields every chunk must repeat; None for receipts written before resume.
 	contract: dict | None
 	# The dataset response, once the upload is complete.
@@ -44,7 +46,9 @@ def _state(receipt: UploadReceipt, committed: int, tmp_paths: list[Path]) -> Upl
 	return 'receiving'
 
 
-def read_upload_status(session_root: Path, upload_id: str, user_id: str, upload_dirs: list[Path]) -> UploadStatus | None:
+def read_upload_status(
+	session_root: Path, upload_id: str, user_id: str, upload_dirs: list[Path], with_chunks: bool = True
+) -> UploadStatus | None:
 	"""Return the caller's upload, or None when it does not exist or belongs to someone else."""
 	receipt_path = session_root / f'{upload_id}.json'
 	try:
@@ -62,6 +66,7 @@ def read_upload_status(session_root: Path, upload_id: str, user_id: str, upload_
 		chunks_received=len(receipt.chunks),
 		bytes_received=committed,
 		last_chunk=receipt.chunks[-1] if receipt.chunks else None,
+		chunks=receipt.chunks if with_chunks else None,
 		contract=receipt.contract,
 		response=receipt.response if receipt.phase == 'complete' else None,
 		created_at=receipt.created_at,
@@ -90,7 +95,9 @@ def list_unfinished_uploads(
 					continue
 			except FileNotFoundError:
 				continue
-			status = read_upload_status(session_root, entry.name.removesuffix('.json'), user_id, upload_dirs)
+			status = read_upload_status(
+				session_root, entry.name.removesuffix('.json'), user_id, upload_dirs, with_chunks=False
+			)
 			if status is not None and status.state in ('receiving', 'finalizing'):
 				found.append(status)
 	return sorted(found, key=lambda status: status.updated_at, reverse=True)

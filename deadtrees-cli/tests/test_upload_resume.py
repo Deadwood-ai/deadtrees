@@ -16,44 +16,55 @@ FORM = {'chunks_total': '4', 'license': 'CC BY', 'platform': 'drone', 'authors':
 CONTRACT = {'file_name': 'flight.zip', 'license': 'CC BY', 'platform': 'drone', 'authors': ['A'], 'data_access': 'public', 'aquisition_year': None}
 
 
-def unfinished(received, last, **overrides):
+def unfinished(parts, **overrides):
+	"""An unfinished upload whose received chunks hold `parts`."""
+	chunks = [{'size': len(part), 'sha256': hashlib.sha256(part).hexdigest()} for part in parts]
 	return {
 		'upload_id': 'up-1',
 		'state': 'receiving',
 		'chunks_total': 4,
-		'chunks_received': received,
-		'last_chunk': {'size': len(last), 'sha256': hashlib.sha256(last).hexdigest()} if last else None,
+		'chunks_received': len(parts),
+		'last_chunk': chunks[-1] if chunks else None,
+		'chunks': chunks,
 		'contract': {**CONTRACT, **overrides},
 	}
 
 
 def find(uploads, form=FORM, status=200):
-	transport = httpx.MockTransport(lambda request: httpx.Response(status, json=uploads))
+	def handler(request):
+		if request.url.path.endswith('/datasets/uploads'):
+			listed = [{k: v for k, v in upload.items() if k != 'chunks'} for upload in uploads] if status == 200 else uploads
+			return httpx.Response(status, json=listed)
+		upload_id = request.url.path.rsplit('/', 1)[-1]
+		return httpx.Response(200, json=next(upload for upload in uploads if upload['upload_id'] == upload_id))
+
+	transport = httpx.MockTransport(handler)
 	with httpx.Client(transport=transport) as client:
 		return _find_resumable_upload(client, 'token', io.BytesIO(CONTENT), 'flight.zip', CHUNK, form)
 
 
 def test_continues_after_the_received_chunks_of_the_same_file():
-	assert find([unfinished(2, b'bbbb')]) == ('up-1', 2)
+	assert find([unfinished([b'aaaa', b'bbbb'])]) == ('up-1', 2)
 
 
 def test_single_author_given_as_text_still_matches():
-	assert find([unfinished(2, b'bbbb')], form={**FORM, 'authors': 'A'}) == ('up-1', 2)
+	assert find([unfinished([b'aaaa', b'bbbb'])], form={**FORM, 'authors': 'A'}) == ('up-1', 2)
 
 
 def test_resends_the_last_chunk_when_only_its_reply_was_lost():
-	assert find([unfinished(4, b'dd')]) == ('up-1', 3)
+	assert find([unfinished([b'aaaa', b'bbbb', b'cccc', b'dd'])]) == ('up-1', 3)
 
 
 @pytest.mark.parametrize(
 	'upload',
 	[
-		unfinished(2, b'xxxx'),  # different bytes
-		unfinished(2, b'bbbb', file_name='other.zip'),
-		unfinished(2, b'bbbb', authors=['B']),
-		unfinished(2, b'bbbb', aquisition_year=2024),
-		{**unfinished(2, b'bbbb'), 'state': 'finalizing'},
-		{**unfinished(2, b'bbbb'), 'chunks_total': 5},
+		unfinished([b'aaaa', b'xxxx']),  # different last chunk
+		unfinished([b'xxxx', b'bbbb']),  # different earlier chunk
+		unfinished([b'aaaa', b'bbbb'], file_name='other.zip'),
+		unfinished([b'aaaa', b'bbbb'], authors=['B']),
+		unfinished([b'aaaa', b'bbbb'], aquisition_year=2024),
+		{**unfinished([b'aaaa', b'bbbb']), 'state': 'finalizing'},
+		{**unfinished([b'aaaa', b'bbbb']), 'chunks_total': 5},
 	],
 )
 def test_starts_fresh_for_any_other_upload(upload):

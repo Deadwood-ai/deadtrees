@@ -8,7 +8,6 @@ import { Alert, Button, Popconfirm, Space, message } from "antd";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { getAccessToken, useResumableUpload } from "../../hooks/useResumableUpload";
-import addProcess from "../../api/addProcess";
 import {
   CHUNK_SIZE,
   chunkCount,
@@ -94,9 +93,10 @@ async function loadUnfinished(userId: string): Promise<UnfinishedUpload[]> {
   const statuses = await Promise.allSettled(unlisted.map((upload) => fetchUploadStatus(upload.uploadId, token)));
   unlisted.forEach((upload, index) => {
     const result = statuses[index];
-    if (result.status === "fulfilled") {
-      found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status: result.value });
-    }
+    if (result.status !== "fulfilled") return;
+    // A stored file is never offered again: processing may already run for it.
+    if (result.value?.state === "complete") removePendingUpload(upload.uploadId);
+    else found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status: result.value });
   });
   const running = await uploadsRunningInAnyTab();
   return found.filter((upload) => !discarded.has(upload.uploadId) && !running.has(upload.uploadId));
@@ -143,19 +143,6 @@ export default function UnfinishedUploads() {
     discardUpload(upload.uploadId);
     track("upload_discarded", transferProperties(upload));
     setUploads((current) => current.filter((item) => item.uploadId !== upload.uploadId));
-  };
-
-  const startProcessing = async (upload: UnfinishedUpload) => {
-    const datasetId = Number(upload.status?.response?.id);
-    if (!upload.local || !datasetId) return;
-    try {
-      await addProcess(datasetId, upload.local.processingSteps, await getAccessToken());
-      removePendingUpload(upload.uploadId);
-      message.success("Processing started.");
-      refresh();
-    } catch {
-      message.error("Processing could not be started. Please try again.");
-    }
   };
 
   const pickFile = (upload: UnfinishedUpload) => {
@@ -226,23 +213,6 @@ export default function UnfinishedUploads() {
               showIcon
               message={`Upload of ${upload.fileName} needs our help`}
               description="All data arrived, but the upload stopped while it was being finished. Please contact info@deadtrees.earth before you upload this file again."
-            />
-          );
-        }
-        if (status?.state === "complete") {
-          return (
-            <Alert
-              key={upload.uploadId}
-              type="warning"
-              showIcon
-              message={`${upload.fileName} is uploaded, but processing has not started`}
-              action={
-                <Space>
-                  <Button size="small" type="primary" onClick={() => startProcessing(upload)}>
-                    Start processing
-                  </Button>
-                </Space>
-              }
             />
           );
         }

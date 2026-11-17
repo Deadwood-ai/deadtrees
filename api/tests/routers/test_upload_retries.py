@@ -232,9 +232,11 @@ def test_owner_can_read_and_resume_an_unfinished_upload(upload, auth_token, test
 	body = status.json()
 	assert (body['state'], body['chunks_total'], body['chunks_received'], body['bytes_received']) == ('receiving', 3, 2, 11)
 	assert body['last_chunk']['size'] == 6
+	assert [chunk['size'] for chunk in body['chunks']] == [5, 6]
 	assert body['contract']['file_name'] == 'retry.tif'
 	assert body['contract']['authors'] == ['Retry test']
-	assert upload_id in [item['upload_id'] for item in get('/datasets/uploads').json()]
+	listed = {item['upload_id']: item for item in get('/datasets/uploads').json()}
+	assert listed[upload_id]['chunks'] is None
 
 	other_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
 	assert verify_token(other_token).id == test_user2

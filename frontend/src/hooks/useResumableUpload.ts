@@ -116,9 +116,20 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
             else notifier.updateUploadProgress(next, cancel);
           },
         });
-        const datasetId = Number(response.id);
-        await addProcess(datasetId, processingSteps, await getAccessToken());
+        // The file is stored; from here on nothing offers to resume it, so a lost
+        // reply to the processing request can never queue the dataset twice.
         removePendingUpload(uploadId);
+        const datasetId = Number(response.id);
+        try {
+          await addProcess(datasetId, processingSteps, await getAccessToken());
+        } catch (error) {
+          console.error("Processing request failed:", error);
+          track("upload_failed", { upload_type: uploadType, dataset_id: datasetId, failure_reason: "processing_not_started" });
+          notifier.showErrorNotification(
+            `Your file is uploaded as dataset ${datasetId}, but its processing could not be started. Please contact info@deadtrees.earth with this dataset ID.`,
+          );
+          return;
+        }
         track("upload_completed", { dataset_id: datasetId, upload_type: uploadType });
         notifier.showSuccessNotification();
         return;

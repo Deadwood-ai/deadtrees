@@ -27,16 +27,17 @@ answer only for the signed-in owner; another user's upload ID returns 404.
 
 - `GET /datasets/uploads/{upload_id}` returns the upload's `state`
   (`receiving`, `expired`, `finalizing` or `complete`), `chunks_total`,
-  `chunks_received`, `bytes_received`, the size and SHA-256 of the last received
-  chunk, the stored `contract` (the fields every chunk repeats) and, once
-  complete, the dataset `response`.
+  `chunks_received`, `bytes_received`, the size and SHA-256 of every received
+  chunk (`chunks`), the stored `contract` (the fields every chunk repeats) and,
+  once complete, the dataset `response`.
 - `GET /datasets/uploads` lists the caller's uploads in `receiving` or
-  `finalizing` whose receipt changed within the retention period.
+  `finalizing` whose receipt changed within the retention period, without the
+  per-chunk list.
 
 A client resumes by sending chunk `chunks_received` next, with the same upload ID
-and the same contract. Before it does, it compares the last received chunk's
-size and SHA-256 with the same slice of its file, so a resume never appends a
-different file. When every chunk arrived but the reply to the last was lost, it
+and the same contract. Before it does, it hashes every received chunk of its
+file and compares it with the receipt, so a resume never appends one file's
+bytes to another's. For a large upload this reads the whole received part once. When every chunk arrived but the reply to the last was lost, it
 sends the last chunk again: an identical repeat starts finalization, or replays
 the stored response. `expired` means the retention job deleted the bytes;
 `finalizing` needs inspection as described below.
@@ -46,9 +47,12 @@ and resumed uploads. It drops a chunk request that sends no bytes for two
 minutes, waits while the browser is offline, refreshes the login after a 401
 and retries with growing pauses; after 30 minutes of failures the run ends and
 the upload stays resumable. The profile page lists unfinished uploads and
-continues one after the contributor picks the same file again. The CLI
+continues one after the contributor picks the same file again. Once the file is
+stored, the browser forgets the upload before it requests processing, so an
+upload is never offered again and a lost processing reply never queues it twice;
+if that request fails, the contributor is asked to contact support. The CLI
 (`deadtrees data upload`) looks for an unfinished upload of the same file name,
-chunk count and metadata, checks its last chunk, and continues it.
+chunk count and metadata, checks every received chunk, and continues it.
 
 Receipts written before resume support have no stored contract. They report
 `contract: null` until their next chunk, which stores it.

@@ -38,6 +38,7 @@ def test_reports_received_chunks_and_contract(dirs):
 	assert result.state == 'receiving'
 	assert (result.chunks_total, result.chunks_received, result.bytes_received) == (3, 2, 11)
 	assert result.last_chunk.size == 6
+	assert [chunk.size for chunk in result.chunks] == [5, 6]
 	assert result.contract == CONTRACT
 	assert result.response is None
 
@@ -93,6 +94,7 @@ def test_unfinished_list_keeps_only_recent_resumable_uploads_of_the_caller(dirs)
 	os.utime(sessions / 'old.json', (now - 10 * 86400, now - 10 * 86400))
 	found = list_unfinished_uploads(sessions, 'owner', [upload_dir], max_age_seconds=7 * 86400, now=now)
 	assert [upload.upload_id for upload in found] == ['recent']
+	assert found[0].chunks is None
 
 
 def test_unfinished_list_without_sessions_directory(tmp_path):
