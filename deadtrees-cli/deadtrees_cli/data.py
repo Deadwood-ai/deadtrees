@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 import sys
 from typing import Optional, List, Dict, Any, Union
@@ -37,6 +38,66 @@ from shared.logger import logger
 # Python exits 1 on an uncaught exception and Fire exits 2 on a usage error, so
 # neither can mean "not uploaded".
 NOT_UPLOADED_EXIT_STATUS = 3
+
+
+CHUNK_ATTEMPTS = 8
+RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+
+
+_CONTRACT_FIELDS = [
+	'license',
+	'platform',
+	'data_access',
+	'project_id',
+	'aquisition_year',
+	'aquisition_month',
+	'aquisition_day',
+	'additional_information',
+	'citation_doi',
+]
+
+
+def _same_metadata(contract: dict, form_data: dict) -> bool:
+	"""The server binds an upload ID to its metadata; a resume must send exactly the same."""
+	if list(contract.get('authors') or []) != list(form_data['authors']):
+		return False
+	if bool(contract.get('allow_duplicate')) != ('allow_duplicate' in form_data):
+		return False
+	return all(
+		(None if contract.get(field) is None else str(contract[field])) == form_data.get(field) for field in _CONTRACT_FIELDS
+	)
+
+
+def _find_resumable_upload(
+	client: httpx.Client, token: str, file, file_name: str, chunk_size: int, form_data: dict
+) -> tuple[str, int] | None:
+	"""(upload ID, next chunk) of the caller's unfinished upload of this file, if the server holds one."""
+	try:
+		response = client.get(
+			settings.API_ENDPOINT.rstrip('/') + '/datasets/uploads', headers={'Authorization': f'Bearer {token}'}
+		)
+	except httpx.TransportError:
+		return None
+	# An API without resume support answers 404 or 405: upload from the start.
+	if response.status_code != 200:
+		return None
+	for upload in response.json():
+		contract = upload.get('contract') or {}
+		if upload.get('state') != 'receiving' or contract.get('file_name') != file_name:
+			continue
+		chunks_total = int(form_data['chunks_total'])
+		if upload.get('chunks_total') != chunks_total or not _same_metadata(contract, form_data):
+			continue
+		received, last = upload['chunks_received'], upload.get('last_chunk')
+		if received and last:
+			start = (received - 1) * chunk_size
+			file.seek(start)
+			data = file.read(last['size'])
+			if len(data) != last['size'] or hashlib.sha256(data).hexdigest() != last['sha256']:
+				continue
+		# All chunks arrived but the last reply was lost: send the last chunk again to finish.
+		return upload['upload_id'], min(received, chunks_total - 1)
+	return None
 
 
 def _raise_for_duplicate_upload(response: httpx.Response) -> None:
@@ -162,67 +223,79 @@ class DataCommands:
 		chunk_size: int = 100 * 1024 * 1024,  # 100MB chunks
 		**metadata,
 	):
-		"""Upload a file in chunks with progress bar"""
+		"""Upload a file in chunks with a progress bar, continuing an unfinished upload of it.
+
+		A stopped run resumes on the next run: the server lists the caller's
+		unfinished uploads (GET /datasets/uploads), and one of the same file name and
+		chunk count whose last received chunk matches this file continues from there.
+		Each chunk is retried on network errors and server busy or error replies.
+		"""
 		file_size = file_path.stat().st_size
 		chunks_total = (file_size + chunk_size - 1) // chunk_size
-		upload_id = str(uuid.uuid4())
+		form_data = {
+			'chunks_total': str(chunks_total),
+			'license': metadata['license'].value,
+			'platform': metadata['platform'].value,
+			'authors': metadata['authors'],
+			'data_access': metadata['data_access'].value,
+		}
+		for field in ['project_id', 'aquisition_year', 'aquisition_month', 'aquisition_day', 'additional_information', 'citation_doi']:
+			if metadata.get(field) is not None:
+				form_data[field] = str(metadata[field])
+		if metadata.get('allow_duplicate'):
+			form_data['allow_duplicate'] = 'true'
 
-		progress = tqdm(total=file_size, unit='B', unit_scale=True, desc=f'Uploading {file_path.name}')
 		logger.info(f'Uploading file: {file_path}, to endpoint: {settings.API_ENDPOINT}')
-
 		with open(file_path, 'rb') as f, httpx.Client(timeout=httpx.Timeout(timeout=300.0)) as client:
-			for chunk_index in range(chunks_total):
-				chunk_data = f.read(chunk_size)
-
-				# Required form fields
-				form_data = {
-					'chunk_index': str(chunk_index),
-					'chunks_total': str(chunks_total),
-					'upload_id': upload_id,
-					'license': metadata['license'].value,
-					'platform': metadata['platform'].value,
-					'authors': metadata['authors'],
-					'data_access': metadata['data_access'].value,
-				}
-
-				# Optional form fields
-				optional_fields = [
-					'project_id',
-					'aquisition_year',
-					'aquisition_month',
-					'aquisition_day',
-					'additional_information',
-					'citation_doi',
-				]
-
-				# Add optional fields if they exist in metadata
-				for field in optional_fields:
-					if field in metadata and metadata[field] is not None:
-						form_data[field] = str(metadata[field])
-				if metadata.get('allow_duplicate'):
-					form_data['allow_duplicate'] = 'true'
-
-				files = {'file': (file_path.name, chunk_data, 'application/octet-stream')}
-
-				try:
-					response = client.post(
-						settings.API_ENTPOINT_DATASETS,
-						files=files,
-						data=form_data,
-						headers={'Authorization': f'Bearer {token}'},
+			resumable = _find_resumable_upload(client, token, f, file_path.name, chunk_size, form_data)
+			upload_id, first_chunk = resumable or (str(uuid.uuid4()), 0)
+			if resumable:
+				logger.info(f'Continuing upload {upload_id} of {file_path.name} at chunk {first_chunk + 1}/{chunks_total}')
+			progress = tqdm(
+				total=file_size, initial=first_chunk * chunk_size, unit='B', unit_scale=True, desc=f'Uploading {file_path.name}'
+			)
+			try:
+				for chunk_index in range(first_chunk, chunks_total):
+					f.seek(chunk_index * chunk_size)
+					chunk_data = f.read(chunk_size)
+					response = self._send_chunk(
+						client,
+						{**form_data, 'chunk_index': str(chunk_index), 'upload_id': upload_id},
+						{'file': (file_path.name, chunk_data, 'application/octet-stream')},
 					)
+					progress.update(len(chunk_data))
+					if chunk_index == chunks_total - 1:
+						return response.json()
+			except Exception as e:
+				logger.error(f'Error uploading {file_path.name} (upload {upload_id}): {e}. Run the upload again to continue it.')
+				raise
+			finally:
+				progress.close()
+
+	def _send_chunk(self, client: httpx.Client, form_data: dict, files: dict) -> httpx.Response:
+		"""POST one chunk; retry network errors, busy and server errors, and an expired login."""
+		for attempt in range(1, CHUNK_ATTEMPTS + 1):
+			try:
+				response = client.post(
+					settings.API_ENTPOINT_DATASETS,
+					files=files,
+					data=form_data,
+					headers={'Authorization': f'Bearer {self._token or self._ensure_auth()}'},
+				)
+			except httpx.TransportError as error:
+				if attempt == CHUNK_ATTEMPTS:
+					raise
+				logger.warning(f'Chunk {form_data["chunk_index"]} failed ({error}); retrying')
+			else:
+				if response.status_code == 401 and attempt < CHUNK_ATTEMPTS:
+					self._token = None
+				elif response.status_code not in RETRYABLE_STATUS_CODES or attempt == CHUNK_ATTEMPTS:
 					_raise_for_duplicate_upload(response)
 					response.raise_for_status()
-					progress.update(len(chunk_data))
-
-					if chunk_index == chunks_total - 1:
-						progress.close()
-						return response.json()
-
-				except Exception as e:
-					progress.close()
-					logger.error(f'Error uploading chunk {chunk_index}: {e}')
-					raise
+					return response
+				logger.warning(f'Chunk {form_data["chunk_index"]} got HTTP {response.status_code}; retrying')
+			time.sleep(min(2**attempt, 30))
+		raise RuntimeError('unreachable')
 
 	def process(
 		self, dataset_id: int, task_types: Optional[List[str]] = None, priority: int = DEFAULT_QUEUE_PRIORITY
