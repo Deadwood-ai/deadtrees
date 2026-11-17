@@ -44,10 +44,8 @@ CHUNK_ATTEMPTS = 8
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
 
-_CONTRACT_FIELDS = [
-	'license',
-	'platform',
-	'data_access',
+# Optional dataset fields a chunk carries only when set.
+_OPTIONAL_FIELDS = [
 	'project_id',
 	'aquisition_year',
 	'aquisition_month',
@@ -55,6 +53,7 @@ _CONTRACT_FIELDS = [
 	'additional_information',
 	'citation_doi',
 ]
+_CONTRACT_FIELDS = ['license', 'platform', 'data_access', *_OPTIONAL_FIELDS]
 
 
 def _same_metadata(contract: dict, form_data: dict) -> bool:
@@ -239,7 +238,7 @@ class DataCommands:
 			'authors': metadata['authors'],
 			'data_access': metadata['data_access'].value,
 		}
-		for field in ['project_id', 'aquisition_year', 'aquisition_month', 'aquisition_day', 'additional_information', 'citation_doi']:
+		for field in _OPTIONAL_FIELDS:
 			if metadata.get(field) is not None:
 				form_data[field] = str(metadata[field])
 		if metadata.get('allow_duplicate'):

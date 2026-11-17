@@ -7,8 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Popconfirm, Space, message } from "antd";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
-import { useResumableUpload } from "../../hooks/useResumableUpload";
-import { supabase } from "../../hooks/useSupabase";
+import { getAccessToken, useResumableUpload } from "../../hooks/useResumableUpload";
 import addProcess from "../../api/addProcess";
 import {
   CHUNK_SIZE,
@@ -19,6 +18,9 @@ import {
   type UploadStatus,
 } from "../../api/uploadOrtho";
 import {
+  discardUpload,
+  discardedUploadIds,
+  isSameFile,
   isUploadActive,
   pendingUploadsFor,
   removePendingUpload,
@@ -35,24 +37,6 @@ interface UnfinishedUpload {
   /** null: the server has no bytes yet (the upload stopped before its first chunk). */
   status: UploadStatus | null;
 }
-
-const DISMISSED_KEY = "deadtrees.discardedUploads.v1";
-
-const readDismissed = (): string[] => {
-  try {
-    return JSON.parse(window.localStorage.getItem(DISMISSED_KEY) ?? "[]");
-  } catch {
-    return [];
-  }
-};
-
-const dismiss = (uploadId: string) => {
-  try {
-    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...readDismissed(), uploadId].slice(-200)));
-  } catch {
-    // Without storage the upload shows again on reload until its data expires.
-  }
-};
 
 const formatSize = (bytes: number) =>
   bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
@@ -84,15 +68,12 @@ const chunkSizeOf = (upload: UnfinishedUpload) => {
   return CHUNK_SIZE;
 };
 
-async function accessToken() {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
+// A focus right after a load does not reload again.
+const REFRESH_INTERVAL_MS = 30_000;
 
 async function loadUnfinished(userId: string): Promise<UnfinishedUpload[]> {
-  const token = await accessToken();
-  if (!token) return [];
-  const dismissed = new Set(readDismissed());
+  const token = await getAccessToken();
+  const discarded = discardedUploadIds();
   const fromServer = await listUnfinishedUploads(token);
   const local = new Map(pendingUploadsFor(userId).map((upload) => [upload.uploadId, upload]));
   const found: UnfinishedUpload[] = fromServer.map((status) => ({
@@ -103,12 +84,12 @@ async function loadUnfinished(userId: string): Promise<UnfinishedUpload[]> {
   }));
   // Uploads this browser remembers that the server no longer lists: not started,
   // finished without processing, or expired.
-  for (const upload of local.values()) {
-    if (found.some((item) => item.uploadId === upload.uploadId)) continue;
-    const status = await fetchUploadStatus(upload.uploadId, token);
-    found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status });
-  }
-  return found.filter((upload) => !dismissed.has(upload.uploadId) && !isUploadActive(upload.uploadId));
+  const unlisted = [...local.values()].filter((upload) => !found.some((item) => item.uploadId === upload.uploadId));
+  const statuses = await Promise.all(unlisted.map((upload) => fetchUploadStatus(upload.uploadId, token)));
+  unlisted.forEach((upload, index) =>
+    found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status: statuses[index] }),
+  );
+  return found.filter((upload) => !discarded.has(upload.uploadId) && !isUploadActive(upload.uploadId));
 }
 
 export default function UnfinishedUploads() {
@@ -118,21 +99,26 @@ export default function UnfinishedUploads() {
   const [uploads, setUploads] = useState<UnfinishedUpload[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const continuing = useRef<UnfinishedUpload | null>(null);
+  const lastLoad = useRef({ id: 0, at: 0 });
 
   const refresh = useCallback(() => {
     if (!user) return;
+    // Only the newest load may set the list, so a slow older reply never overwrites it.
+    const load = { id: lastLoad.current.id + 1, at: Date.now() };
+    lastLoad.current = load;
     loadUnfinished(user.id)
-      .then(setUploads)
+      .then((found) => lastLoad.current.id === load.id && setUploads(found))
       .catch((error) => console.warn("Could not load unfinished uploads", error));
   }, [user]);
 
   useEffect(() => {
+    const onFocus = () => Date.now() - lastLoad.current.at > REFRESH_INTERVAL_MS && refresh();
     refresh();
     window.addEventListener(UPLOADS_CHANGED_EVENT, refresh);
-    window.addEventListener("focus", refresh);
+    window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener(UPLOADS_CHANGED_EVENT, refresh);
-      window.removeEventListener("focus", refresh);
+      window.removeEventListener("focus", onFocus);
     };
   }, [refresh]);
 
@@ -144,18 +130,16 @@ export default function UnfinishedUploads() {
   });
 
   const discard = (upload: UnfinishedUpload) => {
-    dismiss(upload.uploadId);
-    removePendingUpload(upload.uploadId);
+    discardUpload(upload.uploadId);
     track("upload_discarded", transferProperties(upload));
     setUploads((current) => current.filter((item) => item.uploadId !== upload.uploadId));
   };
 
   const startProcessing = async (upload: UnfinishedUpload) => {
     const datasetId = Number(upload.status?.response?.id);
-    const token = await accessToken();
-    if (!upload.local || !datasetId || !token) return;
+    if (!upload.local || !datasetId) return;
     try {
-      await addProcess(datasetId, upload.local.processingSteps, token);
+      await addProcess(datasetId, upload.local.processingSteps, await getAccessToken());
       removePendingUpload(upload.uploadId);
       message.success("Processing started.");
       refresh();
@@ -177,9 +161,9 @@ export default function UnfinishedUploads() {
     if (!file || !upload) return;
     const contract = upload.status?.contract;
     const chunkSize = chunkSizeOf(upload);
-    const sameFile =
-      file.name === upload.fileName &&
-      (upload.local ? file.size === upload.local.fileSize : chunkCount(file.size, chunkSize) === upload.status?.chunks_total);
+    const sameFile = upload.local
+      ? isSameFile(upload.local, file)
+      : file.name === upload.fileName && chunkCount(file.size, chunkSize) === upload.status?.chunks_total;
     if (!sameFile) {
       message.error(`Please pick ${upload.fileName}, the file this upload started with.`);
       return;

@@ -36,16 +36,17 @@ class UploadStatus(BaseModel):
 	updated_at: float
 
 
-def _state(receipt: UploadReceipt, tmp_paths: list[Path]) -> UploadState:
+def _state(receipt: UploadReceipt, committed: int, tmp_paths: list[Path]) -> UploadState:
 	if receipt.phase != 'receiving':
 		return receipt.phase
-	committed = sum(chunk.size for chunk in receipt.chunks)
 	if committed and not any(path.exists() and path.stat().st_size >= committed for path in tmp_paths):
 		return 'expired'
 	return 'receiving'
 
 
-def _read(receipt_path: Path, upload_id: str, user_id: str, tmp_paths: list[Path]) -> UploadStatus | None:
+def read_upload_status(session_root: Path, upload_id: str, user_id: str, upload_dirs: list[Path]) -> UploadStatus | None:
+	"""Return the caller's upload, or None when it does not exist or belongs to someone else."""
+	receipt_path = session_root / f'{upload_id}.json'
 	try:
 		updated_at = receipt_path.stat().st_mtime
 		receipt = UploadReceipt.model_validate_json(receipt_path.read_bytes())
@@ -53,24 +54,18 @@ def _read(receipt_path: Path, upload_id: str, user_id: str, tmp_paths: list[Path
 		return None
 	if receipt.user_id != user_id:
 		return None
+	committed = sum(chunk.size for chunk in receipt.chunks)
 	return UploadStatus(
 		upload_id=upload_id,
-		state=_state(receipt, tmp_paths),
+		state=_state(receipt, committed, [d / f'{upload_id}.tmp' for d in upload_dirs]),
 		chunks_total=(receipt.contract or {}).get('chunks_total'),
 		chunks_received=len(receipt.chunks),
-		bytes_received=sum(chunk.size for chunk in receipt.chunks),
+		bytes_received=committed,
 		last_chunk=receipt.chunks[-1] if receipt.chunks else None,
 		contract=receipt.contract,
 		response=receipt.response if receipt.phase == 'complete' else None,
 		created_at=receipt.created_at,
 		updated_at=updated_at,
-	)
-
-
-def read_upload_status(session_root: Path, upload_id: str, user_id: str, upload_dirs: list[Path]) -> UploadStatus | None:
-	"""Return the caller's upload, or None when it does not exist or belongs to someone else."""
-	return _read(
-		session_root / f'{upload_id}.json', upload_id, user_id, [d / f'{upload_id}.tmp' for d in upload_dirs]
 	)
 
 
@@ -95,8 +90,7 @@ def list_unfinished_uploads(
 					continue
 			except FileNotFoundError:
 				continue
-			upload_id = entry.name.removesuffix('.json')
-			status = _read(Path(entry.path), upload_id, user_id, [d / f'{upload_id}.tmp' for d in upload_dirs])
+			status = read_upload_status(session_root, entry.name.removesuffix('.json'), user_id, upload_dirs)
 			if status is not None and status.state in ('receiving', 'finalizing'):
 				found.append(status)
 	return sorted(found, key=lambda status: status.updated_at, reverse=True)

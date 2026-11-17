@@ -8,14 +8,13 @@ export interface PendingUpload {
   userId: string;
   fileName: string;
   fileSize: number;
-  fileLastModified: number;
   chunkSize: number;
   metadata: UploadMetadata;
   processingSteps: string[];
-  startedAt: number;
 }
 
 const STORAGE_KEY = "deadtrees.pendingUploads.v1";
+const DISCARDED_KEY = "deadtrees.discardedUploads.v1";
 
 const storage = (): Storage | null => {
   try {
@@ -25,22 +24,25 @@ const storage = (): Storage | null => {
   }
 };
 
-const readAll = (): Record<string, PendingUpload> => {
+const read = <T>(key: string, fallback: T): T => {
   try {
-    const parsed = JSON.parse(storage()?.getItem(STORAGE_KEY) ?? "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
+    const parsed = JSON.parse(storage()?.getItem(key) ?? "null");
+    return parsed && typeof parsed === "object" ? parsed : fallback;
   } catch {
-    return {};
+    return fallback;
   }
 };
 
-const writeAll = (uploads: Record<string, PendingUpload>) => {
+const write = (key: string, value: unknown) => {
   try {
-    storage()?.setItem(STORAGE_KEY, JSON.stringify(uploads));
+    storage()?.setItem(key, JSON.stringify(value));
   } catch {
     // Storage full or blocked: the server's list still offers the upload for recovery.
   }
 };
+
+const readAll = () => read<Record<string, PendingUpload>>(STORAGE_KEY, {});
+const writeAll = (uploads: Record<string, PendingUpload>) => write(STORAGE_KEY, uploads);
 
 export const savePendingUpload = (upload: PendingUpload) => writeAll({ ...readAll(), [upload.uploadId]: upload });
 
@@ -52,6 +54,14 @@ export const removePendingUpload = (uploadId: string) => {
 
 export const pendingUploadsFor = (userId: string): PendingUpload[] =>
   Object.values(readAll()).filter((upload) => upload.userId === userId);
+
+/** Uploads the contributor discarded; the server deletes their bytes when they expire. */
+export const discardedUploadIds = (): Set<string> => new Set(read<string[]>(DISCARDED_KEY, []));
+
+export const discardUpload = (uploadId: string) => {
+  write(DISCARDED_KEY, [...discardedUploadIds(), uploadId].slice(-200));
+  removePendingUpload(uploadId);
+};
 
 /** A picked file is the upload's file when name and size match; the server then checks the bytes. */
 export const isSameFile = (upload: Pick<PendingUpload, "fileName" | "fileSize">, file: File) =>

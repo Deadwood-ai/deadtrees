@@ -4,6 +4,7 @@
 // fresh upload and a resumed one alike.
 import axios, { type AxiosResponse } from "axios";
 import { Settings } from "../config";
+import { sha256Hex } from "../utils/uploadFingerprint";
 
 export const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MiB
 // A chunk request that sends no bytes for this long is dropped and retried.
@@ -115,11 +116,6 @@ export async function listUnfinishedUploads(token: string): Promise<UploadStatus
   return response.data;
 }
 
-async function sha256Hex(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 /** Where to continue, after checking that the server's bytes came from this file. */
 async function firstChunkToSend(status: UploadStatus | null, file: File, chunkSize: number, chunksTotal: number) {
   if (!status || status.chunks_received === 0) return 0;
@@ -185,7 +181,7 @@ function classify(error: unknown, chunkIndex: number, userSignal?: AbortSignal, 
   const status = error.response?.status;
   const data = error.response?.data as { detail?: unknown } | string | undefined;
   const detail = (typeof data === "object" && data?.detail) || (typeof data === "string" ? data : undefined) || error.message;
-  if (status === undefined || error.code === "ECONNABORTED" || axios.isCancel(error)) {
+  if (status === undefined || error.code === "ECONNABORTED") {
     return { kind: "retry", reason: error.code === "ECONNABORTED" ? "timeout" : "network_error" };
   }
   if (status === 401) return { kind: "retry", reason: "invalid_token", refreshToken: true };
@@ -297,37 +293,27 @@ export async function transferUpload(options: TransferOptions): Promise<UploadOr
     const formData = chunkForm(file, uploadId, index, chunksTotal, chunkSize, metadata);
     const report = (loaded: number) => onProgress(Math.min(100, Math.round(((index * chunkSize + loaded) / file.size) * 100)));
     report(0);
-    let attempt = 0;
-    let failuresInRow = 0;
-    let stalled = false;
     let failingSince = 0;
-    let refresh = false;
-    for (;;) {
-      attempt++;
+    for (let failures = 0; ; ) {
       await waitUntilOnline(signal);
-      if (refresh) token = await getAccessToken(true);
-      refresh = false;
       const result = await postChunk(formData, token, report, signal);
       if (result.response) {
         response = result.response;
-        if (stalled) onEvent?.({ type: "recovered", chunkIndex: index, chunksTotal });
+        if (failures >= STALL_AFTER_FAILURES) onEvent?.({ type: "recovered", chunkIndex: index, chunksTotal });
         break;
       }
       const failure = classify(result.error, index, signal, result.noProgress);
       if (failure.kind === "abort") throw abortError();
       if (failure.kind === "fatal") throw failure.error;
-      onEvent?.({ type: "chunk_failed", chunkIndex: index, chunksTotal, attempt, reason: failure.reason });
-      failuresInRow++;
+      failures++;
       failingSince ||= Date.now();
-      if (failuresInRow >= STALL_AFTER_FAILURES && !stalled) {
-        stalled = true;
-        onEvent?.({ type: "stalled", chunkIndex: index, chunksTotal, reason: failure.reason });
-      }
+      onEvent?.({ type: "chunk_failed", chunkIndex: index, chunksTotal, attempt: failures, reason: failure.reason });
+      if (failures === STALL_AFTER_FAILURES) onEvent?.({ type: "stalled", chunkIndex: index, chunksTotal, reason: failure.reason });
       if (Date.now() - failingSince > GIVE_UP_AFTER_MS) {
         throw new Error(`Upload stopped at chunk ${index + 1} of ${chunksTotal} (${failure.reason}). You can continue it later.`);
       }
-      refresh = Boolean(failure.refreshToken);
-      await wait(Math.min(1000 * 2 ** Math.min(failuresInRow, 5), MAX_RETRY_DELAY_MS), signal);
+      await wait(Math.min(1000 * 2 ** Math.min(failures, 5), MAX_RETRY_DELAY_MS), signal);
+      if (failure.refreshToken) token = await getAccessToken(true);
     }
   }
   if (!response?.data?.id) throw new Error("Upload did not return a dataset response");

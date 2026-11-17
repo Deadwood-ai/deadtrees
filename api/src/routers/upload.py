@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Annotated, Optional, List
 
@@ -21,7 +20,7 @@ from shared.zip_utils import (
 )
 
 from ..upload.upload import create_dataset_entry
-from ..upload.abandoned_uploads import DEFAULT_MAX_AGE_DAYS
+from ..upload.abandoned_uploads import UPLOAD_ID_PATTERN, retention_days
 from ..upload.chunk_session import UPLOAD_SESSIONS_DIR, locked_chunk_session
 from ..upload.upload_status import UploadStatus, list_unfinished_uploads, read_upload_status
 from ..upload.geotiff_processor import process_geotiff_upload
@@ -39,7 +38,7 @@ logger = UnifiedLogger(__name__)
 logger.add_supabase_handler(SupabaseHandler())
 
 
-UploadIdParam = Annotated[str, PathParam(min_length=1, max_length=128, pattern=r'^[A-Za-z0-9_-]+$')]
+UploadIdParam = Annotated[str, PathParam(pattern=UPLOAD_ID_PATTERN.pattern)]
 
 
 def _authenticated_user_id(token: str) -> str:
@@ -56,12 +55,11 @@ def _upload_dirs() -> list[Path]:
 @router.get('/datasets/uploads', response_model=list[UploadStatus])
 def list_my_unfinished_uploads(token: Annotated[str, Depends(oauth2_scheme)]):
 	"""The caller's chunked uploads that can still be resumed, or that stopped while finishing."""
-	retention_days = float(os.getenv('UPLOAD_TMP_RETENTION_DAYS', DEFAULT_MAX_AGE_DAYS))
 	return list_unfinished_uploads(
 		settings.base_path / UPLOAD_SESSIONS_DIR,
 		_authenticated_user_id(token),
 		_upload_dirs(),
-		max_age_seconds=retention_days * 24 * 3600,
+		max_age_seconds=retention_days() * 24 * 3600,
 	)
 
 
@@ -81,7 +79,7 @@ def upload_chunk(
 	file: UploadFile,
 	chunk_index: Annotated[int, Form(ge=0)],
 	chunks_total: Annotated[int, Form(gt=0)],
-	upload_id: Annotated[str, Form(min_length=1, max_length=128, pattern=r'^[A-Za-z0-9_-]+$')],
+	upload_id: Annotated[str, Form(pattern=UPLOAD_ID_PATTERN.pattern)],
 	token: Annotated[str, Depends(oauth2_scheme)],
 	# Dataset required fields
 	license: Annotated[LicenseEnum, Form()],

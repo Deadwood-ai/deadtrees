@@ -1,7 +1,5 @@
 import { notification, Progress } from "antd";
 
-export type UploadNotifier = ReturnType<typeof createUploadNotifier>;
-
 /** The progress toast of one upload, keyed by its upload ID. */
 export const createUploadNotifier = (uploadKey: string, fileName: string) => {
   const showNotification = (

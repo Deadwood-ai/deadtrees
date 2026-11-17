@@ -32,9 +32,8 @@ export interface RunUploadOptions {
   resumed?: boolean;
 }
 
-export type RunUploadResult = "completed" | "cancelled" | "failed" | "mismatch";
-
-const getAccessToken = async (refresh = false): Promise<string> => {
+/** The signed-in user's token for upload calls; `refresh` forces a new one after the API rejected it. */
+export const getAccessToken = async (refresh = false): Promise<string> => {
   const { data, error } = refresh ? await supabase.auth.refreshSession() : await supabase.auth.getSession();
   if (error) {
     if (isInvalidSessionError(error)) {
@@ -52,7 +51,7 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
   const { track } = useAnalytics(sourceSurface);
 
   return useCallback(
-    async (options: RunUploadOptions): Promise<RunUploadResult> => {
+    async (options: RunUploadOptions): Promise<void> => {
       const { file, uploadId, metadata, processingSteps, uploadType } = options;
       const chunkSize = options.chunkSize ?? CHUNK_SIZE;
       const transfer = {
@@ -75,11 +74,9 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
           userId: user.id,
           fileName: file.name,
           fileSize: file.size,
-          fileLastModified: file.lastModified,
           chunkSize,
           metadata,
           processingSteps,
-          startedAt: Date.now(),
         });
       }
       if (!options.resumed) track("upload_started", { upload_type: uploadType });
@@ -124,17 +121,17 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
         removePendingUpload(uploadId);
         track("upload_completed", { dataset_id: datasetId, upload_type: uploadType });
         notifier.showSuccessNotification();
-        return "completed";
+        return;
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           // The bytes stay on the server; the profile page offers to continue or discard.
           track("upload_cancelled", { ...transfer, chunk_index: lastChunk });
           notifier.closeNotification();
-          return "cancelled";
+          return;
         }
         if (error instanceof UploadFileMismatchError) {
           notifier.showErrorNotification(error.message);
-          return "mismatch";
+          return;
         }
         console.error("Upload error:", error);
         const message = error instanceof Error ? error.message : "unknown_error";
@@ -148,7 +145,7 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
             `${message} Your upload is saved: open your profile and choose "Continue upload" to carry on where it stopped.`,
           );
         }
-        return "failed";
+        return;
       } finally {
         release();
         setUploadActive(uploadId, false);
