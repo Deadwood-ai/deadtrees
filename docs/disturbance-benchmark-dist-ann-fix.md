@@ -24,10 +24,11 @@ quality checks. Upstream rasters and workbooks are unchanged.
 - Chrome local preview confirms the annual mask, label, and rounded scores
   (63.6%, 87.1%, 0.74) at the reported site.
 
-Full Windows build remains blocked by the existing AccountJourney.ts /
-accountJourney.ts case collision and Profile import. The full regression gate
-cannot initialize its local Supabase migrations link; ast-grep also fails on a
-missing cached CLI module. These checks are not claimed as passing.
+The current frontend passes tests, lint and production build on Linux (Node
+24.15.0). GitHub PR #871 frontend-ci, ast-grep and title checks pass. Windows
+checks still encounter the existing AccountJourney.ts / accountJourney.ts case
+collision and missing ast-grep cache module. Full backend/auth regression cannot
+initialize its local Supabase migrations link; that check is not claimed passing.
 
 ## Prepared artifacts and publication
 
@@ -44,4 +45,11 @@ Publication must regenerate the WebP build with a fresh build ID and ingest
 the corrected catalogue, site JSON and masks together. Do not reuse an old
 WebP build or relabel the old DIST-ALERT payload.
 
-This fix is locally verified; it has not been deployed to production.
+Viewer PR: https://github.com/Deadwood-ai/deadtrees/pull/871.
+Converter PR: https://github.com/Deadwood-ai/disturbance_benchmark_visuals/pull/3
+(stacked on converter PR #2).
+
+Complete replacement NAS run: `11-Webviewer_visuals/runs/pylos-2026-11-17-v8-dist-ann`.
+Start with HANDOFF.md and PR-LINKS.md. It contains full raw and WebP archives;
+the corresponding prepared WebP build uses the same fresh run ID under builds/.
+This fix is verified but has not been deployed to production.
