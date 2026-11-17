@@ -71,6 +71,8 @@ export interface TransferOptions {
   onEvent?: (event: TransferEvent) => void;
   signal?: AbortSignal;
   chunkSize?: number;
+  /** A brand-new upload ID: nothing to ask the server before the first chunk. */
+  isNew?: boolean;
 }
 
 /** The API refused the file itself (HTTP 400, or 409 for a duplicate); the message is its reason for the contributor. */
@@ -285,7 +287,7 @@ export async function transferUpload(options: TransferOptions): Promise<UploadOr
   if (signal?.aborted) throw abortError();
 
   let token = await getAccessToken();
-  const status = await fetchUploadStatus(uploadId, token);
+  const status = options.isNew ? null : await fetchUploadStatus(uploadId, token);
   if (status?.state === "complete" && status.response) return status.response;
   const first = await firstChunkToSend(status, file, chunkSize, chunksTotal);
   if (first > 0) onEvent?.({ type: "resumed", chunkIndex: first, chunksTotal });

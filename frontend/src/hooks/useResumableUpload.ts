@@ -109,6 +109,7 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
           uploadId,
           metadata,
           chunkSize,
+          isNew: !options.resumed,
           getAccessToken,
           signal: controller.signal,
           onEvent,

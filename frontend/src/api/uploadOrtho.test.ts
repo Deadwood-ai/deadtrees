@@ -92,6 +92,13 @@ describe("resumable chunk upload", () => {
     expect([form.get("upload_id"), form.get("chunks_total"), form.get("license")]).toEqual(["up-1", "4", "CC BY"]);
   });
 
+  it("does not ask the server about a brand-new upload ID", async () => {
+    const { promise } = await run({ isNew: true });
+    await expect(promise).resolves.toEqual({ id: "42" });
+    expect(get).not.toHaveBeenCalled();
+    expect(sentChunks()).toEqual([0, 1, 2, 3]);
+  });
+
   it("continues after the chunks the server holds, once the last one matches the file", async () => {
     get.mockResolvedValue({ data: status({ chunks_received: 2, bytes_received: 8, last_chunk: { size: 4, sha256: sha("bbbb") } }) });
     const { promise, events } = await run();
