@@ -60,6 +60,9 @@ TREECOVER_BLOCK_PADDING = 128  # pixels; well beyond how far VW and Chaikin move
 # crosses the 128 px margin, so it covers at least 128 px and passes the 0.1 m² filter at
 # any resolution from 5 cm up. Clipping may leave smaller pieces along the block lines;
 # they are parts of larger polygons and are kept, so no forest goes missing at a seam.
+# A clip that GEOS cannot compute in floating point is retried on this grid, in metres
+# (15646). Snap rounding is robust for valid input; 1 mm is far below a 5 cm pixel.
+BLOCK_CLIP_GRID_SIZE = 0.001
 
 
 def _explode_polygons(geom):
@@ -71,6 +74,19 @@ def _explode_polygons(geom):
     if geom.geom_type in ('MultiPolygon', 'GeometryCollection'):
         return [p for g in geom.geoms for p in _explode_polygons(g)]
     return []
+
+
+def _clip_to_block(polygon, block):
+    """``polygon`` intersected with ``block``.
+
+    GEOS's floating-point overlay raises a TopologyException on an invalid polygon, and
+    rarely on near-coincident edges of a valid one. Only then is the polygon repaired
+    and clipped again with snap rounding, so the common path costs no validity check.
+    """
+    try:
+        return polygon.intersection(block)
+    except shapely.errors.GEOSException:
+        return shapely.intersection(repair_polygon(polygon), block, grid_size=BLOCK_CLIP_GRID_SIZE)
 
 
 def _chaikin_ring(coords, iterations):
@@ -283,7 +299,7 @@ class CombinedInference:
                 # a three-point ring where a boundary runs along the block edge (13412).
                 block = shapely.box(*core_bounds)
                 for polygon in self._simplify_polygons(block_polygons):
-                    for part in _explode_polygons(polygon.intersection(block)):
+                    for part in _explode_polygons(_clip_to_block(polygon, block)):
                         polygons.extend(_explode_polygons(repair_polygon(part)))
         largest = max((len(p.interiors) for p in polygons), default=0)
         progress(
