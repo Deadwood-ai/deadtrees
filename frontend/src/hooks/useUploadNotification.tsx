@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { notification, Progress } from "antd";
 
 export type UploadNotifier = ReturnType<typeof createUploadNotifier>;
@@ -58,10 +57,4 @@ export const createUploadNotifier = (uploadKey: string, fileName: string) => {
     showErrorNotification: (reason?: string) => showNotification("error", "error", undefined, undefined, reason),
     closeNotification: () => notification.destroy(uploadKey),
   };
-};
-
-export const useUploadNotification = (uploadKey: string, fileName: string) => {
-  const notifier = useRef<UploadNotifier | null>(null);
-  notifier.current = createUploadNotifier(uploadKey, fileName);
-  return notifier.current;
 };
