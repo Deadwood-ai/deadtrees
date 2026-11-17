@@ -8,6 +8,7 @@ import { Alert, Button, Popconfirm, Space, message } from "antd";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { getAccessToken, useResumableUpload } from "../../hooks/useResumableUpload";
+import addProcess from "../../api/addProcess";
 import {
   CHUNK_SIZE,
   chunkCount,
@@ -94,9 +95,9 @@ async function loadUnfinished(userId: string): Promise<UnfinishedUpload[]> {
   unlisted.forEach((upload, index) => {
     const result = statuses[index];
     if (result.status !== "fulfilled") return;
-    // A stored file is never offered again: processing may already run for it.
-    if (result.value?.state === "complete") removePendingUpload(upload.uploadId);
-    else found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status: result.value });
+    // A `complete` upload still remembered here never reached its processing request:
+    // the browser forgets an upload before it sends that request.
+    found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status: result.value });
   });
   const running = await uploadsRunningInAnyTab();
   return found.filter((upload) => !discarded.has(upload.uploadId) && !running.has(upload.uploadId));
@@ -111,15 +112,16 @@ export default function UnfinishedUploads() {
   const continuing = useRef<UnfinishedUpload | null>(null);
   const lastLoad = useRef({ id: 0, at: 0 });
 
+  const userId = user?.id;
   const refresh = useCallback(() => {
-    if (!user) return;
+    if (!userId) return;
     // Only the newest load may set the list, so a slow older reply never overwrites it.
     const load = { id: lastLoad.current.id + 1, at: Date.now() };
     lastLoad.current = load;
-    loadUnfinished(user.id)
+    loadUnfinished(userId)
       .then((found) => lastLoad.current.id === load.id && setUploads(found))
       .catch((error) => console.warn("Could not load unfinished uploads", error));
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     const onFocus = () => Date.now() - lastLoad.current.at > REFRESH_INTERVAL_MS && refresh();
@@ -143,6 +145,22 @@ export default function UnfinishedUploads() {
     discardUpload(upload.uploadId);
     track("upload_discarded", transferProperties(upload));
     setUploads((current) => current.filter((item) => item.uploadId !== upload.uploadId));
+  };
+
+  const startProcessing = async (upload: UnfinishedUpload) => {
+    const datasetId = Number(upload.status?.response?.id);
+    if (!upload.local || !datasetId) return;
+    // Forget the upload first, as the upload flow does, so this request is never sent twice.
+    removePendingUpload(upload.uploadId);
+    setUploads((current) => current.filter((item) => item.uploadId !== upload.uploadId));
+    try {
+      await addProcess(datasetId, upload.local.processingSteps, await getAccessToken());
+      message.success(`Processing of ${upload.fileName} started.`);
+    } catch {
+      message.error(
+        `Processing of dataset ${datasetId} could not be started. Please contact info@deadtrees.earth with this dataset ID.`,
+      );
+    }
   };
 
   const pickFile = (upload: UnfinishedUpload) => {
@@ -213,6 +231,22 @@ export default function UnfinishedUploads() {
               showIcon
               message={`Upload of ${upload.fileName} needs our help`}
               description="All data arrived, but the upload stopped while it was being finished. Please contact info@deadtrees.earth before you upload this file again."
+            />
+          );
+        }
+        if (status?.state === "complete") {
+          return (
+            <Alert
+              key={upload.uploadId}
+              type="warning"
+              showIcon
+              message={`${upload.fileName} is uploaded, but its processing has not started`}
+              description="The page closed after the upload finished. Start the processing to get the results."
+              action={
+                <Button size="small" type="primary" onClick={() => startProcessing(upload)}>
+                  Start processing
+                </Button>
+              }
             />
           );
         }

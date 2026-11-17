@@ -48,9 +48,11 @@ minutes, waits while the browser is offline, refreshes the login after a 401
 and retries with growing pauses; after 30 minutes of failures the run ends and
 the upload stays resumable. The profile page lists unfinished uploads and
 continues one after the contributor picks the same file again. Once the file is
-stored, the browser forgets the upload before it requests processing, so an
-upload is never offered again and a lost processing reply never queues it twice;
-if that request fails, the contributor is asked to contact support. The CLI
+stored, the browser forgets the upload before it requests processing, so a lost
+processing reply never queues it twice; if that request fails, the contributor
+is asked to contact support. A stored upload this browser still remembers never
+reached that request (the tab closed during finalization), so the panel offers
+to start its processing. The CLI
 (`deadtrees data upload`) looks for an unfinished upload of the same file name,
 chunk count and metadata, checks every received chunk, and continues it.
 
