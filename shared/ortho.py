@@ -6,7 +6,7 @@ from shared.models import Ortho, ProcessedOrtho
 from shared.db import use_client
 from shared.settings import settings
 from shared.logger import logger
-from shared.utils import get_transformed_bounds, format_bbox_string
+from shared.utils import get_transformed_bounds, format_bbox_string, ground_resolution_cm
 
 
 def sanitize_json_data(data):
@@ -50,6 +50,7 @@ def upsert_ortho_entry(
 			'sha256': sha256,
 			'ortho_info': sanitized_ortho_info,
 			'ortho_upload_runtime': ortho_upload_runtime,
+			'gsd_cm': ground_resolution_cm(file_path),
 		}
 
 		# Remove None values

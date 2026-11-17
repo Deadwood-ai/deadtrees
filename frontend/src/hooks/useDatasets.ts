@@ -130,9 +130,10 @@ export function useDatasetGroundResolution(datasetId: number | undefined) {
     queryKey: ["dataset-ground-resolution", datasetId, user?.id ?? "anonymous"],
     enabled: !!datasetId && status !== "checking",
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("dataset_ground_resolution", { p_dataset_id: datasetId! });
+      // Row security hides orthos of datasets the caller may not see.
+      const { data, error } = await supabase.from("v2_orthos").select("gsd_cm").eq("dataset_id", datasetId!).maybeSingle();
       if (error) throw error;
-      return (data as number | null) ?? null;
+      return (data?.gsd_cm as number | null | undefined) ?? null;
     },
     staleTime: 60 * 60 * 1000,
   });

@@ -173,7 +173,7 @@ def test_archive_resolves_exclusions_once_per_query(db, world):
 
 
 def test_archive_lists_ground_resolution_and_additional_information(db):
-	"""The archive filters on ground resolution and searches the uploader's additional information."""
+	"""The archive filters on the stored ground resolution and searches the uploader's additional information."""
 	owner = account(db)
 	row = archive_dataset(db, owner)
 	plain = archive_dataset(db, owner)
@@ -182,12 +182,7 @@ def test_archive_lists_ground_resolution_and_additional_information(db):
 		WHERE id=%s""",
 		(row,),
 	)
-	# COGs are web mercator: 0.05 m per pixel at 52.505°N is about 3.0 cm on the ground.
-	db.execute(
-		"""INSERT INTO public.v2_cogs (dataset_id,cog_file_name,version,cog_file_size,cog_processing_runtime,cog_path,cog_info)
-		VALUES (%s,'c.tif',1,1,0.1,'c.tif','{"GEO":{"CRS":"EPSG:3857","Resolution":[0.05,-0.05]}}')""",
-		(row,),
-	)
+	db.execute('UPDATE public.v2_orthos SET gsd_cm=2.3 WHERE dataset_id=%s', (row,))
 	act_as(db, None)
 	found = {
 		id_: (gsd, text)
@@ -196,51 +191,8 @@ def test_archive_lists_ground_resolution_and_additional_information(db):
 			([row, plain],),
 		)
 	}
-	assert found[row] == (pytest.approx(3.0, abs=0.05), 'Bark beetle decline near a FLUX site')
+	assert found[row] == (pytest.approx(2.3), 'Bark beetle decline near a FLUX site')
 	assert found[plain] == (None, None)
-
-
-def set_ortho_georeference(db, dataset_id, crs, pixel_size):
-	db.execute(
-		"UPDATE public.v2_orthos SET ortho_info=%s WHERE dataset_id=%s",
-		(json.dumps({'GEO': {'CRS': crs, 'Resolution': [pixel_size, -pixel_size]}}), dataset_id),
-	)
-
-
-UTM_33N_WKT = (
-	'PROJCS["WGS 84 / UTM zone 33N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],'
-	'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]],'
-	'PROJECTION["Transverse_Mercator"],PARAMETER["central_meridian",15],'
-	'UNIT["US survey foot",0.304800609601219,AUTHORITY["EPSG","9003"]],AXIS["Easting",EAST],AXIS["Northing",NORTH]]'
-)
-
-
-@pytest.mark.parametrize(
-	'crs,pixel_size,expected_cm',
-	[
-		('EPSG:32633', 0.022, 2.2),  # metres
-		('EPSG:4326', 3e-7, 2.0),  # degrees, scaled by cos(52.505°N)
-		('EPSG:3857', 0.05, 3.0),  # web mercator, scaled by latitude
-		('EPSG:2263', 0.1, 3.0),  # US survey feet
-		(UTM_33N_WKT, 0.1, 3.0),  # WKT: the projected unit, not the degree unit
-		('LOCAL_CS["Arbitrary (m)",UNIT["metre",1],AXIS["Easting",EAST]]', 0.04, 4.0),
-	],
-)
-def test_ground_resolution_comes_from_the_orthophoto(db, crs, pixel_size, expected_cm):
-	owner = account(db)
-	row = archive_dataset(db, owner)
-	set_ortho_georeference(db, row, crs, pixel_size)
-	# The COG is snapped to a zoom level and must not win over the orthophoto.
-	db.execute(
-		"""INSERT INTO public.v2_cogs (dataset_id,cog_file_name,version,cog_file_size,cog_processing_runtime,cog_path,cog_info)
-		VALUES (%s,'c.tif',1,1,0.1,'c.tif','{"GEO":{"CRS":"EPSG:3857","Resolution":[0.5,-0.5]}}')""",
-		(row,),
-	)
-	act_as(db, None)
-	(archive,) = db.execute('SELECT gsd_cm FROM public.public_dataset_archive_items WHERE id=%s', (row,)).fetchone()
-	(details,) = db.execute('SELECT public.dataset_ground_resolution(%s)', (row,)).fetchone()
-	assert archive == pytest.approx(expected_cm, abs=0.05)
-	assert details == archive
 
 
 @pytest.mark.parametrize(
@@ -248,10 +200,16 @@ def test_ground_resolution_comes_from_the_orthophoto(db, crs, pixel_size, expect
 	[('anonymous', False), ('stranger', False), ('owner', True), ('privileged', True)],
 )
 def test_details_resolution_follows_dataset_visibility(db, world, caller, sees_private):
+	"""The details page reads v2_orthos.gsd_cm directly; row security hides private datasets."""
 	rows, callers = world
-	for row in (rows['public'], rows['private']):
-		set_ortho_georeference(db, row, 'EPSG:32633', 0.03)
+	db.execute('UPDATE public.v2_orthos SET gsd_cm=3.0 WHERE dataset_id = ANY(%s)', ([rows['public'], rows['private']],))
 	act_as(db, callers[caller])
-	resolution = lambda row: db.execute('SELECT public.dataset_ground_resolution(%s)', (row,)).fetchone()[0]
-	assert resolution(rows['public']) == pytest.approx(3.0)
-	assert (resolution(rows['private']) is not None) == sees_private
+	resolution = {
+		dataset_id: gsd
+		for dataset_id, gsd in db.execute(
+			'SELECT dataset_id,gsd_cm FROM public.v2_orthos WHERE dataset_id = ANY(%s)',
+			([rows['public'], rows['private']],),
+		)
+	}
+	assert resolution[rows['public']] == pytest.approx(3.0)
+	assert (rows['private'] in resolution) == sees_private
