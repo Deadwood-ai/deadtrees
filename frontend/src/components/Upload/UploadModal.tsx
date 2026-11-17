@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Form,
@@ -15,15 +15,14 @@ import {
   message,
 } from "antd";
 import { InfoCircleOutlined, InboxOutlined } from "@ant-design/icons";
-import { useAuth } from "../../hooks/useAuthProvider";
 import { usePriwaProjectMemberships } from "../../hooks/usePriwaProjectMemberships";
 import { IDataAccess, ILicense, IPlatform, UploadType } from "../../types/dataset";
 import { useFileUpload } from "../../hooks/useFileUpload";
-import { useUploadNotification } from "../../hooks/useUploadNotification";
+import { useResumableUpload } from "../../hooks/useResumableUpload";
 import PickerWithType from "./PickerWithType";
-import uploadOrtho, { UploadRejectedError } from "../../api/uploadOrtho";
+import type { UploadMetadata } from "../../api/uploadOrtho";
+import { processingStepsFor } from "../../utils/uploadProcessingSteps";
 import { useData } from "../../hooks/useDataProvider";
-import addProcess from "../../api/addProcess";
 import { findDuplicateUpload } from "../../api/duplicateUpload";
 import VisibilityChoice from "../DatasetAccess/VisibilityChoice";
 import {
@@ -32,11 +31,8 @@ import {
   validateGeoTiffUpload,
   validateZipUpload,
 } from "../../utils/fileValidation";
-import { isInvalidSessionError } from "../../utils/authSession";
 import AdditionalInformationFormItem from "../AdditionalInformationFormItem";
 
-import { isTokenExpiringSoon } from "../../utils/isTokenExpiringSoon";
-import { clearLocalSupabaseSession, supabase } from "../../hooks/useSupabase";
 import { RcFile } from "antd/es/upload";
 import type { Dayjs } from "dayjs";
 import { useAnalytics } from "../../hooks/useAnalytics";
@@ -59,24 +55,6 @@ interface UploadModalProps {
   uploadKey: string;
 }
 
-// Add these types near the top of the file
-interface UploadResponse {
-  id: string;
-}
-
-interface UploadMetadata {
-  license: string;
-  platform: string;
-  authors: string[];
-  upload_type: string;
-  project_id?: string;
-  aquisition_year?: number;
-  aquisition_month?: number;
-  aquisition_day?: number;
-  additional_information?: string;
-  data_access?: string;
-  citation_doi?: string;
-}
 
 const TermsLink = () => (
   <Typography.Link href="/terms-of-service" target="_blank">
@@ -89,30 +67,6 @@ const PrivacyLink = () => (
     privacy policy
   </Typography.Link>
 );
-
-const PREDICTION_PROCESSING_STEPS = [
-  "deadwood_v1",
-  "treecover_v1",
-  "deadwood_treecover_combined_v2",
-];
-
-const GEOTIFF_PROCESSING_STEPS = [
-  "geotiff",
-  "cog",
-  "thumbnail",
-  "metadata",
-  "aoi_v1",
-  ...PREDICTION_PROCESSING_STEPS,
-  // Open-vocabulary tile embeddings run last (needs the standardized ortho).
-  "embeddings_v1",
-  // Acquisition-date estimate + audit prefill (reads the stored COG and AOI).
-  "doy_estimation_v1",
-];
-
-const RAW_IMAGES_PROCESSING_STEPS = [
-  "odm_processing",
-  ...GEOTIFF_PROCESSING_STEPS,
-];
 
 const DuplicateUploadNotice = ({ datasetId }: { datasetId: number | null }) => (
   <span data-testid="upload-duplicate-notice">
@@ -149,26 +103,17 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
     }
   }, [priwaProject, form]);
 
-  const { fileList, fileName, onFileChange, beforeUpload } = useFileUpload();
+  const { fileList, onFileChange, beforeUpload } = useFileUpload();
 
-  const { session } = useAuth();
   const [pickerType, setPickerType] = useState(pickerTypeOptions[0]);
-  const [isUploading, setIsUploading] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   const { authors } = useData();
   // console.log("authors in upload modal", authors);
-  const {
-    showUploadingNotification,
-    updateUploadProgress,
-    showSuccessNotification,
-    showErrorNotification,
-    closeNotification,
-  } = useUploadNotification(uploadKey, fileName);
 
   const [uploadValidationError, setUploadValidationError] = useState<React.ReactNode>(null);
   const [uploadValidationWarnings, setUploadValidationWarnings] = useState<string[]>([]);
   const { track } = useAnalytics("profile");
+  const runUpload = useResumableUpload("profile");
 
 
   const handleBeforeUpload = async (file: RcFile) => {
@@ -199,135 +144,48 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
     }
   };
 
-  const uploadOrthophoto = async (file: RcFile, metadata: UploadMetadata): Promise<UploadResponse> => {
-    return new Promise((resolve, reject) => {
-      // Create a new AbortController for this upload
-      abortControllerRef.current = new AbortController();
-
-      uploadOrtho({
-        uploadId: uploadKey,
-        file,
-        session,
-        metadata,
-        signal: abortControllerRef.current.signal,
-        onSuccess: (response) => {
-          resolve(response);
-        },
-        onError: (error) => {
-          reject(error);
-        },
-        onProgress: (event) => {
-          const percent = Math.round(event.percent);
-          updateUploadProgress(percent, cancelUpload);
-        },
-      });
-    });
-  };
-
-  const getValidAccessToken = async (): Promise<string> => {
-    if (isTokenExpiringSoon(session)) {
-      const { data, error } = await supabase.auth.refreshSession();
-      if (error) {
-        if (isInvalidSessionError(error)) {
-          await clearLocalSupabaseSession();
-          throw new Error("Session expired. Please sign in again.");
-        }
-
-        throw error;
-      }
-      return data.session!.access_token;
-    }
-    return session!.access_token;
-  };
-
-  const processDataset = async (datasetId: number, token: string, processingSteps: string[]) => {
-    await addProcess(datasetId, processingSteps, token);
-  };
-
-  const cancelUpload = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-      closeNotification();
-      setIsUploading(false);
-    }
-  };
-
   const handleUpload = async (values: IFormValues) => {
-    setIsUploading(true);
-    showUploadingNotification(cancelUpload);
-
-    try {
-      const uploadFile = fileList[0];
-      if (!uploadFile?.originFileObj) {
-        throw new Error("No file selected for upload.");
-      }
-
-      // Detect file type and validate file size
-      const uploadType = detectUploadType(uploadFile.name);
-      track("upload_started", {
-        upload_type: uploadType,
-      });
-      validateFileSize(uploadFile.originFileObj, uploadType);
-      if (uploadType === UploadType.GEOTIFF) {
-        await validateGeoTiffUpload(uploadFile.originFileObj);
-      }
-
-      // console.log("values.author", values.author);
-      // Create metadata object
-      const metadata: UploadMetadata = {
-        license: values.license,
-        platform: String(values.platform),
-        authors: values.author,
-        upload_type: uploadType,
-        project_id: undefined,
-        aquisition_year: values.aquisition_date?.year(),
-        aquisition_month: values.aquisition_date ? values.aquisition_date.month() + 1 : undefined,
-        aquisition_day: values.aquisition_date?.date(),
-        additional_information: values.additional_information,
-        data_access: values.data_access,
-        citation_doi: values.doi,
-      };
-      // console.log("metadata", metadata);
-
-      // Upload orthophoto with metadata
-      const uploadResponse = await uploadOrthophoto(uploadFile.originFileObj, metadata);
-      if (!uploadResponse.id) {
-        throw new Error("Upload failed to return an ID.");
-      }
-
-      // Get valid access token
-      const validAccessToken = await getValidAccessToken();
-
-      // Process dataset with appropriate steps based on upload type
-      const processingSteps =
-        uploadType === UploadType.RAW_IMAGES_ZIP
-          ? RAW_IMAGES_PROCESSING_STEPS
-          : GEOTIFF_PROCESSING_STEPS;
-
-      await processDataset(Number(uploadResponse.id), validAccessToken, processingSteps);
-      track("upload_completed", {
-        dataset_id: Number(uploadResponse.id),
-        upload_type: uploadType,
-      });
-
-      showSuccessNotification();
-    } catch (error) {
-      // Check if the error was caused by user abortion
-      if (error instanceof DOMException && error.name === "AbortError") {
-        // console.log("Upload was cancelled by the user");
-      } else {
-        console.error("Upload error:", error);
-        track("upload_failed", {
-          upload_type:
-            fileList[0]?.name ? detectUploadType(fileList[0].name) : undefined,
-          failure_reason: error instanceof Error ? error.message : "unknown_error",
-        });
-        showErrorNotification(error instanceof UploadRejectedError ? error.message : undefined);
-      }
-    } finally {
-      setIsUploading(false);
+    const uploadFile = fileList[0]?.originFileObj;
+    if (!uploadFile) {
+      message.error("No file selected for upload.");
+      return;
     }
+    const uploadType = detectUploadType(uploadFile.name);
+    try {
+      validateFileSize(uploadFile, uploadType);
+      if (uploadType === UploadType.GEOTIFF) {
+        await validateGeoTiffUpload(uploadFile);
+      }
+    } catch (error) {
+      track("upload_failed", {
+        upload_type: uploadType,
+        failure_reason: error instanceof Error ? error.message : "unknown_error",
+      });
+      message.error(error instanceof Error ? error.message : "File validation failed.");
+      return;
+    }
+
+    const metadata: UploadMetadata = {
+      // Every contribution is published under CC BY; the form has no license choice.
+      license: "CC BY",
+      platform: String(values.platform),
+      authors: values.author,
+      upload_type: uploadType,
+      aquisition_year: values.aquisition_date?.year(),
+      aquisition_month: values.aquisition_date ? values.aquisition_date.month() + 1 : undefined,
+      aquisition_day: values.aquisition_date?.date(),
+      additional_information: values.additional_information,
+      data_access: values.data_access,
+      citation_doi: values.doi,
+    };
+
+    await runUpload({
+      file: uploadFile,
+      uploadId: uploadKey,
+      metadata,
+      uploadType,
+      processingSteps: processingStepsFor(uploadType),
+    });
   };
 
   const onFormFinish = (values: IFormValues) => {
@@ -336,9 +194,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isVisible, onClose, uploadKey
   };
 
   const handleModalClose = () => {
-    if (isUploading) {
-      cancelUpload();
-    }
     setUploadValidationError(null);
     setUploadValidationWarnings([]);
     onClose();
