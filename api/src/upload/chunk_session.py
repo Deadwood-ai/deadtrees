@@ -28,6 +28,9 @@ UPLOAD_SESSIONS_DIR = '.upload-sessions'
 # Largest accepted chunk. The web app sends 50 MB and the CLI 100 MB chunks;
 # nginx caps the request body a little above this (storage-server.conf).
 MAX_CHUNK_BYTES = 128 * 1024 * 1024
+# Most chunks one upload may have (as S3 multipart). Bounds the receipt, whose
+# list has one entry per chunk index (500 GB in the web app's 50 MiB chunks).
+MAX_CHUNKS = 10_000
 # Chunks are hashed and copied in blocks of this size, never read whole.
 COPY_BLOCK_BYTES = 1024 * 1024
 # A request waits this long for another request of the same upload (a parallel

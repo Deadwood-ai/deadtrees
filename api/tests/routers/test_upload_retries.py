@@ -131,7 +131,7 @@ def test_concurrent_final_requests_have_one_result(upload):
 	assert all(result == retry.json() for result in successes)
 
 
-@pytest.mark.parametrize(('index', 'total'), [(-1, 3), (0, 0), (3, 3)])
+@pytest.mark.parametrize(('index', 'total'), [(-1, 3), (0, 0), (3, 3), (10_000, 10_001)])
 def test_invalid_chunk_numbers(upload, index, total):
 	send, _ = upload
 	assert send(index, b'chunk', total=total).status_code == 422

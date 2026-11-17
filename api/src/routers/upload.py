@@ -21,7 +21,7 @@ from shared.zip_utils import (
 
 from ..upload.upload import create_dataset_entry
 from ..upload.abandoned_uploads import UPLOAD_ID_PATTERN, retention_days
-from ..upload.chunk_session import MAX_CHUNK_BYTES, UPLOAD_SESSIONS_DIR, locked_chunk_session, measure_chunk
+from ..upload.chunk_session import MAX_CHUNK_BYTES, MAX_CHUNKS, UPLOAD_SESSIONS_DIR, locked_chunk_session, measure_chunk
 from ..upload.upload_status import UploadStatus, list_unfinished_uploads, read_upload_status
 from ..upload.geotiff_processor import process_geotiff_upload
 from ..upload.raw_images_processor import process_raw_images_upload
@@ -78,7 +78,7 @@ def get_upload_status(upload_id: UploadIdParam, token: Annotated[str, Depends(oa
 def upload_chunk(
 	file: UploadFile,
 	chunk_index: Annotated[int, Form(ge=0)],
-	chunks_total: Annotated[int, Form(gt=0)],
+	chunks_total: Annotated[int, Form(gt=0, le=MAX_CHUNKS)],
 	upload_id: Annotated[str, Form(pattern=UPLOAD_ID_PATTERN.pattern)],
 	token: Annotated[str, Depends(oauth2_scheme)],
 	# Dataset required fields
