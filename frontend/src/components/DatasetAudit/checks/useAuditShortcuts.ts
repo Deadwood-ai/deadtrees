@@ -13,6 +13,10 @@ const typing = (target: EventTarget | null) =>
 		["TEXTAREA", "SELECT"].includes(target.tagName) ||
 		(target instanceof HTMLInputElement && !["radio", "checkbox"].includes(target.type)));
 
+/** A key pressed in a dialog (a confirm step) belongs to the dialog, so the page behind it
+ * cannot move on to another target while it asks. */
+const inDialog = (target: EventTarget | null) => target instanceof HTMLElement && !!target.closest('[role="dialog"]');
+
 /** Enter and Space on a focused button press that button. */
 const onButton = (target: EventTarget | null) => target instanceof HTMLElement && !!target.closest("button");
 
@@ -29,7 +33,8 @@ function keyName(event: KeyboardEvent): string {
 /** The audit's keyboard: go through the steps with the keys, the mouse only to dig deeper. Each
  * part of the page passes the keys it answers while it is active: the steps Enter, Shift+Enter
  * and Ctrl+S, step 1 K and X, the crop review its own keys. Keys are ignored while you type
- * in a field (except Ctrl+S), and Enter or Space on a focused button press that button. */
+ * in a field (except Ctrl+S) or in a dialog, and Enter or Space on a focused button press that
+ * button. */
 export function useAuditShortcuts(keys: AuditKeyMap, active: boolean) {
 	const current = useRef(keys);
 	current.current = keys;
@@ -37,6 +42,7 @@ export function useAuditShortcuts(keys: AuditKeyMap, active: boolean) {
 		if (!active) return;
 		const onKey = (event: KeyboardEvent) => {
 			const name = keyName(event);
+			if (inDialog(event.target)) return;
 			if (!name.startsWith("mod+") && (event.altKey || typing(event.target))) return;
 			if ((event.key === "Enter" || event.key === " ") && onButton(event.target)) return;
 			const action = current.current[name];

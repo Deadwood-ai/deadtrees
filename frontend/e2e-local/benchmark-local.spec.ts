@@ -95,6 +95,9 @@ const MODELS = [
 ];
 
 let saved: Record<string, unknown>[] = [];
+// crops taken out with audit.remove_benchmark_target, and the rpc calls made
+let removedCrops = new Set<number>();
+let rpcCalls: { name: string; body: Record<string, unknown> }[] = [];
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", headers: { "content-range": "0-0/1" }, json: body });
 const inList = (url: URL, column: string) => {
@@ -102,7 +105,7 @@ const inList = (url: URL, column: string) => {
   return value?.startsWith("in.(") ? value.slice(4, -1).split(",").map(Number) : null;
 };
 
-async function mockSupabase(page: Page) {
+async function mockSupabase(page: Page, { operator = false } = {}) {
   await installLocalSession(page, { user: auditor, supabaseUrl: localSupabaseUrl, refreshToken: "benchmark-local-e2e", acceptCookies: true });
   await page.route("**/audit/images/access", (route) => json(route, { files_url: "/bench-files", expires_at: Math.floor(Date.now() / 1000) + 3600 }));
   await page.route("**/bench-files/**", (route) => route.fulfill({ contentType: "image/png", body: PIXEL }));
@@ -111,10 +114,23 @@ async function mockSupabase(page: Page) {
     const url = new URL(request.url());
     const resource = url.pathname.split("/").at(-1);
     const object = request.headers()["accept"]?.includes("vnd.pgrst.object");
-    if (resource === "privileged_users") return json(route, { user_id: auditor.id, can_audit: true, can_operate: false });
+    if (resource === "privileged_users") return json(route, { user_id: auditor.id, can_audit: true, can_operate: operator });
+    if (resource === "remove_benchmark_target" || resource === "add_benchmark_target") {
+      const body = request.postDataJSON() as { p_dataset_id: number; p_crop_id: number | null };
+      rpcCalls.push({ name: resource, body });
+      const rows = MEMBERS[1].filter((m) => {
+        const member = m as { dataset_id: number; crop_id: number };
+        return member.dataset_id === body.p_dataset_id && (body.p_crop_id === null || member.crop_id === body.p_crop_id);
+      }) as { crop_id: number }[];
+      for (const row of rows) (resource === "remove_benchmark_target" ? removedCrops.add(row.crop_id) : removedCrops.delete(row.crop_id));
+      return json(route, resource === "remove_benchmark_target" ? rows : rows[0]);
+    }
     if (resource === "get_user_emails") return json(route, [other, auditor].map((u) => ({ user_id: u.id, email: u.email })));
     if (resource === "benchmarks") return json(route, BENCHMARKS);
-    if (resource === "benchmark_members") return json(route, MEMBERS[Number(url.searchParams.get("benchmark_id")?.slice(3))] ?? []);
+    if (resource === "benchmark_members") {
+      const members = (MEMBERS[Number(url.searchParams.get("benchmark_id")?.slice(3))] ?? []) as { crop_id: number | null }[];
+      return json(route, members.filter((m) => m.crop_id === null || !removedCrops.has(m.crop_id)));
+    }
     if (resource === "images") {
       const crops = inList(url, "crop_id");
       return json(route, crops ? CROP_IMAGES.filter((i) => crops.includes(i.crop_id!)) : DATASET_IMAGES);
@@ -128,6 +144,8 @@ async function mockSupabase(page: Page) {
       const ids = inList(url, "id");
       return json(route, ids ? CROPS.filter((c) => ids.includes(c.id)) : CROPS.filter((c) => c.crop_sets.includes("evaluation")));
     }
+    // the dataset evaluation excludes dataset 502 (its latest call is "major")
+    if (resource === "latest_assessments" && url.searchParams.get("verdict") === "eq.major") return json(route, [{ dataset_id: 502, assessor_kind: "person" }]);
     if (resource === "latest_assessments") return json(route, inList(url, "crop_id") ? OTHERS : []);
     if (resource === "assessments" && request.method() === "POST") {
       const rows = (request.postDataJSON() as Record<string, unknown>[]).map((r, i) => ({ ...row({}), ...r, id: 1000 + saved.length + i, assessor: auditor.id }));
@@ -142,6 +160,8 @@ async function mockSupabase(page: Page) {
 test.describe("benchmark labeling", () => {
   test.beforeEach(() => {
     saved = [];
+    removedCrops = new Set();
+    rpcCalls = [];
   });
 
   test("the tab counts what is open for you and opens the labeler", async ({ page }) => {
@@ -220,5 +240,81 @@ test.describe("benchmark labeling", () => {
     await expect.poll(() => saved.length).toBe(1);
     expect(saved[0]).toMatchObject({ check_key: "dataset_evaluation", dataset_id: 601, crop_id: null, layer: "image", verdict: "major", reason_code: "blurry", run_id: 77 });
     await expect(page.getByTestId("benchmark-reveal")).toContainText("Nobody else labeled this dataset yet");
+  });
+
+  test("crops on excluded datasets are marked and have their own filter", async ({ page }) => {
+    await mockSupabase(page);
+    await page.goto("/dataset-audit?tab=benchmark");
+    await expect(page.getByTestId("benchmark-card-prediction_quality")).toContainText("1 on excluded datasets");
+    await page.getByTestId("benchmark-excluded-prediction_quality").click();
+    await expect(page).toHaveURL(/filter=excluded/);
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 1");
+    await expect(page.getByTestId("benchmark-excluded")).toHaveText("Dataset excluded");
+    // auditors who are no operators cannot remove, by button or key
+    await expect(page.getByTestId("benchmark-remove")).toHaveCount(0);
+    await page.keyboard.press("Delete");
+    await expect(page.getByText("Remove from the benchmark?")).toHaveCount(0);
+    // the dataset evaluation labels exclusion blind: no such filter there
+    await page.goto("/dataset-audit/benchmark/dataset_evaluation?filter=all");
+    await expect(page.getByText("Excluded datasets")).toHaveCount(0);
+  });
+
+  test("an operator removes a crop after confirming, and Undo brings it back", async ({ page }) => {
+    await mockSupabase(page, { operator: true });
+    await page.goto("/dataset-audit/benchmark/prediction_quality?filter=all");
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 2");
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 2 of 2");
+
+    // Delete asks first; Cancel removes nothing
+    await page.keyboard.press("Delete");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Crop 102 of dataset 502 leaves pq-gold-dt1272 v2");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect(rpcCalls).toHaveLength(0);
+
+    await page.getByTestId("benchmark-remove").click();
+    await page.getByTestId("benchmark-remove-confirm").click();
+    await expect.poll(() => rpcCalls.map((c) => [c.name, c.body.p_crop_id])).toEqual([["remove_benchmark_target", 102]]);
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 1");
+    // a dataset with one crop offers no "remove all its crops"
+    await page.getByTestId("benchmark-remove").click();
+    await expect(page.getByTestId("benchmark-remove-dataset")).toHaveCount(0);
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+    await page.getByTestId("benchmark-undo-remove").click();
+    await expect.poll(() => rpcCalls.map((c) => c.name)).toEqual(["remove_benchmark_target", "add_benchmark_target"]);
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 2");
+    await expect(page.getByTestId("benchmark-undo-remove")).toHaveCount(0);
+  });
+
+  test("Undo still works after removing the last crop a filter shows", async ({ page }) => {
+    await mockSupabase(page, { operator: true });
+    await page.goto("/dataset-audit/benchmark/prediction_quality?filter=excluded");
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 1");
+    await page.keyboard.press("Delete");
+    await page.getByTestId("benchmark-remove-confirm").click();
+    await expect(page.getByText("No target matches this filter.")).toBeVisible();
+    await expect(page.getByTestId("benchmark-remove")).toHaveCount(0);
+    await page.getByTestId("benchmark-undo-remove").click();
+    await expect.poll(() => rpcCalls.map((c) => [c.name, c.body.p_crop_id])).toEqual([
+      ["remove_benchmark_target", 102],
+      ["add_benchmark_target", 102],
+    ]);
+    await expect(page.getByTestId("benchmark-position")).toHaveText("1 / 1");
+  });
+
+  test("the confirm step holds its crop while the keys behind it are pressed", async ({ page }) => {
+    await mockSupabase(page, { operator: true });
+    await page.goto("/dataset-audit/benchmark/prediction_quality?filter=all");
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 1 of 2");
+    await page.keyboard.press("Delete");
+    await expect(page.getByRole("dialog")).toContainText("Crop 101 of dataset 501");
+    // the crop review's keys do not reach the page while the dialog asks
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("dialog")).toContainText("Crop 101 of dataset 501");
+    await page.getByTestId("benchmark-remove-confirm").click();
+    await expect.poll(() => rpcCalls.map((c) => [c.name, c.body.p_dataset_id, c.body.p_crop_id])).toEqual([["remove_benchmark_target", 501, 101]]);
   });
 });

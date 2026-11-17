@@ -146,6 +146,9 @@ export interface IBenchmarkTarget {
   people: IAuditAssessment[];
   /** model and rule rows, latest per assessor and layer */
   models: IAuditAssessment[];
+  /** crop benchmarks: who calls the target's dataset excluded in the dataset evaluation, a person
+   * (the audit's call or a labeler) or only a model or rule; null when nobody does */
+  excludedBy: "person" | "model" | null;
 }
 
 export interface IBenchmarkData {

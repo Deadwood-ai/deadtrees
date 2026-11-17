@@ -1,15 +1,11 @@
 import React, { createContext, useState, useContext, useMemo } from "react";
-import { AdvancedFilters } from "../components/FilterModal";
+import { EMPTY_ARCHIVE_FILTERS, type ArchiveFilters } from "../utils/datasetArchiveFilters";
 
-type FilterTag = "platform" | "license" | "authors_image" | "admin_level_1" | "admin_level_3" | "biome";
-
+// Lives above the router outlet so the archive keeps its filters when a visitor
+// opens a dataset and comes back.
 interface DatasetFilterContextType {
-  filter: string;
-  setFilter: (filter: string) => void;
-  filterTag: FilterTag;
-  setFilterTag: (filterTag: FilterTag) => void;
-  advancedFilters: AdvancedFilters;
-  setAdvancedFilters: (filters: AdvancedFilters) => void;
+  filters: ArchiveFilters;
+  setFilters: (filters: ArchiveFilters) => void;
   sortDirection: "asc" | "desc";
   setSortDirection: (direction: "asc" | "desc") => void;
   filterByViewport: boolean;
@@ -17,19 +13,8 @@ interface DatasetFilterContextType {
 }
 
 const DatasetFilterContext = createContext<DatasetFilterContextType>({
-  filter: "",
-  setFilter: () => {},
-  filterTag: "platform",
-  setFilterTag: () => {},
-  advancedFilters: {
-    hasDeadwoodPrediction: false,
-    hasLabels: false,
-    biome: null,
-    authors: [],
-    platform: "",
-    dateRange: [2010, new Date().getFullYear()],
-  },
-  setAdvancedFilters: () => {},
+  filters: EMPTY_ARCHIVE_FILTERS,
+  setFilters: () => {},
   sortDirection: "desc",
   setSortDirection: () => {},
   filterByViewport: true,
@@ -37,34 +22,21 @@ const DatasetFilterContext = createContext<DatasetFilterContextType>({
 });
 
 export const DatasetFilterProvider = (props: { children: React.ReactNode }) => {
-  const [filter, setFilter] = useState<string>("");
-  const [filterTag, setFilterTag] = useState<FilterTag>("platform");
-  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
-    hasDeadwoodPrediction: false,
-    hasLabels: false,
-    biome: null,
-    authors: [],
-    platform: "",
-    dateRange: [2010, new Date().getFullYear()],
-  });
+  const [filters, setFilters] = useState<ArchiveFilters>(EMPTY_ARCHIVE_FILTERS);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filterByViewport, setFilterByViewport] = useState(true);
 
   // A fresh object here would re-render every consumer on each provider render.
   const value = useMemo(
     () => ({
-      filter,
-      setFilter,
-      filterTag,
-      setFilterTag,
-      advancedFilters,
-      setAdvancedFilters,
+      filters,
+      setFilters,
       sortDirection,
       setSortDirection,
       filterByViewport,
       setFilterByViewport,
     }),
-    [filter, filterTag, advancedFilters, sortDirection, filterByViewport],
+    [filters, sortDirection, filterByViewport],
   );
 
   return <DatasetFilterContext.Provider value={value}>{props.children}</DatasetFilterContext.Provider>;

@@ -43,7 +43,8 @@ const archiveItem = (id: number, region: string) => ({
   aquisition_month: "5",
   aquisition_day: "6",
   data_access: "public",
-  bbox: null,
+  // A footprint keeps the row in the list while it follows the map view.
+  bbox: "BOX(13.40 52.50,13.41 52.51)",
   thumbnail_path: null,
   admin_level_1: "DEU",
   admin_level_2: region,
@@ -362,10 +363,14 @@ test.describe("search UX (local)", () => {
     await input.fill("forest");
     await input.press("Enter");
 
+    // A timed-out ranking is retried once with the same embedding, then explained.
     await expect(
-      page.getByText("canceling statement due to statement timeout"),
+      page.getByText("The search took too long. Please try again."),
     ).toBeVisible();
     expect(embedRequests).toEqual([{ query: "forest", dataset_id: null }]);
+    expect(
+      rpcRequests.filter((r) => r.name === "search_datasets_by_embedding"),
+    ).toHaveLength(2);
     expect(loggedQueries).toHaveLength(0);
   });
 
@@ -391,9 +396,7 @@ test.describe("search UX (local)", () => {
     );
 
     await page.goto("/dataset");
-    await page
-      .getByRole("checkbox", { name: "Filter list by map view" })
-      .uncheck();
+    await page.getByRole("button", { name: "Filter list by map view" }).click();
     await selectAiSearch(page);
     const input = page.getByRole("textbox", { name: "AI search", exact: true });
     await input.fill("forest");
@@ -416,7 +419,7 @@ test.describe("search UX (local)", () => {
   }) => {
     await installAuditor(page, false);
     await page.goto("/dataset?q=forest");
-    await page.getByRole("checkbox", { name: "Filter list by map view" }).uncheck();
+    await page.getByRole("button", { name: "Filter list by map view" }).click();
 
     await expect(page.getByRole("button", { name: "Search mode" })).toBeVisible();
     await expect(page.getByText(/Ranked by/)).toBeVisible();
@@ -433,7 +436,7 @@ test.describe("search UX (local)", () => {
   test("one search field switches modes without combining filters and restores history", async ({ page }) => {
     await installAuditor(page);
     await page.goto("/dataset?text=5002");
-    await page.getByRole("checkbox", { name: "Filter list by map view" }).uncheck();
+    await page.getByRole("button", { name: "Filter list by map view" }).click();
     const input = page.getByTestId("dataset-search-input");
     await expect(input).toHaveCount(1);
     await expect(page.getByTestId("dataset-list-item")).toHaveCount(1);
@@ -441,7 +444,7 @@ test.describe("search UX (local)", () => {
     await expect(page.getByTestId("dataset-list-item")).toHaveCount(2);
     await expect(page.getByTestId("dataset-list-item").first()).toContainText("Alphaville");
     await page.getByRole("button", { name: "Search mode" }).click();
-    await page.getByRole("menuitem", { name: "Author / place", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Text", exact: true }).click();
     await expect(input).toHaveValue("");
     await expect(page.getByTestId("dataset-list-item")).toHaveCount(2);
     await page.goBack();
@@ -463,14 +466,14 @@ test.describe("search UX (local)", () => {
       await fulfillJson(route, [{ dataset_id: 5001, similarity: 0.9, tile_count: 3 }]);
     });
     await page.goto("/dataset");
-    await page.getByRole("checkbox", { name: "Filter list by map view" }).uncheck();
+    await page.getByRole("button", { name: "Filter list by map view" }).click();
     await selectAiSearch(page);
     await page.getByTestId("dataset-search-input").fill("forest");
     await page.getByRole("button", { name: "Run AI search" }).click();
     await expect.poll(() => started).toBe(true);
     await page.getByRole("button", { name: "Search mode" }).click();
-    await page.getByRole("menuitem", { name: "Author / place", exact: true }).click();
-    await page.getByRole("textbox", { name: "Search authors or places" }).fill("5002");
+    await page.getByRole("menuitem", { name: "Text", exact: true }).click();
+    await page.getByRole("textbox", { name: "Search authors, places or descriptions" }).fill("5002");
     release();
     await expect(page.getByTestId("dataset-list-item")).toHaveCount(1);
     await expect(page.getByTestId("dataset-list-item").first()).toContainText("5002");

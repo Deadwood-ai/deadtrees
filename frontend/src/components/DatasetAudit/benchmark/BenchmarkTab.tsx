@@ -27,6 +27,7 @@ function BenchmarkCard({ checkKey, title, benchmark }: { checkKey: AuditCheckKey
 	const targets = data?.targets ?? [];
 	const left = targets.filter((t) => !answeredBy(t, user?.id)).length;
 	const disagree = targets.filter((t) => labelersDisagree(checkKey, t.people)).length;
+	const excluded = targets.filter((t) => t.excludedBy).length;
 	const to = (filter: string) => `/dataset-audit/benchmark/${checkKey}?filter=${filter}`;
 	return (
 		<div className="flex flex-col gap-2 rounded-xl border border-gray-200 p-4" data-testid={`benchmark-card-${checkKey}`}>
@@ -46,6 +47,7 @@ function BenchmarkCard({ checkKey, title, benchmark }: { checkKey: AuditCheckKey
 				<>
 					<div className="text-sm">
 						<b data-testid={`benchmark-open-${checkKey}`}>{left}</b> open for you · {targets.length} {checkKey === "prediction_quality" ? "crops" : "datasets"} · {disagree} where labelers disagree
+						{excluded > 0 && <> · {excluded} on excluded datasets</>}
 					</div>
 					<div className="flex flex-wrap gap-2">
 						<Button type="primary" disabled={!left} onClick={() => navigate(to("open"))}>
@@ -55,6 +57,11 @@ function BenchmarkCard({ checkKey, title, benchmark }: { checkKey: AuditCheckKey
 						<Button disabled={!disagree} onClick={() => navigate(to("disagree"))}>
 							Labelers disagree
 						</Button>
+						{excluded > 0 && (
+							<Button danger onClick={() => navigate(to("excluded"))} data-testid={`benchmark-excluded-${checkKey}`}>
+								Excluded datasets
+							</Button>
+						)}
 					</div>
 				</>
 			)}

@@ -156,3 +156,85 @@ def test_v2_opens_with_v1s_crops_splits_and_truth(db):
 	# a second run adds nothing
 	db.execute(seed_block())
 	assert len(members(v2)) == 2
+
+
+def remove(db, user, dataset, crop=None, check='prediction_quality'):
+	act_as(db, user)
+	rows = db.execute(
+		'SELECT dataset_id, crop_id, split FROM audit.remove_benchmark_target(%s,%s,%s) ORDER BY crop_id', (check, dataset, crop)
+	).fetchall()
+	as_admin(db)
+	return rows
+
+
+def member_targets(db, benchmark_id):
+	return db.execute(
+		'SELECT dataset_id, crop_id FROM audit.benchmark_members WHERE benchmark_id=%s ORDER BY dataset_id, crop_id',
+		(benchmark_id,),
+	).fetchall()
+
+
+def test_operators_remove_a_crop_from_the_open_version_and_its_labels_stay(db):
+	operator, auditor, owner = create_operator(db), create_user(db, can_audit=True), create_user(db)
+	dataset = create_dataset(db, owner)
+	v1 = benchmark(db)
+	kept, dropped = create_crop(db, dataset), create_crop(db, dataset, x0=512)
+	for crop in (kept, dropped):
+		member(db, v1, dataset, crop)
+	freeze(db, v1)
+	v2 = benchmark(db, version='v2')
+	for crop in (kept, dropped):
+		add(db, operator, dataset, crop)
+	person_row(db, auditor, dataset, dropped, 'major')
+
+	split = db.execute('SELECT split FROM audit.benchmark_members WHERE benchmark_id=%s AND crop_id=%s', (v2, dropped)).fetchone()[0]
+	assert remove(db, operator, dataset, dropped) == [(dataset, dropped, split)]
+	assert member_targets(db, v2) == [(dataset, kept)]
+	# the frozen version and the label are untouched
+	assert len(member_targets(db, v1)) == 2
+	assert db.execute('SELECT count(*) FROM audit.assessments WHERE crop_id=%s', (dropped,)).fetchone()[0] == 1
+	# removing it again removes nothing; adding it back gives it its side again
+	assert remove(db, operator, dataset, dropped) == []
+	assert add(db, operator, dataset, dropped)[3] == split
+
+
+def test_removing_a_dataset_from_a_crop_benchmark_removes_all_its_crops(db):
+	operator, owner = create_operator(db), create_user(db)
+	dataset, other = create_dataset(db, owner), create_dataset(db, owner)
+	v2 = benchmark(db, version='v2')
+	crops = [create_crop(db, dataset, x0=512 * i) for i in range(2)]
+	for crop in crops:
+		add(db, operator, dataset, crop)
+	survivor = create_crop(db, other)
+	add(db, operator, other, survivor)
+
+	assert [r[1] for r in remove(db, operator, dataset)] == sorted(crops)
+	assert member_targets(db, v2) == [(other, survivor)]
+
+
+def test_a_dataset_leaves_the_dataset_evaluation_gold_set(db):
+	operator, owner = create_operator(db), create_user(db)
+	dataset = create_dataset(db, owner)
+	gold = db.execute(
+		"SELECT id FROM audit.benchmarks WHERE name='dataset-evaluation-gold' AND version='v1' AND frozen_at IS NULL"
+	).fetchone()[0]
+	add(db, operator, dataset, check='dataset_evaluation')
+	assert [r[:2] for r in remove(db, operator, dataset, check='dataset_evaluation')] == [(dataset, None)]
+	assert (dataset, None) not in member_targets(db, gold)
+
+
+def test_only_operators_remove_and_only_from_an_open_version(db):
+	operator, auditor, owner = create_operator(db), create_user(db, can_audit=True), create_user(db)
+	dataset = create_dataset(db, owner)
+	crop = create_off_grid_crop(db, dataset)
+	v1 = benchmark(db)
+	member(db, v1, dataset, crop)
+	freeze(db, v1)
+	# no open version: nothing to remove from, and the frozen one stays
+	with pytest.raises(psycopg.errors.NoDataFound), db.transaction():
+		remove(db, operator, dataset, crop)
+	benchmark(db, version='v2')
+	add(db, operator, dataset, crop)
+	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
+		remove(db, auditor, dataset, crop)
+	assert member_targets(db, v1) == [(dataset, crop)]

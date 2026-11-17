@@ -18,8 +18,8 @@ from shared.settings import settings
 from ..utils.ssh import pull_file_from_storage_server
 from ..utils.stored_inputs import (
 	NO_ORTHO_HASH,
-	local_cog,
 	ortho_sha256,
+	readable_cog,
 	stored_cog,
 	tile_rows,
 )
@@ -64,10 +64,12 @@ def handle(ctx) -> dict:
 	)
 	cog = stored_cog(client, dataset_id)
 	ortho = _ortho(client, dataset_id)
-	with tempfile.TemporaryDirectory(prefix='dataset-evaluation-') as folder:
-		cog_file = local_cog(cog, Path(folder), ctx.token, dataset_id, log)
+	with (
+		tempfile.TemporaryDirectory(prefix='dataset-evaluation-') as folder,
+		readable_cog(cog, Path(folder), ctx.token, dataset_id, log) as cog_source,
+	):
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
-		seen = read_inputs(str(cog_file), seed=dataset_id, tiles=tiles(client, dataset_id))
+		seen = read_inputs(cog_source, seed=dataset_id, tiles=tiles(client, dataset_id))
 	# The thresholds the version was registered with (a version before they were recorded runs with today's).
 	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
 	image_hash, candidates = None, []

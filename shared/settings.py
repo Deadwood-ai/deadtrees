@@ -141,6 +141,10 @@ class Settings(BaseSettings):
 	UVICORN_ROOT_PATH: str = '/api/v1'
 	UVICORN_PROXY_HEADERS: bool = True
 	SEARCH_RATE_LIMIT_TRUSTED_PROXIES: str = '127.0.0.1,::1,172.16.0.0/12'
+	# Load the CLIP text encoder when the API starts instead of on the first AI
+	# search, which otherwise waits for the model load. Off by default so tests and
+	# local runs do not load the ~3.9GB model.
+	SEARCH_MODEL_WARMUP: bool = False
 
 	# storage server settings
 	STORAGE_SERVER_IP: str = ''

@@ -4,6 +4,8 @@ import { Button } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import EmptyStatePanel from "./EmptyStatePanel";
 import { IDataset, IDatasetArchiveItem } from "../types/dataset";
+import type { ArchiveChipFilter } from "../utils/datasetArchiveFilters";
+import type { InfoSnippet } from "../utils/archiveTextSearch";
 
 type ListDataset = IDataset | IDatasetArchiveItem;
 
@@ -12,12 +14,12 @@ interface DataListProps {
   hoveredItem: number | null;
   setHoveredItem: (id: number | null) => void;
   visibleFeatures: string[];
-  onFilterClick: (
-    filterValue: string,
-    filterType: "platform" | "license" | "authors_image" | "admin_level_1" | "admin_level_3" | "biome",
-  ) => void;
-  searchValue: string;
+  onFilterClick: (key: ArchiveChipFilter, value: string) => void;
   filterByViewport: boolean;
+  // Frames every match on the map when the current view hides them all.
+  onZoomToMatches?: () => void;
+  // The matched part of a dataset's additional information, when it matched.
+  findInfoSnippet?: (datasetId: number) => InfoSnippet | null;
   scores?: Map<number, number> | null;
   semanticQuery?: string | null;
 }
@@ -28,26 +30,27 @@ function DataList({
   setHoveredItem,
   visibleFeatures,
   onFilterClick,
-  searchValue,
   filterByViewport,
+  onZoomToMatches,
+  findInfoSnippet,
   scores,
   semanticQuery,
 }: DataListProps) {
   const [nItems, setNItems] = useState(50);
 
-  // Filter data by visible features in the map viewport only when:
-  // 1. Not searching (text or semantic)
-  // 2. Viewport filtering is enabled
+  // "Filter list by map view" narrows every result, searches included, so a
+  // visitor can look for one author's or one query's datasets in a region.
   //
   // Both lists hold every dataset in the archive (~7.5k), so a linear scan of
   // visibleFeatures per item is quadratic and blocks the main thread for ~90ms
   // on each render — which is every keystroke, pan and hover. A Set lookup keeps
   // this at ~1.5ms.
   const visibleData = useMemo(() => {
-    if (searchValue || scores || !filterByViewport) return data;
+    if (!filterByViewport) return data;
     const visibleIds = new Set(visibleFeatures);
     return data.filter((item) => visibleIds.has(item.id.toString()));
-  }, [data, visibleFeatures, searchValue, scores, filterByViewport]);
+  }, [data, visibleFeatures, filterByViewport]);
+  const hiddenByMap = data.length - visibleData.length;
 
   const handleMoreItems = () => {
     setNItems(nItems + 50);
@@ -55,12 +58,26 @@ function DataList({
 
   return (
     <div className="flex-1 space-y-1.5 overflow-y-auto pr-1 md:space-y-2">
-      {visibleData.length === 0 ? (
+      {visibleData.length === 0 && hiddenByMap > 0 ? (
+        <EmptyStatePanel
+          testId="dataset-empty-results"
+          icon={<SearchOutlined />}
+          title="No matches in this map view"
+          description={`${hiddenByMap} ${hiddenByMap === 1 ? "image matches" : "images match"} elsewhere.`}
+          action={
+            onZoomToMatches && (
+              <Button onClick={onZoomToMatches} data-testid="dataset-zoom-to-matches">
+                Show on map
+              </Button>
+            )
+          }
+        />
+      ) : visibleData.length === 0 ? (
         <EmptyStatePanel
           testId="dataset-empty-results"
           icon={<SearchOutlined />}
           title="No drone images match"
-          description="Zoom out, move the map or clear a filter to see more."
+          description="Clear a filter or change the search to see more."
         />
       ) : (
         <>
@@ -77,6 +94,7 @@ function DataList({
                     setHoveredItem={setHoveredItem}
                     onFilterClick={onFilterClick}
                     score={scores?.get(item.id) ?? null}
+                    infoSnippet={findInfoSnippet?.(item.id) ?? null}
                     semanticQuery={semanticQuery ?? null}
                   />
                 ),

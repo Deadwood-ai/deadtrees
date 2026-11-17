@@ -1,4 +1,5 @@
 import os
+import threading
 import uuid
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
@@ -117,58 +118,95 @@ def push_file_to_storage_server(local_file_path: str, remote_file_path: str, tok
 	a partial upload.
 	"""
 	with _storage_sftp(token, dataset_id) as sftp:
-		temp_remote_path = f'{remote_file_path}.{uuid.uuid4().hex}.tmp'
-		try:
-			# Create missing parent directories (UUID-prefixed paths, nested audit image folders)
-			missing = []
-			for parent in PurePosixPath(remote_file_path).parents:
-				try:
-					sftp.stat(str(parent))
-					break
-				except IOError:
-					missing.append(str(parent))
-			for remote_dir in reversed(missing):
-				logger.info(
-					'Creating remote directory',
-					LogContext(
-						category=LogCategory.SSH, token=token, dataset_id=dataset_id, extra={'remote_dir': remote_dir}
-					),
-				)
-				sftp.mkdir(remote_dir)
+		_push_over(sftp, local_file_path, remote_file_path, token, dataset_id)
 
-			sftp.put(local_file_path, temp_remote_path)
-			sftp.posix_rename(temp_remote_path, remote_file_path)
 
-			logger.info(
-				'File successfully pushed to storage server',
-				LogContext(
-					category=LogCategory.SSH,
-					token=token,
-					dataset_id=dataset_id,
-					extra={'remote_path': remote_file_path},
-				),
-			)
-
-		except Exception as e:
+def _push_over(sftp, local_file_path: str, remote_file_path: str, token: str, dataset_id: int):
+	"""push_file_to_storage_server over an open SFTP session."""
+	temp_remote_path = f'{remote_file_path}.{uuid.uuid4().hex}.tmp'
+	try:
+		# Create missing parent directories (UUID-prefixed paths, nested audit image folders)
+		missing = []
+		for parent in PurePosixPath(remote_file_path).parents:
 			try:
-				sftp.remove(temp_remote_path)
+				sftp.stat(str(parent))
+				break
 			except IOError:
-				pass
-
-			logger.error(
-				'Failed to push file to storage server',
+				missing.append(str(parent))
+		for remote_dir in reversed(missing):
+			logger.info(
+				'Creating remote directory',
 				LogContext(
-					category=LogCategory.SSH,
-					token=token,
-					dataset_id=dataset_id,
-					extra={
-						'error': str(e),
-						'remote_path': remote_file_path,
-						'local_path': local_file_path,
-					},
+					category=LogCategory.SSH, token=token, dataset_id=dataset_id, extra={'remote_dir': remote_dir}
 				),
 			)
-			raise
+			sftp.mkdir(remote_dir)
+
+		sftp.put(local_file_path, temp_remote_path)
+		sftp.posix_rename(temp_remote_path, remote_file_path)
+
+		logger.info(
+			'File successfully pushed to storage server',
+			LogContext(
+				category=LogCategory.SSH,
+				token=token,
+				dataset_id=dataset_id,
+				extra={'remote_path': remote_file_path},
+			),
+		)
+
+	except Exception as e:
+		try:
+			sftp.remove(temp_remote_path)
+		except IOError:
+			pass
+
+		logger.error(
+			'Failed to push file to storage server',
+			LogContext(
+				category=LogCategory.SSH,
+				token=token,
+				dataset_id=dataset_id,
+				extra={
+					'error': str(e),
+					'remote_path': remote_file_path,
+					'local_path': local_file_path,
+				},
+			),
+		)
+		raise
+
+
+class StorageConnection:
+	"""One SFTP session for many uploads (an audit run stores dozens of images; a new
+	connection for each took about a second). A session that broke is opened again once."""
+
+	def __init__(self):
+		self._session = None
+		self._sftp = None
+		self._lock = threading.Lock()
+
+	def push(self, local_file_path: str, remote_file_path: str, token: str, dataset_id: int) -> None:
+		with self._lock:
+			for attempt in (1, 2):
+				if self._sftp is None:
+					self._session = _storage_sftp(token, dataset_id)
+					self._sftp = self._session.__enter__()
+				try:
+					_push_over(self._sftp, local_file_path, remote_file_path, token, dataset_id)
+					return
+				except (OSError, EOFError, paramiko.SSHException):
+					self._close()
+					if attempt == 2:
+						raise
+
+	def _close(self) -> None:
+		session, self._session, self._sftp = self._session, None, None
+		if session is not None:
+			try:
+				session.__exit__(None, None, None)
+			except Exception:
+				pass
 
 
 def delete_superseded_storage_file(

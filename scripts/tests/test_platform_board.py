@@ -321,41 +321,51 @@ def write_tick(state_dir, at):
 	(state_dir / board_wait.TICK_STATE).write_text(json.dumps({'last_tick_at': at}))
 
 
-def test_wait_reports_notes_and_the_reconcile_until_it_is_done(tmp_path):
+def test_wait_reports_notes_as_they_arrive(tmp_path):
 	write_tick(tmp_path, '2026-11-05T11:52:00Z')
 	(tmp_path / board_wait.OUTBOX).mkdir()
-	assert board_wait.pending(tmp_path, NOON) == {'notes': [], 'reconcile_due': True}
-	board_wait.reconciled(tmp_path, NOON)
-	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=1)) == {'notes': [], 'reconcile_due': False}
+	assert board_wait.pending(tmp_path, NOON, NOON) == {'notes': [], 'heartbeat': False}
 	note = tmp_path / board_wait.OUTBOX / '20261105T120000Z.md'
 	note.write_text('x')
-	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=2))['notes'] == [str(note)]
+	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=2), NOON) == {'notes': [str(note)], 'heartbeat': False}
 
 
-def test_reconcile_is_due_again_after_115_minutes(tmp_path):
-	write_tick(tmp_path, '2026-11-05T13:52:00Z')
+def test_the_heartbeat_comes_before_the_prompt_cache_expires(tmp_path):
+	write_tick(tmp_path, '2026-11-05T12:52:00Z')
 	(tmp_path / board_wait.OUTBOX).mkdir()
-	board_wait.reconciled(tmp_path, NOON)
-	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=114))['reconcile_due'] is False
-	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=115))['reconcile_due'] is True
+	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=49), NOON)['heartbeat'] is False
+	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=50), NOON)['heartbeat'] is True
+	# The wait polls every minute and the wake itself takes a moment: both fit
+	# inside the one-hour cache.
+	assert board_wait.HEARTBEAT + timedelta(seconds=board_wait.POLL_SECONDS) < timedelta(minutes=55)
+
+
+def test_wait_returns_a_heartbeat_with_no_reconcile_and_no_state(tmp_path, monkeypatch):
+	write_tick(tmp_path, '2026-11-05T12:37:00Z')
+	(tmp_path / board_wait.OUTBOX).mkdir()
+	clock = iter([NOON, NOON + timedelta(minutes=30), NOON + timedelta(minutes=50)])
+	monkeypatch.setattr(board_wait, '_now', lambda: next(clock))
+	monkeypatch.setattr(board_wait.time, 'sleep', lambda _seconds: None)
+	assert board_wait.wait(tmp_path) == {'notes': [], 'heartbeat': True}
+	assert not (tmp_path / board_wait.WAIT_STATE).exists()
 
 
 def test_a_stalled_monitor_leaves_one_note_per_stalled_tick(tmp_path):
 	write_tick(tmp_path, '2026-11-05T11:00:00Z')
-	found = board_wait.pending(tmp_path, NOON)
+	found = board_wait.pending(tmp_path, NOON, NOON)
 	assert len(found['notes']) == 1
 	text = Path(found['notes'][0]).read_text()
 	assert 'stalled' in text and '2026-11-05T11:00:00Z' in text and '60 min ago' in text
 	Path(found['notes'][0]).unlink()
-	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=5))['notes'] == []
+	assert board_wait.pending(tmp_path, NOON + timedelta(minutes=5), NOON)['notes'] == []
 	# A new tick that stalls again is a new note.
 	write_tick(tmp_path, '2026-11-05T12:30:00Z')
-	assert len(board_wait.pending(tmp_path, NOON + timedelta(hours=2))['notes']) == 1
+	assert len(board_wait.pending(tmp_path, NOON + timedelta(hours=2), NOON)['notes']) == 1
 
 
 def test_the_night_allows_two_slots_before_it_calls_a_stall(tmp_path):
 	night = datetime(2026, 11, 5, 21, 0, tzinfo=timezone.utc)  # 22:00 Berlin
 	write_tick(tmp_path, '2026-11-05T19:07:00Z')
 	(tmp_path / board_wait.OUTBOX).mkdir()
-	assert board_wait.pending(tmp_path, night)['notes'] == []
-	assert len(board_wait.pending(tmp_path, night + timedelta(minutes=40))['notes']) == 1
+	assert board_wait.pending(tmp_path, night, night)['notes'] == []
+	assert len(board_wait.pending(tmp_path, night + timedelta(minutes=40), night)['notes']) == 1

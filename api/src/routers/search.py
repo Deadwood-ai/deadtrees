@@ -13,13 +13,14 @@ key an unbounded write path (see 20260923120000_log-public-search-queries.sql).
 """
 
 import logging
+import threading
 from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from shared.db import use_service_client, verify_token
 from shared.settings import settings
-from shared.embedding_model import EMBEDDING_DIM, embed_text
+from shared.embedding_model import EMBEDDING_DIM, embed_text, get_text_bundle
 from api.src.utils.request_ip import get_client_ip
 from api.src.utils.sliding_window import SlidingWindowLimiter
 
@@ -41,6 +42,22 @@ class EmbedResponse(BaseModel):
 	# pgvector text literal '[v1,v2,...]' ready to pass to the ranking RPCs.
 	embedding: str = Field(..., description="CLIP text embedding as a pgvector literal")
 	dim: int = Field(..., description='Embedding dimensionality')
+
+
+def warm_up_search_model() -> None:
+	"""Load the text encoder in the background so the first search after a restart is fast.
+
+	A failure only means the first request loads the model itself, as before.
+	"""
+
+	def load() -> None:
+		try:
+			get_text_bundle()
+			logger.info('Search model loaded')
+		except Exception as e:
+			logger.warning(f'Search model warm-up failed: {type(e).__name__}: {e}')
+
+	threading.Thread(target=load, name='search-model-warmup', daemon=True).start()
 
 
 def _search_client_key(request: Request) -> str:

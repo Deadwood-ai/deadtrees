@@ -267,10 +267,10 @@ test.describe("DeadTrees Data Factory read-only smoke", () => {
     const firstBiomeFilter = page.getByTestId("dataset-biome-filter").first();
     await expect(firstBiomeFilter).toBeVisible();
     await firstBiomeFilter.click();
-    await expect(page.getByText("Filtered by:")).toBeVisible();
+    await expect(page.getByTestId("dataset-active-filters")).toBeVisible();
     await expectArchiveReady(page);
     await page.getByTestId("dataset-active-filter-clear").click();
-    await expect(page.getByText("Filtered by:")).toHaveCount(0);
+    await expect(page.getByTestId("dataset-active-filters")).toHaveCount(0);
     await expectArchiveReady(page);
   });
 

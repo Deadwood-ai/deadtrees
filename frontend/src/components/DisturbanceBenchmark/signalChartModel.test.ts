@@ -40,6 +40,19 @@ const sentinel = [
 const planet = [{ date: "2023-07", value: 0.4 }];
 
 describe("combined imagery time window", () => {
+  it("keeps explicit Planet gaps out of the axis extent without reviving source values", () => {
+    const observations = [
+      { date: "2023-01", gcc: 0.4, gccSourceValue: 0.4 },
+      { date: "2023-02", gcc: null, gccSourceValue: 1.0 },
+      { date: "2023-03", gcc: 0.45, gccSourceValue: 0.45 },
+    ];
+    const chart = createSignalChartModel(
+      site, [], [], observations.map((row) => ({ date: row.date, value: row.gcc })), true,
+    );
+    expect(chart.planetHigh).toBeLessThan(0.5);
+    expect(chart.visiblePlanet[1].value).toBeNull();
+    expect(observations[1].gccSourceValue).toBe(1.0);
+  });
   it("keeps the close-up fixed when displayed Google frames lie outside the evaluation years", () => {
     const chart = createSignalChartModel(
       site,

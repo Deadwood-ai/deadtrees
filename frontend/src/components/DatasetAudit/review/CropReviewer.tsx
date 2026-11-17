@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Button, Segmented, Tag } from "antd";
+import { Button, Segmented, Slider, Tag } from "antd";
 import { CheckOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditImage } from "../../../types/auditChecks";
 import type { CropImageKind } from "../../../utils/auditChecks";
@@ -21,6 +21,7 @@ import { useAuditShortcuts } from "../checks/useAuditShortcuts";
 import CropAnswerPanel, { PREDICTION_LABELS } from "./CropAnswerPanel";
 import CropImage from "./CropImage";
 import CropImages from "./CropImages";
+import { usePredictionOpacity } from "./usePredictionOpacity";
 
 /** A crop to review, in review order. */
 export interface ICropReviewItem {
@@ -65,7 +66,7 @@ const OVERLAY: Record<PredictionLayer, CropImageKind> = { deadwood: "deadwood_ov
 /** The crop review: a crop large with its prediction, the strip of all crops, what the models saw
  * and your answer per error type. The audit's prediction steps and the benchmark use it alike.
  * Keys: ← → crops (flagged only until A), Tab next without your answer, T raw or prediction,
- * V side by side, ↑ ↓ error type, Y N U yes no unsure, 1 2 3 verdict (saves on the last layer),
+ * V side by side, - + prediction opacity (also [ ]), ↑ ↓ error type, Y N U yes no unsure, 1 2 3 verdict (saves on the last layer),
  * Space layer fine, Shift+Space crop fine, C can't tell, Enter save and on, B benchmark, M map. */
 export default function CropReviewer(props: CropReviewerProps) {
 	const { crops, layers, imageOf, automated, mine, checkMajor, cropId, onSelectCrop, onAnswer, onDone, onAddToBenchmark, onShowMap, header, active, disabled, blind } =
@@ -73,6 +74,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 	const [allCrops, setAllCrops] = useState(false);
 	const [sideBySide, setSideBySide] = useState(true);
 	const [showPrediction, setShowPrediction] = useState(true);
+	const { opacity, setOpacity, weaker, stronger } = usePredictionOpacity();
 	const [saving, setSaving] = useState(false);
 	// what you changed on a crop and not saved yet
 	const [edits, setEdits] = useState<Map<number, CropDraft>>(new Map());
@@ -179,6 +181,12 @@ export default function CropReviewer(props: CropReviewerProps) {
 				setSideBySide(false);
 			},
 			v: () => setSideBySide((s) => !s),
+			// - and + work on every layout; [ and ] need AltGr or Option on German keyboards
+			"-": weaker,
+			"+": stronger,
+			"=": stronger,
+			"[": weaker,
+			"]": stronger,
 			ArrowDown: () => setFocusIndex((i) => Math.min(i + 1, problems.length - 1)),
 			ArrowUp: () => setFocusIndex((i) => Math.max(i - 1, 0)),
 			y: problemKey("yes"),
@@ -250,6 +258,25 @@ export default function CropReviewer(props: CropReviewerProps) {
 								{ label: "Prediction", value: "prediction" },
 							]}
 						/>
+						{(sideBySide || showPrediction) && (
+							<label className="flex items-center gap-1.5 text-xs text-gray-600" title="How strongly the prediction shows over the raw image (- and +)">
+								Prediction
+								<Slider
+									className="!my-0 w-24"
+									min={0}
+									max={100}
+									step={10}
+									// the arrow keys stay with the crops
+									keyboard={false}
+									value={Math.round(opacity * 100)}
+									onChange={(v) => setOpacity(v / 100)}
+									tooltip={{ formatter: (v) => `${v}%` }}
+									aria-label="Prediction opacity"
+									data-testid="crop-prediction-opacity"
+								/>
+								<span className="w-8 tabular-nums">{Math.round(opacity * 100)}%</span>
+							</label>
+						)}
 						{onShowMap && (
 							<Button size="small" onClick={onShowMap}>
 								Map (M)
@@ -264,6 +291,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 						predictionLabel={PREDICTION_LABELS[focus.layer]}
 						sideBySide={sideBySide}
 						showPrediction={showPrediction}
+						opacity={opacity}
 						resetKey={crop.id}
 					/>
 				) : (
@@ -284,7 +312,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 				</div>
 				<CropStrip crops={crops} cropId={cropId} answered={answered} inCycle={(id) => cycle.some((c) => c.id === id)} onSelect={goTo} />
 				<div className="text-[11px] text-gray-500">
-					← → {cyclingFlagged ? "flagged " : ""}crops · A all or flagged · Tab next without your answer · T raw or prediction · V side by side · scroll to zoom
+					← → {cyclingFlagged ? "flagged " : ""}crops · A all or flagged · Tab next without your answer · T raw or prediction · V side by side · - + prediction opacity · scroll to zoom
 				</div>
 			</div>
 			<aside className="flex w-80 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-gray-100 pl-3">
