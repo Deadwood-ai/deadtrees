@@ -65,6 +65,9 @@ const contractMetadata = (contract: Record<string, unknown>): UploadMetadata => 
  */
 const chunkSizeOf = (upload: UnfinishedUpload, file: File) => {
   if (upload.local) return upload.local.chunkSize;
+  // Parallel uploads declare it; older ones are measured from their contiguous chunks.
+  const declared = Number(upload.status?.contract?.chunk_size);
+  if (declared > 0) return declared;
   const { chunks_received: received = 0, bytes_received: bytes = 0, last_chunk: last, chunks_total: total } =
     upload.status ?? {};
   if (received >= 2 && last) return (bytes - last.size) / (received - 1);

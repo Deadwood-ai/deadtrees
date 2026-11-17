@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 from pathlib import Path
 import sys
@@ -54,10 +55,18 @@ _OPTIONAL_FIELDS = [
 	'citation_doi',
 ]
 _CONTRACT_FIELDS = ['license', 'platform', 'data_access', *_OPTIONAL_FIELDS]
+# Chunks in flight at once (DT-1568); the server places each at index * chunk_size.
+PARALLEL_CHUNKS = 3
 
 
 def _same_metadata(contract: dict, form_data: dict) -> bool:
-	"""The server binds an upload ID to its metadata; a resume must send exactly the same."""
+	"""The server binds an upload ID to its metadata; a resume must send exactly the same.
+
+	An upload started before parallel sending has no chunk size in its contract; it
+	still matches, and continues in order (see _find_resumable_upload).
+	"""
+	if contract.get('chunk_size') not in (None, int(form_data['chunk_size'])):
+		return False
 	authors = form_data['authors']
 	# Fire passes a single `--authors` value as a string, which the form sends as one author.
 	if list(contract.get('authors') or []) != ([authors] if isinstance(authors, str) else list(authors)):
@@ -69,10 +78,12 @@ def _same_metadata(contract: dict, form_data: dict) -> bool:
 	)
 
 
-def _received_bytes_match(file, chunks: list[dict], chunk_size: int) -> bool:
+def _received_bytes_match(file, chunks: list[dict | None], chunk_size: int) -> bool:
 	"""Every received chunk has this file's size and SHA-256 at its offset, so a resume never mixes two files."""
-	file.seek(0)
-	for chunk in chunks:
+	for index, chunk in enumerate(chunks):
+		if chunk is None:
+			continue
+		file.seek(index * chunk_size)
 		data = file.read(chunk_size)
 		if len(data) != chunk['size'] or hashlib.sha256(data).hexdigest() != chunk['sha256']:
 			return False
@@ -81,8 +92,8 @@ def _received_bytes_match(file, chunks: list[dict], chunk_size: int) -> bool:
 
 def _find_resumable_upload(
 	client: httpx.Client, token: str, file, file_name: str, chunk_size: int, form_data: dict
-) -> tuple[str, int] | None:
-	"""(upload ID, next chunk) of the caller's unfinished upload of this file, if the server holds one."""
+) -> tuple[str, list[int], bool] | None:
+	"""(upload ID, chunks still to send, parallel) of the caller's unfinished upload of this file, if any."""
 	api = settings.API_ENDPOINT.rstrip('/') + '/datasets/uploads'
 	headers = {'Authorization': f'Bearer {token}'}
 	try:
@@ -101,10 +112,12 @@ def _find_resumable_upload(
 			if detail.status_code != 200:
 				continue
 			chunks = detail.json().get('chunks') or []
-			if len(chunks) != detail.json()['chunks_received'] or not _received_bytes_match(file, chunks, chunk_size):
+			received = sum(chunk is not None for chunk in chunks)
+			if received != detail.json()['chunks_received'] or not _received_bytes_match(file, chunks, chunk_size):
 				continue
+			missing = [index for index in range(chunks_total) if index >= len(chunks) or chunks[index] is None]
 			# All chunks arrived but the last reply was lost: send the last chunk again to finish.
-			return upload['upload_id'], min(len(chunks), chunks_total - 1)
+			return upload['upload_id'], missing or [chunks_total - 1], contract.get('chunk_size') is not None
 	except httpx.TransportError:
 		return None
 	return None
@@ -235,10 +248,11 @@ class DataCommands:
 	):
 		"""Upload a file in chunks with a progress bar, continuing an unfinished upload of it.
 
-		A stopped run resumes on the next run: the server lists the caller's
-		unfinished uploads (GET /datasets/uploads), and one of the same file name and
-		chunk count whose last received chunk matches this file continues from there.
-		Each chunk is retried on network errors and server busy or error replies.
+		Sends PARALLEL_CHUNKS chunks at once with a declared chunk size. A stopped run
+		resumes on the next run: the server lists the caller's unfinished uploads
+		(GET /datasets/uploads), and one of the same file name, chunk count and
+		metadata whose received chunks all match this file continues with the missing
+		chunks. Each chunk is retried on network errors and server busy or error replies.
 		"""
 		file_size = file_path.stat().st_size
 		chunks_total = (file_size + chunk_size - 1) // chunk_size
@@ -255,27 +269,54 @@ class DataCommands:
 		if metadata.get('allow_duplicate'):
 			form_data['allow_duplicate'] = 'true'
 
+		form_data['chunk_size'] = str(chunk_size)
+
 		logger.info(f'Uploading file: {file_path}, to endpoint: {settings.API_ENDPOINT}')
 		with open(file_path, 'rb') as f, httpx.Client(timeout=httpx.Timeout(timeout=300.0)) as client:
 			resumable = _find_resumable_upload(client, token, f, file_path.name, chunk_size, form_data)
-			upload_id, first_chunk = resumable or (str(uuid.uuid4()), 0)
+			upload_id, missing, parallel = resumable or (str(uuid.uuid4()), list(range(chunks_total)), True)
+			if not parallel:
+				# Started before parallel sending: continue in order, without a chunk size.
+				del form_data['chunk_size']
 			if resumable:
-				logger.info(f'Continuing upload {upload_id} of {file_path.name} at chunk {first_chunk + 1}/{chunks_total}')
-			progress = tqdm(
-				total=file_size, initial=first_chunk * chunk_size, unit='B', unit_scale=True, desc=f'Uploading {file_path.name}'
-			)
+				logger.info(f'Continuing upload {upload_id} of {file_path.name}: {len(missing)} of {chunks_total} chunks to send')
+			done = file_size - sum(min(chunk_size, file_size - index * chunk_size) for index in missing)
+			progress = tqdm(total=file_size, initial=max(done, 0), unit='B', unit_scale=True, desc=f'Uploading {file_path.name}')
+
+			def send(index: int) -> dict:
+				# Each worker opens the file itself: no shared position across threads.
+				with open(file_path, 'rb') as chunk_file:
+					chunk_file.seek(index * chunk_size)
+					data = chunk_file.read(chunk_size)
+				response = self._send_chunk(
+					client,
+					{**form_data, 'chunk_index': str(index), 'upload_id': upload_id},
+					{'file': (file_path.name, data, 'application/octet-stream')},
+				)
+				progress.update(len(data))
+				return response.json()
+
 			try:
-				for chunk_index in range(first_chunk, chunks_total):
-					f.seek(chunk_index * chunk_size)
-					chunk_data = f.read(chunk_size)
-					response = self._send_chunk(
-						client,
-						{**form_data, 'chunk_index': str(chunk_index), 'upload_id': upload_id},
-						{'file': (file_path.name, chunk_data, 'application/octet-stream')},
-					)
-					progress.update(len(chunk_data))
-					if chunk_index == chunks_total - 1:
-						return response.json()
+				pool = ThreadPoolExecutor(max_workers=PARALLEL_CHUNKS if parallel else 1)
+				try:
+					futures = [pool.submit(send, index) for index in missing]
+					replies = []
+					for future in as_completed(futures):
+						# The first failure stops the chunks that have not started yet.
+						replies.append(future.result())
+				finally:
+					pool.shutdown(wait=True, cancel_futures=True)
+				final = next((reply for reply in replies if reply.get('id')), None)
+				if final is None:
+					# Another chunk than the last completed the upload; its dataset is in the status.
+					status = client.get(
+						f"{settings.API_ENDPOINT.rstrip('/')}/datasets/uploads/{upload_id}",
+						headers={'Authorization': f'Bearer {self._token or token}'},
+					).json()
+					final = status.get('response')
+				if not final:
+					raise RuntimeError('Upload finished without a dataset response')
+				return final
 			except Exception as e:
 				logger.error(f'Error uploading {file_path.name} (upload {upload_id}): {e}. Run the upload again to continue it.')
 				raise

@@ -26,10 +26,10 @@ class UploadStatus(BaseModel):
 	chunks_received: int
 	bytes_received: int
 	last_chunk: ChunkReceipt | None
-	# Size and SHA-256 of every received chunk, in order. Before it resumes, a
-	# client compares them with its file, so a resume never appends one file's
-	# bytes to another's. Left out of the list call.
-	chunks: list[ChunkReceipt] | None = None
+	# Size and SHA-256 of every chunk by index, null where a chunk has not arrived
+	# (parallel uploads). Before it resumes, a client compares them with its file,
+	# so a resume never mixes two files. Left out of the list call.
+	chunks: list[ChunkReceipt | None] | None = None
 	# The fields every chunk must repeat; None for receipts written before resume.
 	contract: dict | None
 	# The dataset response, once the upload is complete.
@@ -58,14 +58,15 @@ def read_upload_status(
 		return None
 	if receipt.user_id != user_id:
 		return None
-	committed = sum(chunk.size for chunk in receipt.chunks)
+	received = [chunk for chunk in receipt.chunks if chunk is not None]
+	committed = sum(chunk.size for chunk in received)
 	return UploadStatus(
 		upload_id=upload_id,
 		state=_state(receipt, committed, [d / f'{upload_id}.tmp' for d in upload_dirs]),
 		chunks_total=(receipt.contract or {}).get('chunks_total'),
-		chunks_received=len(receipt.chunks),
+		chunks_received=len(received),
 		bytes_received=committed,
-		last_chunk=receipt.chunks[-1] if receipt.chunks else None,
+		last_chunk=received[-1] if received else None,
 		chunks=receipt.chunks if with_chunks else None,
 		contract=receipt.contract,
 		response=receipt.response if receipt.phase == 'complete' else None,
