@@ -1,12 +1,16 @@
 // Sends an orthophoto or raw-image ZIP to the chunk API and resumes it after any
 // interruption. The server keeps a receipt per chunk (docs/playbooks/upload-retry-contract.md);
 // this loop asks it which chunks it already holds and sends only the rest, for a
-// fresh upload and a resumed one alike.
+// fresh upload and a resumed one alike. It sends PARALLEL_CHUNKS chunks at once
+// (DT-1568): the server writes each at index * chunk_size, so order does not matter.
 import axios, { type AxiosResponse } from "axios";
 import { Settings } from "../config";
 import { sha256Hex } from "../utils/uploadFingerprint";
 
 export const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MiB
+// Chunks in flight at once. More connections fill long or lossy lines and hide the
+// server's time per chunk; three keep memory and server load small.
+export const PARALLEL_CHUNKS = 3;
 // A chunk request that sends no bytes for this long is dropped and retried.
 const NO_PROGRESS_TIMEOUT_MS = 2 * 60 * 1000;
 // After its bytes are sent, the server may still validate and finalize the upload.
@@ -51,7 +55,7 @@ export interface UploadStatus {
   bytes_received: number;
   last_chunk: ChunkReceipt | null;
   /** Every received chunk in order; only the single-upload call returns it. */
-  chunks?: ChunkReceipt[] | null;
+  chunks?: (ChunkReceipt | null)[] | null;
   contract: Record<string, unknown> | null;
   response: UploadOrthoResponse | null;
   created_at: number | null;
@@ -133,20 +137,21 @@ async function withRetries<T>(read: () => Promise<T>, signal?: AbortSignal, atte
 }
 
 /**
- * Where to continue, after checking that every byte the server holds came from
- * this file. Each received chunk is hashed and compared with its receipt, so a
- * resume never appends one file's bytes to another's. `onChecked` reports the
- * bytes checked so far; for a 25 GB upload the check reads the whole received part.
+ * The chunks still to send, after checking that every byte the server holds came
+ * from this file. Each received chunk is hashed and compared with its receipt, so a
+ * resume never mixes two files. `onChecked` reports the bytes checked so far; for
+ * a 25 GB upload the check reads the whole received part once.
  */
-async function firstChunkToSend(
+async function chunksToSend(
   status: UploadStatus | null,
   file: File,
   chunkSize: number,
   chunksTotal: number,
   onChecked: (bytes: number) => void,
   signal?: AbortSignal,
-) {
-  if (!status || status.chunks_received === 0) return 0;
+): Promise<number[]> {
+  const all = Array.from({ length: chunksTotal }, (_, index) => index);
+  if (!status || status.chunks_received === 0) return all;
   if (status.state === "expired") {
     throw new UploadNotResumableError(
       "This upload was paused for too long and its data was removed. Please start the upload again.",
@@ -160,24 +165,38 @@ async function firstChunkToSend(
   const mismatch = () =>
     new UploadFileMismatchError("This file does not match the unfinished upload. Pick the same file you started with.");
   const chunks = status.chunks ?? [];
-  if (status.chunks_total !== chunksTotal || chunks.length !== status.chunks_received) throw mismatch();
+  const received = chunks.filter((chunk) => chunk !== null).length;
+  if (status.chunks_total !== chunksTotal || received !== status.chunks_received) throw mismatch();
+  let checked = 0;
   for (const [index, chunk] of chunks.entries()) {
+    if (chunk === null) continue;
     if (signal?.aborted) throw abortError();
     const start = index * chunkSize;
     if (chunk.size !== Math.min(chunkSize, file.size - start)) throw mismatch();
     if ((await sha256Hex(file.slice(start, start + chunk.size))) !== chunk.sha256) throw mismatch();
-    onChecked(start + chunk.size);
+    checked += chunk.size;
+    onChecked(checked);
   }
-  // Every chunk arrived but the reply to the last was lost or rejected: send it again to finish.
-  return Math.min(chunks.length, chunksTotal - 1);
+  const missing = all.filter((index) => !chunks[index]);
+  // Every chunk arrived but the reply was lost or rejected: send the last again to finish.
+  return missing.length ? missing : [chunksTotal - 1];
 }
 
-function chunkForm(file: File, uploadId: string, index: number, chunksTotal: number, chunkSize: number, metadata: UploadMetadata) {
+function chunkForm(
+  file: File,
+  uploadId: string,
+  index: number,
+  chunksTotal: number,
+  chunkSize: number,
+  metadata: UploadMetadata,
+  declareChunkSize: boolean,
+) {
   const formData = new FormData();
   formData.append("file", file.slice(index * chunkSize, Math.min((index + 1) * chunkSize, file.size)), file.name);
   formData.append("chunk_index", index.toString());
   formData.append("chunks_total", chunksTotal.toString());
   formData.append("upload_id", uploadId);
+  if (declareChunkSize) formData.append("chunk_size", chunkSize.toString());
   formData.append("license", metadata.license);
   formData.append("platform", metadata.platform);
   metadata.authors.forEach((author) => formData.append("authors", author));
@@ -305,53 +324,96 @@ async function postChunk(
 
 /** Upload `file` under `uploadId`, continuing from whatever the server already holds. */
 export async function transferUpload(options: TransferOptions): Promise<UploadOrthoResponse> {
-  const { file, uploadId, metadata, getAccessToken, onProgress, onEvent, signal } = options;
+  const { file, uploadId, metadata, getAccessToken, onProgress, onEvent } = options;
   const chunkSize = options.chunkSize ?? CHUNK_SIZE;
   const chunksTotal = chunkCount(file.size, chunkSize);
-  if (signal?.aborted) throw abortError();
+  if (options.signal?.aborted) throw abortError();
 
   let token = await getAccessToken();
-  const status = options.isNew ? null : await withRetries(() => fetchUploadStatus(uploadId, token), signal);
+  const status = options.isNew ? null : await withRetries(() => fetchUploadStatus(uploadId, token), options.signal);
   if (status?.state === "complete" && status.response) return status.response;
-  const first = await firstChunkToSend(
+  const queue = await chunksToSend(
     status,
     file,
     chunkSize,
     chunksTotal,
     (bytes) => onProgress(Math.min(100, Math.round((bytes / file.size) * 100))),
-    signal,
+    options.signal,
   );
-  if (first > 0) onEvent?.({ type: "resumed", chunkIndex: first, chunksTotal });
+  const received = status?.chunks_received ?? 0;
+  if (received > 0) onEvent?.({ type: "resumed", chunkIndex: received, chunksTotal });
+  // An upload started before parallel sending has no declared chunk size; it continues in order.
+  const parallel = !status || Boolean(status.contract?.chunk_size);
 
-  let response: AxiosResponse<UploadOrthoResponse> | undefined;
-  for (let index = first; index < chunksTotal; index++) {
-    const formData = chunkForm(file, uploadId, index, chunksTotal, chunkSize, metadata);
-    const report = (loaded: number) => onProgress(Math.min(100, Math.round(((index * chunkSize + loaded) / file.size) * 100)));
-    report(0);
+  // One failing chunk stops its siblings; a user cancel stops all of them.
+  const stop = new AbortController();
+  const signal = stop.signal;
+  const forwardCancel = () => stop.abort();
+  options.signal?.addEventListener("abort", forwardCancel, { once: true });
+
+  const sentBytes = new Map<number, number>();
+  const doneBytes = status?.bytes_received ?? 0;
+  const report = () => {
+    let sent = doneBytes;
+    sentBytes.forEach((bytes) => (sent += bytes));
+    onProgress(Math.min(100, Math.round((sent / file.size) * 100)));
+  };
+  const stalled = new Set<number>();
+  let final: UploadOrthoResponse | undefined;
+
+  const sendChunk = async (index: number) => {
+    const formData = chunkForm(file, uploadId, index, chunksTotal, chunkSize, metadata, parallel);
     let failingSince = 0;
     for (let failures = 0; ; ) {
-      if (signal?.aborted) throw abortError();
+      if (signal.aborted) throw abortError();
       await waitUntilOnline(signal);
-      const result = await postChunk(formData, token, report, signal);
+      const result = await postChunk(formData, token, (loaded) => {
+        sentBytes.set(index, loaded);
+        report();
+      }, signal);
       if (result.response) {
-        response = result.response;
-        if (failures >= STALL_AFTER_FAILURES) onEvent?.({ type: "recovered", chunkIndex: index, chunksTotal });
-        break;
+        if (result.response.data?.id) final = result.response.data;
+        if (stalled.delete(index) && stalled.size === 0) onEvent?.({ type: "recovered", chunkIndex: index, chunksTotal });
+        return;
       }
-      const failure = classify(result.error, index, signal, result.noProgress);
-      if (failure.kind === "abort") throw abortError();
+      sentBytes.set(index, 0);
+      const failure = classify(result.error, index, options.signal, result.noProgress);
+      if (failure.kind === "abort" || signal.aborted) throw abortError();
       if (failure.kind === "fatal") throw failure.error;
       failures++;
       failingSince ||= Date.now();
       onEvent?.({ type: "chunk_failed", chunkIndex: index, chunksTotal, attempt: failures, reason: failure.reason });
-      if (failures === STALL_AFTER_FAILURES) onEvent?.({ type: "stalled", chunkIndex: index, chunksTotal, reason: failure.reason });
+      if (failures === STALL_AFTER_FAILURES && stalled.add(index).size === 1) {
+        onEvent?.({ type: "stalled", chunkIndex: index, chunksTotal, reason: failure.reason });
+      }
       if (Date.now() - failingSince > GIVE_UP_AFTER_MS) {
         throw new Error(`Upload stopped at chunk ${index + 1} of ${chunksTotal} (${failure.reason}). You can continue it later.`);
       }
       await wait(Math.min(1000 * 2 ** Math.min(failures, 5), MAX_RETRY_DELAY_MS), signal);
       if (failure.refreshToken) token = await getAccessToken(true);
     }
-  }
-  if (!response?.data?.id) throw new Error("Upload did not return a dataset response");
-  return response.data;
+  };
+
+  const worker = async () => {
+    for (let index = queue.shift(); index !== undefined; index = queue.shift()) await sendChunk(index);
+  };
+  const results = await Promise.allSettled(
+    Array.from({ length: parallel ? Math.min(PARALLEL_CHUNKS, queue.length) : 1 }, () =>
+      worker().catch((error) => {
+        stop.abort();
+        throw error;
+      }),
+    ),
+  );
+  options.signal?.removeEventListener("abort", forwardCancel);
+  if (options.signal?.aborted) throw abortError();
+  // The first real failure explains the stop; its siblings only report being cancelled.
+  const failed = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+  const cause = failed.find((error) => !(error instanceof DOMException && error.name === "AbortError")) ?? failed[0];
+  if (cause) throw cause;
+  if (final) return final;
+  // The chunk that completed the set answered, but another worker's reply carried the dataset.
+  const settled = await withRetries(() => fetchUploadStatus(uploadId, token));
+  if (settled?.state === "complete" && settled.response) return settled.response;
+  throw new Error("Upload did not return a dataset response");
 }
