@@ -21,7 +21,7 @@ import {
   discardUpload,
   discardedUploadIds,
   isSameFile,
-  isUploadActive,
+  uploadsRunningInAnyTab,
   pendingUploadsFor,
   removePendingUpload,
   UPLOADS_CHANGED_EVENT,
@@ -58,14 +58,19 @@ const contractMetadata = (contract: Record<string, unknown>): UploadMetadata => 
   };
 };
 
-/** The chunk size the upload was started with; all chunks but the last share it. */
-const chunkSizeOf = (upload: UnfinishedUpload) => {
-  const status = upload.status;
+/**
+ * The chunk size the upload was started with (the web app uses 50 MiB, the CLI
+ * 100 MiB); all chunks but the last share it. Without a local record it follows
+ * from the received chunks, or from the chunk count before any arrived.
+ */
+const chunkSizeOf = (upload: UnfinishedUpload, file: File) => {
   if (upload.local) return upload.local.chunkSize;
-  if (status?.last_chunk && status.chunks_total && status.chunks_received < status.chunks_total) {
-    return status.last_chunk.size;
-  }
-  return CHUNK_SIZE;
+  const { chunks_received: received = 0, bytes_received: bytes = 0, last_chunk: last, chunks_total: total } =
+    upload.status ?? {};
+  if (received >= 2 && last) return (bytes - last.size) / (received - 1);
+  if (received === 1 && last && total !== 1) return last.size;
+  if (!total || chunkCount(file.size, CHUNK_SIZE) === total) return CHUNK_SIZE;
+  return Math.ceil(file.size / total);
 };
 
 // A focus right after a load does not reload again.
@@ -85,11 +90,16 @@ async function loadUnfinished(userId: string): Promise<UnfinishedUpload[]> {
   // Uploads this browser remembers that the server no longer lists: not started,
   // finished without processing, or expired.
   const unlisted = [...local.values()].filter((upload) => !found.some((item) => item.uploadId === upload.uploadId));
-  const statuses = await Promise.all(unlisted.map((upload) => fetchUploadStatus(upload.uploadId, token)));
-  unlisted.forEach((upload, index) =>
-    found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status: statuses[index] }),
-  );
-  return found.filter((upload) => !discarded.has(upload.uploadId) && !isUploadActive(upload.uploadId));
+  // One failed lookup leaves out only that upload, not the whole list.
+  const statuses = await Promise.allSettled(unlisted.map((upload) => fetchUploadStatus(upload.uploadId, token)));
+  unlisted.forEach((upload, index) => {
+    const result = statuses[index];
+    if (result.status === "fulfilled") {
+      found.push({ uploadId: upload.uploadId, fileName: upload.fileName, local: upload, status: result.value });
+    }
+  });
+  const running = await uploadsRunningInAnyTab();
+  return found.filter((upload) => !discarded.has(upload.uploadId) && !running.has(upload.uploadId));
 }
 
 export default function UnfinishedUploads() {
@@ -160,17 +170,17 @@ export default function UnfinishedUploads() {
     continuing.current = null;
     if (!file || !upload) return;
     const contract = upload.status?.contract;
-    const chunkSize = chunkSizeOf(upload);
+    const metadata = upload.local?.metadata ?? (contract ? contractMetadata(contract) : null);
+    if (!metadata) {
+      message.error("This upload was started with an older version of the site and cannot be continued.");
+      return;
+    }
+    const chunkSize = chunkSizeOf(upload, file);
     const sameFile = upload.local
       ? isSameFile(upload.local, file)
       : file.name === upload.fileName && chunkCount(file.size, chunkSize) === upload.status?.chunks_total;
     if (!sameFile) {
       message.error(`Please pick ${upload.fileName}, the file this upload started with.`);
-      return;
-    }
-    const metadata = upload.local?.metadata ?? (contract ? contractMetadata(contract) : null);
-    if (!metadata) {
-      message.error("This upload was started with an older version of the site and cannot be continued.");
       return;
     }
     const uploadType = String(metadata.upload_type ?? contract?.upload_type ?? "");

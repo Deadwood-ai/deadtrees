@@ -183,6 +183,47 @@ describe("resumable chunk upload", () => {
     expect(getAccessToken).toHaveBeenCalledWith(true);
   });
 
+  it("stops when cancelled during the pause between retries", async () => {
+    get.mockRejectedValue(httpError(404));
+    post.mockRejectedValue(httpError());
+    const controller = new AbortController();
+    const events: TransferEvent[] = [];
+    const promise = transferUpload({
+      file,
+      uploadId: "up-1",
+      metadata,
+      chunkSize: CHUNK,
+      getAccessToken: async () => "token",
+      onProgress: () => undefined,
+      onEvent: (event) => {
+        events.push(event);
+        // Cancel 0.1 s into the 2 s pause before the next try.
+        setTimeout(() => controller.abort(), 100);
+      },
+      signal: controller.signal,
+    });
+    promise.catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up on an upload ID the server no longer accepts", async () => {
+    get.mockRejectedValue(httpError(404));
+    post.mockRejectedValue(httpError(409, "Upload has no retry receipts; restart with a new upload ID"));
+    const { promise } = await run();
+    await expect(promise).rejects.toBeInstanceOf(UploadNotResumableError);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a status read that hits a short outage", async () => {
+    get.mockRejectedValueOnce(httpError()).mockRejectedValueOnce(httpError(404));
+    const { promise } = await run();
+    await expect(promise).resolves.toEqual({ id: "42" });
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
   it("stops at once when the API refuses the file", async () => {
     get.mockRejectedValue(httpError(404));
     post.mockRejectedValue(httpError(400, "This ZIP contains no drone photos"));

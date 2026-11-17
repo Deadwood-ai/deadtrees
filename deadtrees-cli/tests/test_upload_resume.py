@@ -37,6 +37,10 @@ def test_continues_after_the_received_chunks_of_the_same_file():
 	assert find([unfinished(2, b'bbbb')]) == ('up-1', 2)
 
 
+def test_single_author_given_as_text_still_matches():
+	assert find([unfinished(2, b'bbbb')], form={**FORM, 'authors': 'A'}) == ('up-1', 2)
+
+
 def test_resends_the_last_chunk_when_only_its_reply_was_lost():
 	assert find([unfinished(4, b'dd')]) == ('up-1', 3)
 

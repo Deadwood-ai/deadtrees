@@ -116,6 +116,20 @@ export async function listUnfinishedUploads(token: string): Promise<UploadStatus
   return response.data;
 }
 
+/** A read that a short network or server hiccup should not fail. */
+async function withRetries<T>(read: () => Promise<T>, signal?: AbortSignal, attempts = 4): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+      const transient = axios.isAxiosError(error) && (status === undefined || RETRYABLE_STATUS_CODES.has(status));
+      if (!transient || attempt >= attempts) throw error;
+      await wait(2000 * attempt, signal);
+    }
+  }
+}
+
 /** Where to continue, after checking that the server's bytes came from this file. */
 async function firstChunkToSend(status: UploadStatus | null, file: File, chunkSize: number, chunksTotal: number) {
   if (!status || status.chunks_received === 0) return 0;
@@ -190,8 +204,10 @@ function classify(error: unknown, chunkIndex: number, userSignal?: AbortSignal, 
   if (status === 409 && typeof detail === "object" && (detail as { code?: unknown }).code === "DUPLICATE_UPLOAD") {
     return { kind: "fatal", error: new UploadRejectedError(String((detail as { message?: unknown }).message)) };
   }
-  if (status === 409 && typeof detail === "string" && /data is missing|finalization was interrupted/.test(detail)) {
-    return { kind: "fatal", error: new UploadNotResumableError(detail) };
+  // Every other conflict (missing data, interrupted finalization, changed metadata or bytes)
+  // repeats on each retry under this upload ID.
+  if (status === 409) {
+    return { kind: "fatal", error: new UploadNotResumableError(typeof detail === "string" ? detail : JSON.stringify(detail)) };
   }
   return {
     kind: "fatal",
@@ -202,16 +218,14 @@ function classify(error: unknown, chunkIndex: number, userSignal?: AbortSignal, 
 function wait(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) return reject(abortError());
-    const timer = setTimeout(done, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      done();
-      reject(abortError());
-    };
-    function done() {
+    const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
       resolve();
-    }
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
@@ -283,7 +297,7 @@ export async function transferUpload(options: TransferOptions): Promise<UploadOr
   if (signal?.aborted) throw abortError();
 
   let token = await getAccessToken();
-  const status = options.isNew ? null : await fetchUploadStatus(uploadId, token);
+  const status = options.isNew ? null : await withRetries(() => fetchUploadStatus(uploadId, token), signal);
   if (status?.state === "complete" && status.response) return status.response;
   const first = await firstChunkToSend(status, file, chunkSize, chunksTotal);
   if (first > 0) onEvent?.({ type: "resumed", chunkIndex: first, chunksTotal });
@@ -295,6 +309,7 @@ export async function transferUpload(options: TransferOptions): Promise<UploadOr
     report(0);
     let failingSince = 0;
     for (let failures = 0; ; ) {
+      if (signal?.aborted) throw abortError();
       await waitUntilOnline(signal);
       const result = await postChunk(formData, token, report, signal);
       if (result.response) {

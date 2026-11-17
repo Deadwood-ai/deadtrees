@@ -18,7 +18,8 @@ import {
 } from "../api/uploadOrtho";
 import { isInvalidSessionError } from "../utils/authSession";
 import { holdUploadKeepAlive } from "../utils/uploadKeepAlive";
-import { removePendingUpload, savePendingUpload, setUploadActive } from "../utils/pendingUploads";
+import { removePendingUpload, savePendingUpload, withUploadLock } from "../utils/pendingUploads";
+import { message as toast } from "antd";
 import type { SourceSurface } from "../utils/analytics";
 
 export interface RunUploadOptions {
@@ -50,7 +51,7 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
   const { user } = useAuth();
   const { track } = useAnalytics(sourceSurface);
 
-  return useCallback(
+  const runOnce = useCallback(
     async (options: RunUploadOptions): Promise<void> => {
       const { file, uploadId, metadata, processingSteps, uploadType } = options;
       const chunkSize = options.chunkSize ?? CHUNK_SIZE;
@@ -63,7 +64,6 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
       const controller = new AbortController();
       const cancel = () => controller.abort();
       const release = holdUploadKeepAlive();
-      setUploadActive(uploadId, true);
       let percent = 0;
       let stalled = false;
       let lastChunk = 0;
@@ -148,9 +148,17 @@ export function useResumableUpload(sourceSurface: SourceSurface) {
         return;
       } finally {
         release();
-        setUploadActive(uploadId, false);
       }
     },
     [track, user],
+  );
+
+  return useCallback(
+    async (options: RunUploadOptions): Promise<void> => {
+      if (!(await withUploadLock(options.uploadId, () => runOnce(options)))) {
+        toast.info("This upload is already running in another tab.");
+      }
+    },
+    [runOnce],
   );
 }

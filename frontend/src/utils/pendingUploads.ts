@@ -67,18 +67,45 @@ export const discardUpload = (uploadId: string) => {
 export const isSameFile = (upload: Pick<PendingUpload, "fileName" | "fileSize">, file: File) =>
   file.name === upload.fileName && file.size === upload.fileSize;
 
-// Uploads running in this tab right now; the recovery panel leaves them out.
-const activeUploadIds = new Set<string>();
+// A running upload holds a Web Lock named after its ID, so every tab of this
+// browser sees it and the recovery panel never offers it while it runs.
 export const UPLOADS_CHANGED_EVENT = "deadtrees:uploads-changed";
+const LOCK_PREFIX = "deadtrees-upload:";
 
 const notifyUploadsChanged = () => {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(UPLOADS_CHANGED_EVENT));
 };
 
-export const setUploadActive = (uploadId: string, active: boolean) => {
-  if (active) activeUploadIds.add(uploadId);
-  else activeUploadIds.delete(uploadId);
-  notifyUploadsChanged();
+/**
+ * Run `work` while holding the upload's lock. Returns false without running it
+ * when another tab already runs this upload. Browsers without Web Locks run it unguarded.
+ */
+export const withUploadLock = async (uploadId: string, work: () => Promise<void>): Promise<boolean> => {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  const run = async () => {
+    notifyUploadsChanged();
+    try {
+      await work();
+    } finally {
+      notifyUploadsChanged();
+    }
+  };
+  if (!locks) {
+    await run();
+    return true;
+  }
+  return locks.request(`${LOCK_PREFIX}${uploadId}`, { ifAvailable: true }, async (lock) => {
+    if (!lock) return false;
+    await run();
+    return true;
+  });
 };
 
-export const isUploadActive = (uploadId: string) => activeUploadIds.has(uploadId);
+export const uploadsRunningInAnyTab = async (): Promise<Set<string>> => {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks) return new Set();
+  const { held = [] } = await locks.query();
+  return new Set(
+    held.flatMap((lock) => (lock.name?.startsWith(LOCK_PREFIX) ? [lock.name.slice(LOCK_PREFIX.length)] : [])),
+  );
+};

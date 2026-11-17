@@ -58,7 +58,9 @@ _CONTRACT_FIELDS = ['license', 'platform', 'data_access', *_OPTIONAL_FIELDS]
 
 def _same_metadata(contract: dict, form_data: dict) -> bool:
 	"""The server binds an upload ID to its metadata; a resume must send exactly the same."""
-	if list(contract.get('authors') or []) != list(form_data['authors']):
+	authors = form_data['authors']
+	# Fire passes a single `--authors` value as a string, which the form sends as one author.
+	if list(contract.get('authors') or []) != ([authors] if isinstance(authors, str) else list(authors)):
 		return False
 	if bool(contract.get('allow_duplicate')) != ('allow_duplicate' in form_data):
 		return False
