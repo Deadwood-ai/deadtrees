@@ -12,6 +12,7 @@ import io
 import json
 import os
 from pathlib import Path
+import time
 from typing import BinaryIO, Callable, Literal
 
 from fastapi import HTTPException
@@ -38,6 +39,10 @@ class UploadReceipt(BaseModel):
 	chunks: list[ChunkReceipt] = Field(default_factory=list)
 	phase: Literal['receiving', 'finalizing', 'complete'] = 'receiving'
 	response: dict | None = None
+	# The fields the client sends with every chunk, kept so a client can resume an
+	# upload it no longer remembers. Receipts written before resume have none.
+	contract: dict | None = None
+	created_at: float | None = None
 
 
 def _sync_directory(path: Path):
@@ -77,12 +82,16 @@ class ChunkSession:
 				raise HTTPException(status_code=409, detail='Upload ID is already in use')
 			if self.receipt.contract_hash != contract_hash:
 				raise HTTPException(status_code=409, detail='Upload metadata or chunk count changed')
+			if self.receipt.contract is None:
+				self.receipt.contract = contract
 		else:
 			if target_path.exists():
 				raise HTTPException(
 					status_code=409, detail='Upload has no retry receipts; restart with a new upload ID'
 				)
-			self.receipt = UploadReceipt(user_id=user_id, contract_hash=contract_hash)
+			self.receipt = UploadReceipt(
+				user_id=user_id, contract_hash=contract_hash, contract=contract, created_at=time.time()
+			)
 
 	def _save(self):
 		"""Replace the receipt atomically, after its referenced bytes are durable."""

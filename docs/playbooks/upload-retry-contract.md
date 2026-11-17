@@ -20,6 +20,45 @@ a new offset or checksum field. The server computes SHA-256 for each chunk.
   and the authenticated user must match the receipt owner. A refreshed token for
   that same user works normally.
 
+## Resuming an upload
+
+Two read calls let a client continue an upload instead of starting again. Both
+answer only for the signed-in owner; another user's upload ID returns 404.
+
+- `GET /datasets/uploads/{upload_id}` returns the upload's `state`
+  (`receiving`, `expired`, `finalizing` or `complete`), `chunks_total`,
+  `chunks_received`, `bytes_received`, the size and SHA-256 of every received
+  chunk (`chunks`), the stored `contract` (the fields every chunk repeats) and,
+  once complete, the dataset `response`.
+- `GET /datasets/uploads` lists the caller's uploads in `receiving` or
+  `finalizing` whose receipt changed within the retention period, without the
+  per-chunk list.
+
+A client resumes by sending chunk `chunks_received` next, with the same upload ID
+and the same contract. Before it does, it hashes every received chunk of its
+file and compares it with the receipt, so a resume never appends one file's
+bytes to another's. For a large upload this reads the whole received part once. When every chunk arrived but the reply to the last was lost, it
+sends the last chunk again: an identical repeat starts finalization, or replays
+the stored response. `expired` means the retention job deleted the bytes;
+`finalizing` needs inspection as described below.
+
+The browser (`frontend/src/api/uploadOrtho.ts`) uses one transfer loop for new
+and resumed uploads. It drops a chunk request that sends no bytes for two
+minutes, waits while the browser is offline, refreshes the login after a 401
+and retries with growing pauses; after 30 minutes of failures the run ends and
+the upload stays resumable. The profile page lists unfinished uploads and
+continues one after the contributor picks the same file again. Once the file is
+stored, the browser forgets the upload before it requests processing, so a lost
+processing reply never queues it twice; if that request fails, the contributor
+is asked to contact support. A stored upload this browser still remembers never
+reached that request (the tab closed during finalization), so the panel offers
+to start its processing. The CLI
+(`deadtrees data upload`) looks for an unfinished upload of the same file name,
+chunk count and metadata, checks every received chunk, and continues it.
+
+Receipts written before resume support have no stored contract. They report
+`contract: null` until their next chunk, which stores it.
+
 ## Persistence and failure behavior
 
 Receipts and lock files live in `settings.base_path / '.upload-sessions'`, outside

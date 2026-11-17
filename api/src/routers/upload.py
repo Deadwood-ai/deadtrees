@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Annotated, Optional, List
 
 import time
-from fastapi import UploadFile, Depends, HTTPException, Form, APIRouter
+from fastapi import UploadFile, Depends, HTTPException, Form, APIRouter, Path as PathParam
 from fastapi.security import OAuth2PasswordBearer
 
 from shared.models import StatusEnum, LicenseEnum, PlatformEnum, DatasetAccessEnum
@@ -20,7 +20,9 @@ from shared.zip_utils import (
 )
 
 from ..upload.upload import create_dataset_entry
+from ..upload.abandoned_uploads import UPLOAD_ID_PATTERN, retention_days
 from ..upload.chunk_session import UPLOAD_SESSIONS_DIR, locked_chunk_session
+from ..upload.upload_status import UploadStatus, list_unfinished_uploads, read_upload_status
 from ..upload.geotiff_processor import process_geotiff_upload
 from ..upload.raw_images_processor import process_raw_images_upload
 from ..utils.file_utils import UploadType, detect_upload_type
@@ -36,12 +38,48 @@ logger = UnifiedLogger(__name__)
 logger.add_supabase_handler(SupabaseHandler())
 
 
+UploadIdParam = Annotated[str, PathParam(pattern=UPLOAD_ID_PATTERN.pattern)]
+
+
+def _authenticated_user_id(token: str) -> str:
+	user = verify_token(token)
+	if not user:
+		raise HTTPException(status_code=401, detail='Invalid token')
+	return str(user.id)
+
+
+def _upload_dirs() -> list[Path]:
+	return [settings.archive_path, settings.raw_images_path]
+
+
+@router.get('/datasets/uploads', response_model=list[UploadStatus])
+def list_my_unfinished_uploads(token: Annotated[str, Depends(oauth2_scheme)]):
+	"""The caller's chunked uploads that can still be resumed, or that stopped while finishing."""
+	return list_unfinished_uploads(
+		settings.base_path / UPLOAD_SESSIONS_DIR,
+		_authenticated_user_id(token),
+		_upload_dirs(),
+		max_age_seconds=retention_days() * 24 * 3600,
+	)
+
+
+@router.get('/datasets/uploads/{upload_id}', response_model=UploadStatus)
+def get_upload_status(upload_id: UploadIdParam, token: Annotated[str, Depends(oauth2_scheme)]):
+	"""Which chunks of one of the caller's uploads the server holds; see docs/playbooks/upload-retry-contract.md."""
+	status = read_upload_status(
+		settings.base_path / UPLOAD_SESSIONS_DIR, upload_id, _authenticated_user_id(token), _upload_dirs()
+	)
+	if status is None:
+		raise HTTPException(status_code=404, detail='Upload not found')
+	return status
+
+
 @router.post('/datasets/chunk')
 def upload_chunk(
 	file: UploadFile,
 	chunk_index: Annotated[int, Form(ge=0)],
 	chunks_total: Annotated[int, Form(gt=0)],
-	upload_id: Annotated[str, Form(min_length=1, max_length=128, pattern=r'^[A-Za-z0-9_-]+$')],
+	upload_id: Annotated[str, Form(pattern=UPLOAD_ID_PATTERN.pattern)],
 	token: Annotated[str, Depends(oauth2_scheme)],
 	# Dataset required fields
 	license: Annotated[LicenseEnum, Form()],
