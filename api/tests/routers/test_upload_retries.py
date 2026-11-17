@@ -257,3 +257,28 @@ def test_status_calls_need_a_valid_login(upload):
 	with TestClient(app) as client:
 		assert client.get('/datasets/uploads').status_code == 401
 		assert client.get('/datasets/uploads', headers={'Authorization': 'Bearer nonsense'}).status_code == 401
+
+
+def test_parallel_chunks_assemble_one_dataset(upload, auth_token):
+	"""DT-1568: with a declared chunk size, chunks sent at the same time in any order make one file."""
+	send, upload_id = upload
+	parts = [b'aaaa', b'bbbb', b'cccc', b'dd']
+	with ThreadPoolExecutor(max_workers=4) as pool:
+		responses = list(
+			pool.map(lambda index: send(index, parts[index], total=4, chunk_size='4'), [3, 1, 2, 0])
+		)
+	assert all(response.status_code == 200 for response in responses), [r.text for r in responses]
+	datasets = {response.json()['id'] for response in responses if 'id' in response.json()}
+	assert len(datasets) == 1
+	dataset_id = datasets.pop()
+	assert (settings.archive_path / f'{dataset_id}_ortho.tif').read_bytes() == b'aaaabbbbccccdd'
+	# Any later repeat replays the dataset instead of creating another.
+	assert send(1, b'bbbb', total=4, chunk_size='4').json()['id'] == dataset_id
+	with use_client(auth_token) as db:
+		rows = db.table(settings.datasets_table).select('id').eq('id', dataset_id).execute().data
+	assert len(rows) == 1
+
+
+def test_parallel_chunk_with_the_wrong_size_is_refused(upload):
+	send, _ = upload
+	assert send(0, b'aaa', total=2, chunk_size='4').status_code == 409

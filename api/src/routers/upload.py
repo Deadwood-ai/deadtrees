@@ -21,7 +21,7 @@ from shared.zip_utils import (
 
 from ..upload.upload import create_dataset_entry
 from ..upload.abandoned_uploads import UPLOAD_ID_PATTERN, retention_days
-from ..upload.chunk_session import UPLOAD_SESSIONS_DIR, locked_chunk_session
+from ..upload.chunk_session import MAX_CHUNK_BYTES, UPLOAD_SESSIONS_DIR, locked_chunk_session
 from ..upload.upload_status import UploadStatus, list_unfinished_uploads, read_upload_status
 from ..upload.geotiff_processor import process_geotiff_upload
 from ..upload.raw_images_processor import process_raw_images_upload
@@ -96,6 +96,8 @@ def upload_chunk(
 	upload_type: Annotated[Optional[UploadType], Form()] = None,
 	# Opt-in override: accept a file that is already on the platform as a new dataset.
 	allow_duplicate: Annotated[bool, Form()] = False,
+	# Declared by clients that send chunks in parallel: chunk i holds bytes from i * chunk_size.
+	chunk_size: Annotated[Optional[int], Form(gt=0, le=MAX_CHUNK_BYTES)] = None,
 ):
 	"""Handle chunked upload of files (GeoTIFF or ZIP) with auto-detection and simplified processing"""
 	user = verify_token(token)
@@ -158,6 +160,7 @@ def upload_chunk(
 			'chunks_total': chunks_total,
 			'upload_type': upload_type.value,
 			**({'allow_duplicate': True} if allow_duplicate else {}),
+			**({'chunk_size': chunk_size} if chunk_size else {}),
 			**metadata,
 		},
 	) as session:

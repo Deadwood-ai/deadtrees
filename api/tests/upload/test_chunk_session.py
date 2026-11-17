@@ -18,6 +18,9 @@ def open_session(tmp_path, user='owner', contract=None):
 
 
 def attempt_in_another_process(tmp_path):
+	from api.src.upload import chunk_session
+
+	chunk_session.LOCK_WAIT_SECONDS = 0.2
 	try:
 		with open_session(tmp_path) as session:
 			return session.accept(0, b'first')
@@ -29,6 +32,7 @@ def test_worker_lock_is_shared_and_released(tmp_path):
 	with ProcessPoolExecutor(max_workers=1, mp_context=get_context('spawn')) as pool:
 		with open_session(tmp_path) as session:
 			session.accept(0, b'first')
+			# Past its wait, a blocked request answers 503.
 			assert pool.submit(attempt_in_another_process, tmp_path).result(timeout=20) == 503
 		assert pool.submit(attempt_in_another_process, tmp_path).result(timeout=20) == {
 			'message': 'Chunk 0 of 2 received'
@@ -152,3 +156,61 @@ def test_oversized_chunk_is_rejected_before_writing(tmp_path, monkeypatch):
 		# A chunk of exactly the limit is accepted, copied in small blocks.
 		assert session.accept(0, io.BytesIO(b'12345678')) == {'message': 'Chunk 0 of 2 received'}
 	assert (tmp_path / 'upload.tmp').read_bytes() == b'12345678'
+
+
+PARALLEL = {'chunks_total': 3, 'filename': 'image.tif', 'chunk_size': 4}
+
+
+def test_declared_chunk_size_accepts_chunks_in_any_order(tmp_path):
+	"""DT-1568: parallel clients send chunks out of order; each lands at index * chunk_size."""
+	for index, data in [(2, b'cc'), (0, b'aaaa')]:
+		with open_session(tmp_path, contract=PARALLEL) as session:
+			assert session.accept(index, data) == {'message': f'Chunk {index} of 3 received'}
+	with open_session(tmp_path, contract=PARALLEL) as session:
+		# A repeated chunk is acknowledged without writing; the missing one completes the set.
+		assert session.accept(2, b'cc') == {'message': 'Chunk 2 of 3 received'}
+		assert session.accept(1, b'bbbb') is None
+		session.begin_finalization()
+		session.complete({'id': 7})
+	assert (tmp_path / 'upload.tmp').read_bytes() == b'aaaabbbbcc'
+	with open_session(tmp_path, contract=PARALLEL) as session:
+		assert session.accept(0, b'aaaa') == {'id': 7}
+
+
+@pytest.mark.parametrize('index, data', [(0, b'aaa'), (1, b'bbbbb'), (2, b'ccccc')])
+def test_chunks_must_match_the_declared_size(tmp_path, index, data):
+	with open_session(tmp_path, contract=PARALLEL) as session:
+		with pytest.raises(HTTPException, match='declared chunk size') as error:
+			session.accept(index, data)
+		assert error.value.status_code == 409
+
+
+def test_uncommitted_parallel_write_is_overwritten_by_its_retry(tmp_path):
+	with open_session(tmp_path, contract=PARALLEL) as session:
+		session.accept(0, b'aaaa')
+	# A worker wrote chunk 1 and died before its receipt.
+	with (tmp_path / 'upload.tmp').open('r+b') as output:
+		output.seek(4)
+		output.write(b'XXXX')
+	with open_session(tmp_path, contract=PARALLEL) as session:
+		session.accept(2, b'cc')
+		assert session.accept(1, b'bbbb') is None
+		session.begin_finalization()
+	assert (tmp_path / 'upload.tmp').read_bytes() == b'aaaabbbbcc'
+
+
+def wait_for_lock_in_another_process(tmp_path):
+	with open_session(tmp_path) as session:
+		return session.accept(1, b'last')
+
+
+def test_a_parallel_request_waits_for_the_lock_instead_of_failing(tmp_path):
+	import time
+
+	with ProcessPoolExecutor(max_workers=1, mp_context=get_context('spawn')) as pool:
+		with open_session(tmp_path) as session:
+			session.accept(0, b'first')
+			waiting = pool.submit(wait_for_lock_in_another_process, tmp_path)
+			time.sleep(1)
+			assert not waiting.done()
+		assert waiting.result(timeout=20) is None
