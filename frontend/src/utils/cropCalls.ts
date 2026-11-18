@@ -61,12 +61,13 @@ export const MODE_LABELS: Record<string, string> = {
 	m5_fc_trees_missed: "Trees missed",
 	m6_fc_on_non_trees: "Tree cover on non-trees",
 	m7_fc_artifact: "Broken or cut-off prediction",
+	m9_fc_gaps_filled: "Gaps between crowns not identified",
 };
 
 /** The error types a reviewer answers per prediction layer (scripts/audit_import.py LAYER_MODES). */
 export const LAYER_MODES = {
 	deadwood: ["m1_dead_missed", "m2_dw_on_live_vegetation", "m3_dw_on_non_vegetation", "m4_dw_on_lying_wood", "m7_dw_artifact"],
-	forest_cover: ["m5_fc_trees_missed", "m6_fc_on_non_trees", "m7_fc_artifact"],
+	forest_cover: ["m5_fc_trees_missed", "m6_fc_on_non_trees", "m9_fc_gaps_filled", "m7_fc_artifact"],
 } as const;
 export type PredictionLayer = keyof typeof LAYER_MODES;
 

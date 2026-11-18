@@ -3,6 +3,11 @@
 The COG is read through a clamped window around the square (never a boundless read, which
 skips the overviews and once used 31 GB on a very large ortho) and warped onto the square's
 5 cm UTM grid. The overlays are what the judges see: a translucent fill and a solid outline.
+
+Render v2 (DT-1560): the forest layer often covers the whole crop. With a faint fill and an
+outline only at the mask's inner edge, such a crop showed no gold edge at all, and the judges
+reported the forest as missing. Now the outline also runs where the prediction meets the crop
+border, the forest fill and outline are stronger, and the prompt states each layer's share.
 """
 
 from __future__ import annotations
@@ -22,8 +27,10 @@ from rasterio.windows import from_bounds as window_from_bounds
 from rasterio.windows import transform as window_transform
 
 CROP_PX = 1024  # 51.2 m at 5 cm
+RENDER_VERSION = 'overlay-v2'
 COLORS = {'deadwood': (30, 135, 255), 'forest': (255, 202, 50)}
-FILL_ALPHA = 0.3
+FILL_ALPHA = {'deadwood': 0.3, 'forest': 0.4}
+OUTLINE_PX = {'deadwood': 1, 'forest': 3}
 OUTSIDE_AOI = 0.35  # brightness kept outside the AOI
 
 
@@ -89,13 +96,18 @@ def render_crop(src: rasterio.DatasetReader, epsg: int, square: tuple, layers: d
 	return Crop(rgb=rgb.transpose(1, 2, 0), valid=ok, masks=masks, mpp=(square[2] - square[0]) / CROP_PX, in_aoi=in_aoi)
 
 
-def outline(mask: np.ndarray) -> np.ndarray:
-	inner = mask.copy()
-	inner[1:] &= mask[:-1]
-	inner[:-1] &= mask[1:]
-	inner[:, 1:] &= mask[:, :-1]
-	inner[:, :-1] &= mask[:, 1:]
-	return mask & ~inner
+def outline(mask: np.ndarray, width: int = 1) -> np.ndarray:
+	"""The mask's edge, `width` pixels wide, inside the mask. The crop border counts as an edge:
+	a prediction that fills the crop gets a frame instead of no outline at all."""
+	inner = np.pad(mask, 1, constant_values=False)
+	for _ in range(width):
+		eroded = inner.copy()
+		eroded[1:] &= inner[:-1]
+		eroded[:-1] &= inner[1:]
+		eroded[:, 1:] &= inner[:, :-1]
+		eroded[:, :-1] &= inner[:, 1:]
+		inner = eroded
+	return mask & ~inner[1:-1, 1:-1]
 
 
 def _base(crop: Crop) -> np.ndarray:
@@ -110,8 +122,9 @@ def overlay(crop: Crop, layer: str) -> Image.Image:
 	base = _base(crop)
 	color = np.array(COLORS[layer], np.float32)
 	m = crop.masks[layer]
-	base[m] = base[m] * (1 - FILL_ALPHA) + color * FILL_ALPHA
-	base[outline(m)] = color
+	alpha = FILL_ALPHA[layer]
+	base[m] = base[m] * (1 - alpha) + color * alpha
+	base[outline(m, OUTLINE_PX[layer])] = color
 	return Image.fromarray(base.clip(0, 255).astype('uint8'))
 
 

@@ -102,7 +102,7 @@ def run_prediction_quality(
 		r, name, backend = task
 		asked = time.monotonic()
 		try:
-			answer, error = judge_mod.ask(name, backend, judge_images(r.crop)), None
+			answer, error = judge_mod.ask(name, backend, judge_images(r.crop), cover={layer: r.crop.cover(layer) for layer in judge_mod.LAYERS}), None
 		except (LoginExpired, LimitReached):
 			raise  # the worker pauses and runs the dataset again later
 		except Exception as e:  # one judge failing on one crop does not stop the check
