@@ -35,6 +35,11 @@ DEFAULT_MAX_AGE_DAYS = 7
 UPLOAD_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
 
+def retention_days() -> float:
+	"""Idle days before abandoned bytes are deleted; also how long the API offers an upload for resume."""
+	return float(os.getenv('UPLOAD_TMP_RETENTION_DAYS', DEFAULT_MAX_AGE_DAYS))
+
+
 def _last_activity(paths: list[Path]) -> float:
 	return max(path.stat().st_mtime for path in paths if path.exists())
 
@@ -94,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
 	parser.add_argument(
 		'--max-age-days',
 		type=float,
-		default=float(os.getenv('UPLOAD_TMP_RETENTION_DAYS', DEFAULT_MAX_AGE_DAYS)),
+		default=retention_days(),
 		help=f'Idle days before abandoned bytes are deleted (default {DEFAULT_MAX_AGE_DAYS}, env UPLOAD_TMP_RETENTION_DAYS)',
 	)
 	parser.add_argument('--dry-run', action='store_true', help='List the files without deleting them')

@@ -249,30 +249,34 @@ def test_activation_retries_lost_response(prediction, monkeypatch, committed):
 	assert state(prediction) == [(label.id, True, 1, None)]
 
 
-def test_initial_count_timeout_retries_read_before_insert(prediction, monkeypatch):
+def test_staged_upload_counts_the_label_only_after_a_lost_response(prediction, monkeypatch):
+	"""Counting a large label can exceed the statement budget (DT-721). The uploader
+	tracks the committed count across chunks and reads it back only to resolve a
+	lost response."""
 	original_send = httpx.Client.send
-	counts = 0
+	reads = []
+	posts = 0
+	monkeypatch.setattr('shared.labels.MAX_CHUNK_GEOMETRIES', 1)
 	monkeypatch.setattr('shared.retry.time.sleep', lambda _delay: None)
 
-	def interrupt(client, request, **kwargs):
-		nonlocal counts
-		if request.method == 'HEAD' and request.url.path.endswith('/v2_forest_cover_geometries'):
-			counts += 1
-			if counts == 1:
-				return httpx.Response(
-					500,
-					request=request,
-					json={
-						'code': '57014',
-						'message': 'canceling statement due to statement timeout',
-					},
-				)
+	def lose_second_chunk_response(client, request, **kwargs):
+		nonlocal posts
+		if request.url.path.endswith('/v2_forest_cover_geometries'):
+			if request.method in {'GET', 'HEAD'}:
+				reads.append(request.method)
+			if request.method == 'POST':
+				posts += 1
+				if posts == 2:
+					assert original_send(client, request, **kwargs).is_success
+					raise httpx.ReadError('Server disconnected without sending a response.')
 		return original_send(client, request, **kwargs)
 
-	monkeypatch.setattr(httpx.Client, 'send', interrupt)
-	label = stage(prediction)
-	assert counts == 2
-	assert publish(prediction, label.id)['is_active']
+	monkeypatch.setattr(httpx.Client, 'send', lose_second_chunk_response)
+	geometry = MultiPolygon([box(7.8 + i * 0.002, 48, 7.801 + i * 0.002, 48.001) for i in range(3)])
+	label = stage(prediction, geometry=geometry.__geo_interface__)
+	assert posts == 3
+	assert reads == ['GET']
+	assert publish(prediction, label.id, count=3)['is_active']
 
 
 @pytest.mark.parametrize('unverifiable', [False, 'network', 'statement_timeout'])
@@ -284,7 +288,7 @@ def test_lost_insert_response_never_duplicates_geometries(prediction, monkeypatc
 	def lose_response(client, request, **kwargs):
 		nonlocal committed
 		if request.url.path.endswith('/v2_forest_cover_geometries'):
-			if request.method == 'HEAD' and committed and unverifiable:
+			if request.method == 'GET' and committed and unverifiable:
 				if unverifiable == 'statement_timeout':
 					return httpx.Response(
 						500,

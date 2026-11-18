@@ -177,6 +177,13 @@ type AnalyticsBaseProperties = {
   status?: string;
 };
 
+type UploadTransferProperties = AnalyticsBaseProperties & {
+  upload_type?: string;
+  chunk_index: number;
+  chunks_total: number;
+  file_size_mb: number;
+};
+
 export interface AnalyticsEventPropertiesMap {
   landing_cta_clicked: AnalyticsBaseProperties & {
     cta_name: string;
@@ -240,6 +247,20 @@ export interface AnalyticsEventPropertiesMap {
     upload_type?: string;
     failure_reason: string;
   };
+  // Transfer health of one upload: a chunk request failed, the upload stopped
+  // making progress, continued after a stop, or the contributor ended it.
+  upload_chunk_failed: UploadTransferProperties & {
+    attempt: number;
+    failure_reason: string;
+  };
+  upload_stalled: UploadTransferProperties & {
+    failure_reason: string;
+  };
+  upload_resumed: UploadTransferProperties & {
+    resume_source: "retry" | "recovery";
+  };
+  upload_cancelled: UploadTransferProperties;
+  upload_discarded: UploadTransferProperties;
   processing_result_viewed: AnalyticsBaseProperties & {
     dataset_id: number;
     processing_type: "deadwood" | "forest_cover" | "deadwood_and_forest_cover";
@@ -345,7 +366,12 @@ type EssentialAnalyticsProperty =
   | "interaction_type"
   | "search_length"
   | "error_code"
-  | "url_path";
+  | "url_path"
+  | "chunk_index"
+  | "chunks_total"
+  | "file_size_mb"
+  | "attempt"
+  | "resume_source";
 
 const ESSENTIAL_PROPERTY_KEYS: EssentialAnalyticsProperty[] = [
   "page",
@@ -377,6 +403,11 @@ const ESSENTIAL_PROPERTY_KEYS: EssentialAnalyticsProperty[] = [
   "search_length",
   "error_code",
   "url_path",
+  "chunk_index",
+  "chunks_total",
+  "file_size_mb",
+  "attempt",
+  "resume_source",
 ];
 
 const ESSENTIAL_EVENTS = new Set<AnalyticsEventName>([
@@ -389,6 +420,11 @@ const ESSENTIAL_EVENTS = new Set<AnalyticsEventName>([
   "upload_started",
   "upload_completed",
   "upload_failed",
+  "upload_chunk_failed",
+  "upload_stalled",
+  "upload_resumed",
+  "upload_cancelled",
+  "upload_discarded",
   "processing_result_viewed",
   "dataset_download_started",
   "dataset_download_completed",

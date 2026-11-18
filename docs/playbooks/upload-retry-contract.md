@@ -1,24 +1,75 @@
 # Upload retry contract
 
 `POST /datasets/chunk` accepts the existing multipart fields. The browser sends
-sequential 50-MiB chunks; the CLI can use other chunk sizes. Neither client needs
-a new offset or checksum field. The server computes SHA-256 for each chunk.
+50-MiB chunks and the CLIs 100-MiB chunks, three at a time. The server computes
+SHA-256 for each chunk.
+
+- A client that sends `chunk_size` (it joins the contract) may send chunks in any
+  order and in parallel: chunk `i` lands at byte `i * chunk_size`. Every chunk
+  but the last must be exactly `chunk_size` bytes, the last at most that; other
+  sizes return HTTP 409. The upload finalizes when its last missing chunk
+  arrives, whatever its index, and that request returns the dataset; any later
+  repeat of any chunk replays it. Receipts then hold `null` for chunks that have
+  not arrived, and the status call reports them the same way.
+- Without `chunk_size`, the rules below for in-order chunks apply unchanged, so
+  uploads started by older clients continue as they began.
 
 - `upload_id` identifies one immutable upload: owner, filename, upload type,
   dataset metadata, and total chunk count. IDs contain 1–128 ASCII letters,
   digits, underscores or hyphens. Both current clients generate compatible IDs.
-- Indexes are zero-based. The next unseen index must follow the last accepted
-  index. An identical earlier chunk returns its original acknowledgement without
+- Indexes are zero-based. Without `chunk_size`, the next unseen index must follow
+  the last accepted index. An identical earlier chunk returns its original acknowledgement without
   changing the file. Different bytes or metadata return HTTP 409.
-- The last chunk is accepted only after all preceding chunks. A completed final
+- Without `chunk_size`, the last chunk is accepted only after all preceding chunks. A completed final
   request returns the same dataset response on every identical retry, even after
   the temporary file has moved or the API process has restarted.
 - Concurrent requests for one upload use a filesystem lock shared by API workers.
-  A busy session returns HTTP 503 with `Retry-After: 2`, which the browser's existing
-  bounded retry policy handles. Unrelated uploads use separate locks.
+  Each request hashes its chunk first, then waits up to 120 s for the lock to write
+  it; only a longer wait (such as a large finalization) returns HTTP 503 with
+  `Retry-After: 2`, which the clients retry. Unrelated uploads use separate locks.
 - No token is stored in a receipt. Authentication is checked on every request,
   and the authenticated user must match the receipt owner. A refreshed token for
   that same user works normally.
+
+## Resuming an upload
+
+Two read calls let a client continue an upload instead of starting again. Both
+answer only for the signed-in owner; another user's upload ID returns 404.
+
+- `GET /datasets/uploads/{upload_id}` returns the upload's `state`
+  (`receiving`, `expired`, `finalizing` or `complete`), `chunks_total`,
+  `chunks_received`, `bytes_received`, the size and SHA-256 of every received
+  chunk (`chunks`), the stored `contract` (the fields every chunk repeats) and,
+  once complete, the dataset `response`.
+- `GET /datasets/uploads` lists the caller's uploads in `receiving` or
+  `finalizing` whose receipt changed within the retention period, without the
+  per-chunk list.
+
+A client resumes by sending the chunks that are missing (`null` or beyond the end
+of `chunks`), with the same upload ID and the same contract; an upload without
+`chunk_size` in its contract continues in order at `chunks_received`. Before it does, it hashes every received chunk of its
+file and compares it with the receipt, so a resume never appends one file's
+bytes to another's. For a large upload this reads the whole received part once. When every chunk arrived but the reply to the last was lost, it
+sends the last chunk again: an identical repeat starts finalization, or replays
+the stored response. `expired` means the retention job deleted the bytes;
+`finalizing` needs inspection as described below.
+
+The browser (`frontend/src/api/uploadOrtho.ts`) uses one transfer loop for new
+and resumed uploads, three chunks at a time. It drops a chunk request that sends no bytes for two
+minutes, waits while the browser is offline, refreshes the login after a 401
+and retries with growing pauses; after 30 minutes of failures the run ends and
+the upload stays resumable. The profile page lists unfinished uploads and
+continues one after the contributor picks the same file again. Once the file is
+stored, the browser forgets the upload before it requests processing, so a lost
+processing reply never queues it twice; if that request fails, the contributor
+is asked to contact support. A stored upload this browser still remembers never
+reached that request (the tab closed during finalization), so the panel offers
+to start its processing. The CLI
+(`deadtrees data upload`) looks for an unfinished upload of the same file name,
+chunk count and metadata, checks every received chunk, and continues it.
+
+Receipts written before resume support have no stored contract. They report
+`contract: null` until their next chunk, which stores it.
 
 ## Persistence and failure behavior
 

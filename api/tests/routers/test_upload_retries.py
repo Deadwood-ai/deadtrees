@@ -131,7 +131,7 @@ def test_concurrent_final_requests_have_one_result(upload):
 	assert all(result == retry.json() for result in successes)
 
 
-@pytest.mark.parametrize(('index', 'total'), [(-1, 3), (0, 0), (3, 3)])
+@pytest.mark.parametrize(('index', 'total'), [(-1, 3), (0, 0), (3, 3), (10_000, 10_001)])
 def test_invalid_chunk_numbers(upload, index, total):
 	send, _ = upload
 	assert send(index, b'chunk', total=total).status_code == 422
@@ -215,3 +215,70 @@ def test_rejected_zip_returns_same_validation_error_on_retry(upload, auth_token)
 		assert db.table(settings.datasets_table).select('id').eq('file_name', filename).execute().data == []
 	# The bytes stay under a receiving receipt until the abandoned-upload retention job removes them.
 	assert (settings.raw_images_path / f'{upload_id}.tmp').read_bytes() == content
+
+
+def test_owner_can_read_and_resume_an_unfinished_upload(upload, auth_token, test_user2):
+	"""DT-1567: the status calls report what arrived, so a client continues instead of restarting."""
+	send, upload_id = upload
+	assert send(0, b'first').status_code == 200
+	assert send(1, b'second').status_code == 200
+
+	def get(path, token=auth_token):
+		with TestClient(app) as client:
+			return client.get(path, headers={'Authorization': f'Bearer {token}'})
+
+	status = get(f'/datasets/uploads/{upload_id}')
+	assert status.status_code == 200, status.text
+	body = status.json()
+	assert (body['state'], body['chunks_total'], body['chunks_received'], body['bytes_received']) == ('receiving', 3, 2, 11)
+	assert body['last_chunk']['size'] == 6
+	assert [chunk['size'] for chunk in body['chunks']] == [5, 6]
+	assert body['contract']['file_name'] == 'retry.tif'
+	assert body['contract']['authors'] == ['Retry test']
+	listed = {item['upload_id']: item for item in get('/datasets/uploads').json()}
+	assert listed[upload_id]['chunks'] is None
+
+	other_token = login(settings.TEST_USER_EMAIL2, settings.TEST_USER_PASSWORD2, use_cached_session=False)
+	assert verify_token(other_token).id == test_user2
+	assert get(f'/datasets/uploads/{upload_id}', other_token).status_code == 404
+	assert upload_id not in [item['upload_id'] for item in get('/datasets/uploads', other_token).json()]
+	assert get('/datasets/uploads/missing-upload').status_code == 404
+
+	# The resumed client sends only the missing chunk; the upload then leaves the list.
+	final = send(2, b'third')
+	assert final.status_code == 200, final.text
+	done = get(f'/datasets/uploads/{upload_id}').json()
+	assert (done['state'], done['response']['id']) == ('complete', final.json()['id'])
+	assert upload_id not in [item['upload_id'] for item in get('/datasets/uploads').json()]
+	assert (settings.archive_path / f"{final.json()['id']}_ortho.tif").read_bytes() == b'firstsecondthird'
+
+
+def test_status_calls_need_a_valid_login(upload):
+	with TestClient(app) as client:
+		assert client.get('/datasets/uploads').status_code == 401
+		assert client.get('/datasets/uploads', headers={'Authorization': 'Bearer nonsense'}).status_code == 401
+
+
+def test_parallel_chunks_assemble_one_dataset(upload, auth_token):
+	"""DT-1568: with a declared chunk size, chunks sent at the same time in any order make one file."""
+	send, upload_id = upload
+	parts = [b'aaaa', b'bbbb', b'cccc', b'dd']
+	with ThreadPoolExecutor(max_workers=4) as pool:
+		responses = list(
+			pool.map(lambda index: send(index, parts[index], total=4, chunk_size='4'), [3, 1, 2, 0])
+		)
+	assert all(response.status_code == 200 for response in responses), [r.text for r in responses]
+	datasets = {response.json()['id'] for response in responses if 'id' in response.json()}
+	assert len(datasets) == 1
+	dataset_id = datasets.pop()
+	assert (settings.archive_path / f'{dataset_id}_ortho.tif').read_bytes() == b'aaaabbbbccccdd'
+	# Any later repeat replays the dataset instead of creating another.
+	assert send(1, b'bbbb', total=4, chunk_size='4').json()['id'] == dataset_id
+	with use_client(auth_token) as db:
+		rows = db.table(settings.datasets_table).select('id').eq('id', dataset_id).execute().data
+	assert len(rows) == 1
+
+
+def test_parallel_chunk_with_the_wrong_size_is_refused(upload):
+	send, _ = upload
+	assert send(0, b'aaa', total=2, chunk_size='4').status_code == 409

@@ -7,7 +7,7 @@ from shared.labels import upload_geometry_chunk
 
 
 class _FakeSelect:
-	"""Models ``select('id', count='exact').eq('label_id', ...).execute()``."""
+	"""Models ``select('id', count='exact').eq('label_id', ...).limit(1).execute()``."""
 
 	def __init__(self, table):
 		self._table = table
@@ -15,7 +15,11 @@ class _FakeSelect:
 	def eq(self, field, value):
 		return self
 
+	def limit(self, n):
+		return self
+
 	def execute(self):
+		self._table.count_requests = getattr(self._table, 'count_requests', 0) + 1
 		return SimpleNamespace(count=len(self._table.rows))
 
 
@@ -115,14 +119,15 @@ def _polygon():
 	return Polygon([(0, 0), (0, 1), (1, 1), (1, 0), (0, 0)])
 
 
-def _upload(client, count=1):
-	upload_geometry_chunk(
+def _upload(client, count=1, existing_count=0):
+	return upload_geometry_chunk(
 		client,
 		table='v2_deadwood_geometries',
 		label_id=1,
 		geometries=[_polygon() for _ in range(count)],
 		properties=None,
 		token='token',
+		existing_count=existing_count,
 	)
 
 
@@ -231,14 +236,21 @@ def test_single_oversized_geometry_uses_the_large_geometry_rpc(monkeypatch):
 	client = _RpcClient()
 
 	upload_geometry_chunk(
-		client, 'v2_forest_cover_geometries', 7, [huge], {'source': 'model'}, 'token', large_geometry_rpc=True
+		client,
+		'v2_forest_cover_geometries',
+		7,
+		[huge],
+		{'source': 'model'},
+		'token',
+		existing_count=3,
+		large_geometry_rpc=True,
 	)
 
 	assert [name for name, _ in client.rpc_calls] == ['insert_large_label_geometry']
 	params = client.rpc_calls[0][1]
 	assert params['p_label_id'] == 7
 	assert params['p_properties'] == {'source': 'model'}
-	assert params['p_expected_existing_count'] == 0
+	assert params['p_expected_existing_count'] == 3
 	assert len(params['p_geometry']) > 2 * labels.MAX_CHUNK_SIZE
 
 
@@ -249,6 +261,48 @@ def test_oversized_geometry_without_the_rpc_flag_uses_the_plain_insert(monkeypat
 	ring = [(i * 1e-6, (i % 2) * 1e-6) for i in range(200)] + [(0.0, 1.0)]
 	client = _FakeClient(['ok'])
 
-	upload_geometry_chunk(client, 'v2_deadwood_geometries', 7, [Polygon(ring)], None, 'token')
+	upload_geometry_chunk(client, 'v2_deadwood_geometries', 7, [Polygon(ring)], None, 'token', existing_count=0)
+
+	assert client._table.insert_attempts == 1
+
+
+def test_clean_upload_never_counts_the_label():
+	"""Counting a large label can exceed the statement budget (DT-721), so a clean
+	upload relies on the count the uploader tracks."""
+	client = _FakeClient(behavior=['ok', 'ok'])
+
+	assert _upload(client, count=2) == 2
+	assert _upload(client, count=3, existing_count=2) == 5
+
+	assert getattr(client._table, 'count_requests', 0) == 0
+	assert len(client._table.rows) == 5
+
+
+def test_split_batches_carry_the_committed_count():
+	client = _GatedClient(max_ok_batch=2)
+
+	assert _upload(client, count=4, existing_count=10) == 14
+	assert getattr(client._table, 'count_requests', 0) == 0
+
+
+def test_lost_response_is_verified_against_the_tracked_count():
+	"""After an unknown outcome the label is counted once and compared with the
+	count the uploader tracked before the batch."""
+	client = _FakeClient(behavior=['commit_then_fail'])
+	client._table.rows.extend([{'earlier': i} for i in range(5)])
+
+	assert _upload(client, count=2, existing_count=5) == 7
+
+	assert client._table.insert_attempts == 1
+	assert client._table.count_requests == 1
+	assert len(client._table.rows) == 7
+
+
+def test_unexpected_label_count_stops_the_retry():
+	client = _FakeClient(behavior=['fail'])
+	client._table.rows.extend([{'earlier': i} for i in range(4)])
+
+	with pytest.raises(Exception, match='count changed unexpectedly'):
+		_upload(client, count=1, existing_count=5)
 
 	assert client._table.insert_attempts == 1

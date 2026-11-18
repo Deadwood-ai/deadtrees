@@ -3,7 +3,7 @@ import { EnvironmentOutlined, CheckCircleOutlined, ExclamationCircleOutlined, Wa
 import type { IDataset } from "../../types/dataset";
 import type { PhenologyMetadata } from "../../types/phenology";
 import countryList from "../../utils/countryList";
-import { formatOrthoFileSize, isGeonadirDataset, getTruncatedAuthorDisplay } from "../../utils/datasetUtils";
+import { formatGroundResolution, formatOrthoFileSize, isGeonadirDataset, getTruncatedAuthorDisplay } from "../../utils/datasetUtils";
 import { sanitizeText } from "../../utils/textUtils";
 import PublicationLink from "../PublicationLink";
 import PhenologyBar from "../PhenologyBar/PhenologyBar";
@@ -22,6 +22,7 @@ import {
 import { formatAcquisitionDate } from "../DatasetAudit/auditConstants";
 import AcquisitionDateEvidence from "../AcquisitionDate/AcquisitionDateEvidence";
 import DatasetAccessSection from "../DatasetAccess/DatasetAccessSection";
+import { useDatasetGroundResolution } from "../../hooks/useDatasets";
 
 interface DatasetInfoSidebarProps {
   dataset: IDataset;
@@ -33,6 +34,20 @@ interface DatasetInfoSidebarProps {
 }
 
 // === Shared Row Components ===
+
+/** Ground resolution of the uploaded orthophoto, before it is reprojected for the map. */
+const ResolutionRow = ({ datasetId }: { datasetId: number }) => {
+  const { data: gsdCm, isLoading } = useDatasetGroundResolution(datasetId);
+  return (
+    <InfoRow label="Resolution" tooltip="Ground size of one pixel of the uploaded orthophoto.">
+      {isLoading ? (
+        <div className="h-4 w-16 animate-pulse rounded bg-gray-200" />
+      ) : (
+        <Typography.Text data-testid="dataset-ground-resolution">{formatGroundResolution(gsdCm)}</Typography.Text>
+      )}
+    </InfoRow>
+  );
+};
 
 const pad2 = (v: number) => String(v).padStart(2, "0");
 const isoOf = (y: number | null, m: number | null, d: number | null) => (y && m && d ? `${y}-${pad2(m)}-${pad2(d)}` : null);
@@ -387,6 +402,7 @@ export default function DatasetInfoSidebar({
         <InfoRow label="File Size" tooltip="Size of the orthomosaic file.">
           <Typography.Text>{formatOrthoFileSize(dataset.ortho_file_size)}</Typography.Text>
         </InfoRow>
+        <ResolutionRow datasetId={dataset.id} />
       </Section>
 
       {/* Visibility and sharing (owner, grantees, private-data operators) */}

@@ -173,7 +173,7 @@ def test_archive_resolves_exclusions_once_per_query(db, world):
 
 
 def test_archive_lists_ground_resolution_and_additional_information(db):
-	"""The archive filters on ground resolution and searches the uploader's additional information."""
+	"""The archive filters on the stored ground resolution and searches the uploader's additional information."""
 	owner = account(db)
 	row = archive_dataset(db, owner)
 	plain = archive_dataset(db, owner)
@@ -182,12 +182,7 @@ def test_archive_lists_ground_resolution_and_additional_information(db):
 		WHERE id=%s""",
 		(row,),
 	)
-	# COGs are web mercator: 0.05 m per pixel at 52.505°N is about 3.0 cm on the ground.
-	db.execute(
-		"""INSERT INTO public.v2_cogs (dataset_id,cog_file_name,version,cog_file_size,cog_processing_runtime,cog_path,cog_info)
-		VALUES (%s,'c.tif',1,1,0.1,'c.tif','{"GEO":{"CRS":"EPSG:3857","Resolution":[0.05,-0.05]}}')""",
-		(row,),
-	)
+	db.execute('UPDATE public.v2_orthos SET gsd_cm=2.3 WHERE dataset_id=%s', (row,))
 	act_as(db, None)
 	found = {
 		id_: (gsd, text)
@@ -196,5 +191,25 @@ def test_archive_lists_ground_resolution_and_additional_information(db):
 			([row, plain],),
 		)
 	}
-	assert found[row] == (pytest.approx(3.0, abs=0.05), 'Bark beetle decline near a FLUX site')
+	assert found[row] == (pytest.approx(2.3), 'Bark beetle decline near a FLUX site')
 	assert found[plain] == (None, None)
+
+
+@pytest.mark.parametrize(
+	'caller,sees_private',
+	[('anonymous', False), ('stranger', False), ('owner', True), ('privileged', True)],
+)
+def test_details_resolution_follows_dataset_visibility(db, world, caller, sees_private):
+	"""The details page reads v2_orthos.gsd_cm directly; row security hides private datasets."""
+	rows, callers = world
+	db.execute('UPDATE public.v2_orthos SET gsd_cm=3.0 WHERE dataset_id = ANY(%s)', ([rows['public'], rows['private']],))
+	act_as(db, callers[caller])
+	resolution = {
+		dataset_id: gsd
+		for dataset_id, gsd in db.execute(
+			'SELECT dataset_id,gsd_cm FROM public.v2_orthos WHERE dataset_id = ANY(%s)',
+			([rows['public'], rows['private']],),
+		)
+	}
+	assert resolution[rows['public']] == pytest.approx(3.0)
+	assert (rows['private'] in resolution) == sees_private

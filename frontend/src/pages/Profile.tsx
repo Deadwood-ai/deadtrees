@@ -4,6 +4,7 @@ import { FileOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { useAuth } from "../hooks/useAuthProvider";
 import DataTable from "../components/DataTable";
 import UploadButton from "../components/Upload/UploadButton";
+import UnfinishedUploads from "../components/Upload/UnfinishedUploads";
 import { useUserDatasets } from "../hooks/useDatasets";
 import { useMyFlags } from "../hooks/useDatasetFlags";
 import { useSharedWithMe } from "../hooks/useDatasetAccess";
@@ -168,6 +169,8 @@ export default function ProfilePage() {
               ) : null}
             </div>
           </div>
+
+          <UnfinishedUploads />
 
           <div className="rounded-2xl border border-gray-200/60 bg-white p-6 shadow-sm">
             {activeTab === "datasets" ? (

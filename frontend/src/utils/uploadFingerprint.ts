@@ -1,5 +1,10 @@
 const SAMPLE_SIZE = 10 * 1024 * 1024;
 
+export const sha256Hex = async (blob: Blob): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
 /**
  * The identity duplicate-upload detection compares: SHA-256 over the decimal
  * file size, the first `sampleSize` bytes and the last `sampleSize` bytes.
@@ -11,6 +16,5 @@ export const computeUploadFingerprint = async (file: Blob, sampleSize = SAMPLE_S
     file.slice(0, sampleSize),
     file.slice(Math.max(0, file.size - sampleSize)),
   ]);
-  const digest = await crypto.subtle.digest("SHA-256", await sampled.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return sha256Hex(sampled);
 };

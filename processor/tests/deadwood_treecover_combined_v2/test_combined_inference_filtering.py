@@ -260,3 +260,30 @@ def test_a_patch_touching_the_block_edge_in_one_vertex_is_clipped_without_error(
 	crs = CRS.from_epsg(32738)
 
 	assert inference._treecover_polygons_in_blocks(str(path), crs, crs, lambda _: None) == []
+
+
+def test_an_invalid_polygon_is_repaired_and_clipped_without_error(monkeypatch, tmp_path):
+	"""A polygon that GEOS cannot intersect with its block is repaired and clipped on a
+	snap-rounding grid instead of failing the combined step (15646, 669; DT-1565)."""
+	import numpy as np
+	import shapely
+
+	# The hole crosses the shell, so the plain intersection raises a TopologyException.
+	invalid = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)], [[(8, 4), (12, 4), (12, 6), (8, 6)]])
+	block_bounds = (0, 0, 9, 10)
+	with pytest.raises(shapely.errors.GEOSException):
+		invalid.intersection(shapely.box(*block_bounds))
+
+	monkeypatch.setattr(combined_inference, 'reproject_polygons', lambda polygons, src, dst: polygons)
+	monkeypatch.setattr(combined_inference, 'mask_to_polygons_in_blocks', lambda ds, value, size, padding: [(block_bounds, [invalid])])
+	monkeypatch.setattr(CombinedInference, '_simplify_polygons', lambda self, polygons: polygons)
+	path = tmp_path / 'mask.tif'
+	_write_mask(path, np.ones((2, 2), dtype=np.uint8))
+
+	inference = CombinedInference.__new__(CombinedInference)
+	crs = CRS.from_epsg(32632)
+	polygons = inference._treecover_polygons_in_blocks(str(path), crs, crs, lambda _: None)
+
+	expected = repair_polygon(invalid).intersection(shapely.box(*block_bounds))
+	assert polygons and all(p.is_valid for p in polygons)
+	assert shapely.union_all(polygons).symmetric_difference(expected).area < 1e-6
