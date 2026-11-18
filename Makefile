@@ -29,11 +29,8 @@ AOI_MODEL_URL := $(ASSETS_BASE_URL)/models/b1_50epoch_best_macro_f1.safetensors
 GADM_URL := $(ASSETS_BASE_URL)/gadm/gadm_410.gpkg
 BIOME_URL := $(ASSETS_BASE_URL)/biom/terres_ecosystems.gpkg
 PHENOLOGY_ARCHIVE_URL := $(ASSETS_BASE_URL)/pheno/modispheno_aggregated_normalized_filled.zarr.tar.gz
-# acquisition-date model (scripts/package_doy_estimation_model.py): manifest, 10 seed files, DINOv2 backbone.
-# Not public: copied over SSH from outside the storage server's web root, with
-# your own storage access or the processor's key (STORAGE_SSH_KEY=<PROCESSOR_SSH_KEY_PATH>).
-DOY_MODEL_ARCHIVE_SOURCE := dendro@data2.deadtrees.earth:private_assets/models/doy_estimation_v2.tar.gz
-STORAGE_SSH_KEY ?=
+# acquisition-date model (scripts/package_doy_estimation_model.py): manifest, 10 seed files, DINOv2 backbone
+DOY_MODEL_ARCHIVE_URL := $(ASSETS_BASE_URL)/models/doy_estimation_v2.tar.gz
 # georeferencing-check matcher (scripts/package_georef_check_model.py): RoMa v2 safetensors + DINOv3 hub code
 GEOREF_MODEL_ARCHIVE_URL := $(ASSETS_BASE_URL)/models/georef_check_v1.tar.gz
 
@@ -94,8 +91,7 @@ create-dirs:
 	@mkdir -p data/trash
 
 download-assets: create-dirs $(TEST_DATA) $(TEST_DATA_SMALL) $(MODEL) $(COMBINED_MODEL) $(AOI_MODEL) $(GADM) $(TEST_DATA_REAL_LABELS) $(TEST_RAW_DRONE_ZIP) $(TEST_ODM_MINIMAL_ZIP) $(DTE_TEST_FILES)
-# the acquisition-date model is not public: fetch it with download-doy-model
-download-processor-assets: create-dirs $(BIOME) $(PHENOLOGY_DATA) $(WORLDVIEW_FIXTURE) $(GEOREF_MODEL)
+download-processor-assets: create-dirs $(BIOME) $(PHENOLOGY_DATA) $(WORLDVIEW_FIXTURE) $(DOY_MODEL) $(GEOREF_MODEL)
 download-combined-model: $(COMBINED_MODEL)
 download-aoi-model: $(AOI_MODEL)
 download-doy-model: $(DOY_MODEL)
@@ -190,10 +186,8 @@ $(PHENOLOGY_DATA): $(PHENOLOGY_ARCHIVE)
 
 $(DOY_MODEL):
 	@mkdir -p $(MODELS_DIR)
-	@echo "Copying acquisition-date model over SSH..."
-	@scp -q -o BatchMode=yes $(if $(STORAGE_SSH_KEY),-i $(STORAGE_SSH_KEY)) $(DOY_MODEL_ARCHIVE_SOURCE) $(DOY_MODEL_ARCHIVE).part \
-		&& test -s $(DOY_MODEL_ARCHIVE).part && mv $(DOY_MODEL_ARCHIVE).part $(DOY_MODEL_ARCHIVE) \
-		|| { rm -f $(DOY_MODEL_ARCHIVE).part; exit 1; }
+	@echo "Downloading acquisition-date model..."
+	@$(call download,$(DOY_MODEL_ARCHIVE),$(DOY_MODEL_ARCHIVE_URL))
 	@rm -rf $(DOY_MODEL_ARCHIVE).extract && mkdir -p $(DOY_MODEL_ARCHIVE).extract
 	@tar -xzf $(DOY_MODEL_ARCHIVE) -C $(DOY_MODEL_ARCHIVE).extract
 	@test -s $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v2/manifest.json
