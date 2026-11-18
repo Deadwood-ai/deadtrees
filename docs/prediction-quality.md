@@ -62,7 +62,8 @@ The failure modes (prompts `pq-v5` and `pq-v6`): dead trees missed, deadwood on 
 non-vegetation, on lying wood, deadwood artifacts; trees missed, forest on non-trees,
 forest artifacts. Lying wood is never deadwood. From `pq-v6`, gaps between crowns inside a stand
 that the forest covers are their own type (`m9_fc_gaps_filled`, "gaps not identified"), and
-"forest on non-trees" means areas without trees outside the stand.
+"forest on non-trees" means areas without trees outside the stand. Filled gaps alone make the
+forest layer minor at most.
 
 Version v2 (render `overlay-v2`, prompt `pq-v6`, DT-1560): in v1 a forest prediction that
 filled the crop showed only a faint gold tint with no edge, and the judges claimed most of

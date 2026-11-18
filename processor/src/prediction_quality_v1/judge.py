@@ -9,7 +9,8 @@ subscription worker (DT-1482) and the benchmark harness share the same prompt an
 Prompt v6 (DT-1560) adds each layer's share of the crop: a crop the forest fills shows a gold
 frame and tint without an inner edge, which the judges took for "no gold". It also splits gaps
 between crowns that the forest covers (m9, common in forest cover; Janusch, 16 Nov 2026) from
-non-tree areas marked as forest (m6).
+non-tree areas marked as forest (m6); gaps alone make the forest layer minor at most
+(Janusch, 18 Nov 2026).
 """
 
 from __future__ import annotations
@@ -65,7 +66,9 @@ raw image region by region, list the errors you see, then give the verdict for t
 - "minor": errors exist, but together they would not noticeably change the satellite cover here.
 - "major": all errors in this layer together would noticeably bias the satellite cover here, so
   this layer should be excluded.
-Count overlapping errors once.
+Count overlapping errors once. Gaps between crowns that the forest covers (m9) are recorded but
+make the forest layer at most "minor": they never make it "major" on their own, so judge "major"
+only from the other forest errors.
 For each error type below, give its likelihood, 0 to 100, that the error is clearly present in the
 layer, and area_pct, the share of the whole crop it affects (0 if absent):
 {_MODE_LINES}
