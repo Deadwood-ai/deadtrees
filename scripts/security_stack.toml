@@ -112,3 +112,10 @@ ids = ['CVE-2026-123158']
 reason = 'OpenSSH "SSHole" password bypass needs sshd built with musl and without PAM (Alpine). Our hosts and the sshd test images are Ubuntu: glibc with PAM, listed as not affected for 22.04 and 24.04.'
 issue = 'DT-1442'
 review_by = '2027-01-31'
+
+[[accepted]]
+package = 'picomatch'
+ids = ['GHSA-fc5q-39xc-vjpf']
+reason = 'ReDoS needs an attacker-controlled glob pattern. picomatch runs only in frontend build and dev tooling (vite, vitest, Tailwind 3), with patterns from our own config. No fixed release exists yet (4.0.7 is the latest).'
+issue = 'DT-1572'
+review_by = '2026-12-31'

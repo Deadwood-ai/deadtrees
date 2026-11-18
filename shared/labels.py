@@ -116,9 +116,11 @@ def create_label_with_geometries(
 
 			# Only staged processor predictions may use the longer-budget RPC.
 			large_geometry_rpc = payload.label_source == LabelSourceEnum.model_prediction
-			# Split geometries into chunks
+			# Split geometries into chunks. The label is new and this uploader owns it,
+			# so the committed row count is tracked here instead of recounted per chunk.
 			current_chunk_size = 0
 			current_chunk = []
+			uploaded = 0
 
 			for polygon in polygons:
 				# Convert to WKB to estimate size
@@ -129,8 +131,15 @@ def create_label_with_geometries(
 				exceeds_count = len(current_chunk) >= MAX_CHUNK_GEOMETRIES
 				if current_chunk and (exceeds_size or exceeds_count):
 					# Upload current chunk
-					upload_geometry_chunk(
-						client, geom_table, label_id, current_chunk, payload.properties, token, large_geometry_rpc=large_geometry_rpc
+					uploaded = upload_geometry_chunk(
+						client,
+						geom_table,
+						label_id,
+						current_chunk,
+						payload.properties,
+						token,
+						existing_count=uploaded,
+						large_geometry_rpc=large_geometry_rpc,
 					)
 					current_chunk = []
 					current_chunk_size = 0
@@ -140,8 +149,15 @@ def create_label_with_geometries(
 
 			# Upload remaining geometries
 			if current_chunk:
-				upload_geometry_chunk(
-					client, geom_table, label_id, current_chunk, payload.properties, token, large_geometry_rpc=large_geometry_rpc
+				uploaded = upload_geometry_chunk(
+					client,
+					geom_table,
+					label_id,
+					current_chunk,
+					payload.properties,
+					token,
+					existing_count=uploaded,
+					large_geometry_rpc=large_geometry_rpc,
 				)
 
 			if is_active:
@@ -184,9 +200,14 @@ def upload_geometry_chunk(
 	properties: Optional[Dict[str, Any]],
 	token: str,
 	*,
+	existing_count: int,
 	large_geometry_rpc: bool = False,
-) -> None:
-	"""Uploads a chunk of geometries to the database."""
+) -> int:
+	"""Uploads a chunk of geometries to the database.
+
+	``existing_count`` is the number of geometries this upload has already committed
+	to the label. Returns the label's geometry count after the chunk.
+	"""
 
 	geometry_records = []
 	for geom in geometries:
@@ -205,15 +226,23 @@ def upload_geometry_chunk(
 		)
 
 	try:
-		_insert_records_adaptive(client, table, geometry_records, label_id, token, large_geometry_rpc)
+		return _insert_records_adaptive(
+			client, table, geometry_records, label_id, token, existing_count, large_geometry_rpc
+		)
 	except Exception as e:
 		logger.error(f'Error uploading geometry chunk: {str(e)}', extra={'token': token})
 		raise Exception(f'Error uploading geometry chunk: {str(e)}')
 
 
 def _insert_records_adaptive(
-	client, table: str, records: List[dict], label_id: int, token: str, large_geometry_rpc: bool = False
-) -> None:
+	client,
+	table: str,
+	records: List[dict],
+	label_id: int,
+	token: str,
+	existing_count: int,
+	large_geometry_rpc: bool = False,
+) -> int:
 	"""Insert ``records`` as one statement, splitting the batch if the DB cancels it.
 
 	A Postgres ``statement_timeout`` (SQLSTATE 57014) means the batch was too large
@@ -222,9 +251,12 @@ def _insert_records_adaptive(
 	recurses down to a single record, which — if it *still* times out — is a genuine
 	problem and is re-raised. Transient network errors are handled per-insert by
 	``retry_on_transient_error`` and are not split.
+
+	Returns the label's geometry count after the records are committed.
 	"""
 	try:
-		_insert_records_with_retry(client, table, records, label_id, large_geometry_rpc)
+		_insert_records_with_retry(client, table, records, label_id, existing_count, large_geometry_rpc)
+		return existing_count + len(records)
 	except Exception as e:
 		if is_statement_timeout(e) and len(records) > 1:
 			mid = len(records) // 2
@@ -233,10 +265,13 @@ def _insert_records_adaptive(
 				f'splitting into {mid} + {len(records) - mid} and retrying',
 				extra={'token': token},
 			)
-			_insert_records_adaptive(client, table, records[:mid], label_id, token, large_geometry_rpc)
-			_insert_records_adaptive(client, table, records[mid:], label_id, token, large_geometry_rpc)
-		else:
-			raise
+			existing_count = _insert_records_adaptive(
+				client, table, records[:mid], label_id, token, existing_count, large_geometry_rpc
+			)
+			return _insert_records_adaptive(
+				client, table, records[mid:], label_id, token, existing_count, large_geometry_rpc
+			)
+		raise
 
 
 def _is_oversized_geometry(records: List[dict]) -> bool:
@@ -245,45 +280,36 @@ def _is_oversized_geometry(records: List[dict]) -> bool:
 
 
 def _insert_records_with_retry(
-	client, table: str, records: List[dict], label_id: int, large_geometry_rpc: bool = False
+	client, table: str, records: List[dict], label_id: int, existing_count: int, large_geometry_rpc: bool = False
 ) -> None:
 	"""Insert a single batch, retrying only on transient network failures.
 
-	One uploader owns each newly created label. Each insert is atomic, so a retry
-	must observe either the baseline count or baseline + batch size. If the count
-	cannot be verified, fail without blindly duplicating a possibly committed batch.
+	One uploader owns each newly created label, so the caller knows the committed
+	count. A full count of a large label can exceed the statement budget, so the
+	label is counted only after a failed attempt whose outcome is unknown. Each
+	insert is atomic, so that count is either ``existing_count`` or
+	``existing_count`` plus the batch size. If it cannot be verified, fail without
+	blindly duplicating a possibly committed batch.
 	"""
 
 	@retry_on_transient_error(is_retryable=is_statement_timeout)
 	def _count_existing() -> int:
-		# Retrying this read is safe even when a previous INSERT has an unknown
-		# outcome. Never fall back to an unknown baseline for the subsequent write.
-		response = client.table(table).select('id', count='exact', head=True).eq('label_id', label_id).execute()
+		# A plain GET, not HEAD: a HEAD error response has no body, so a statement
+		# timeout there arrives as an anonymous empty 500 (DT-721).
+		response = client.table(table).select('id', count='exact').eq('label_id', label_id).limit(1).execute()
 		if response.count is None:
 			raise RuntimeError('Cannot verify geometry upload count')
 		return response.count
 
-	count_before = None
+	attempted = False
 
 	@retry_on_transient_error
 	def _insert() -> None:
-		nonlocal count_before
-		try:
-			count = _count_existing()
-		except Exception as exc:
-			if is_statement_timeout(exc):
-				# Only a cancelled INSERT is safe to split, never a failed count.
-				raise RuntimeError('Cannot verify geometry upload count') from exc
-			raise
-		if count_before is None:
-			count_before = count
-		elif count == count_before + len(records):
-			return
-		elif count != count_before:
-			raise RuntimeError('Geometry upload count changed unexpectedly')
+		nonlocal attempted
 		if large_geometry_rpc and _is_oversized_geometry(records):
 			# One polygon this large can exceed the 8s budget of a plain insert on its
-			# own, and a single row cannot be split further.
+			# own, and a single row cannot be split further. The function skips a
+			# replay whose earlier call already committed.
 			record = records[0]
 			client.rpc(
 				'insert_large_label_geometry',
@@ -291,13 +317,25 @@ def _insert_records_with_retry(
 					'p_label_id': label_id,
 					'p_geometry': record['geometry'],
 					'p_properties': record['properties'],
-					# Lets the database skip a replay whose earlier call already committed.
-					'p_expected_existing_count': count_before,
+					'p_expected_existing_count': existing_count,
 				},
 			).execute()
-		else:
-			# Echoing a huge geometry adds DB serialization work without any useful data.
-			client.table(table).insert(records, returning='minimal').execute()
+			return
+		if attempted:
+			try:
+				count = _count_existing()
+			except Exception as exc:
+				if is_statement_timeout(exc):
+					# Only a cancelled INSERT is safe to split, never a failed count.
+					raise RuntimeError('Cannot verify geometry upload count') from exc
+				raise
+			if count == existing_count + len(records):
+				return
+			if count != existing_count:
+				raise RuntimeError('Geometry upload count changed unexpectedly')
+		attempted = True
+		# Echoing a huge geometry adds DB serialization work without any useful data.
+		client.table(table).insert(records, returning='minimal').execute()
 
 	_insert()
 

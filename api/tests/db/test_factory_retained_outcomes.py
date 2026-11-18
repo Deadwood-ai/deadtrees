@@ -330,7 +330,8 @@ def test_retry_running_at_deployment_stays_one_open_failure(db):
 
 def test_trend_buckets_count_each_dataset_once_with_sources_and_matching_links(db):
 	operator = user(db, operate=True)
-	day = ago(days=9)
+	# Start of a UTC day, so the runs a few hours later land in the same daily bucket.
+	day = ago(days=9).replace(hour=8, minute=0, second=0, microsecond=0)
 	authenticate(db, operator)
 	before = bucket(trends(db, workflow='odm', size='large'), day)
 	db.execute('RESET ROLE')
