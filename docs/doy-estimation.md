@@ -16,8 +16,7 @@ separately by its asset directory, and every estimate records that version in
 
 The deployed model `doy_estimation_v2` is the platform build of the AerialStamp
 paper model: the paper's recipe, refit on all public and private dated
-orthophotos with a Sentinel-2 series (8,825). Because it learned from private
-orthophotos, its weights are not public (see [Model assets](#model-assets)).
+orthophotos with a Sentinel-2 series (8,825).
 Its image-only model is the processor's `nos2` model type. Spatial block
 cross-validation of the same recipe on 8,777 clean dates:
 
@@ -87,14 +86,12 @@ v1). Built from the AerialStamp weights by
 --backbone <v1 backbone>` (no pickles in the processor) and part of the
 processor asset preflight.
 
-**The v2 weights are not public.** They must never go into git, CI artifacts or
-the public asset URL (`ASSETS_BASE_URL`, which lists its directory). The archive
-lives on the storage server outside the web root; `make download-doy-model`
-copies it over SSH, with your own storage access or the processor's key
-(`STORAGE_SSH_KEY=<PROCESSOR_SSH_KEY_PATH>`). Hosts without the model (CI, most
-dev checkouts) skip the model test, and `download-processor-assets` no longer
-includes it. Stage it on every processor host before a release that needs it,
-as [`processor-hosts.md`](playbooks/processor-hosts.md#prs-that-add-or-change-a-required-asset) describes.
+The archive `doy_estimation_v2.tar.gz` is a public asset (`ASSETS_BASE_URL`,
+`/data/assets/v1/models/` on the storage server), fetched by
+`make download-processor-assets` or `make download-doy-model`. The weights
+hold no imagery: date heads on DINOv2 embeddings of 16 patches per
+orthophoto. Stage the model on every processor host before a release that
+needs it, as [`processor-hosts.md`](playbooks/processor-hosts.md#prs-that-add-or-change-a-required-asset) describes.
 
 v1 (`doy_estimation_v1`, public archive) is no longer required. The loader still
 reads it, so a rollback is a revert plus the v1 directory on each host.
