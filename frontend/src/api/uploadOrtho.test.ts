@@ -102,6 +102,52 @@ describe("resumable chunk upload", () => {
     expect([form.get("upload_id"), form.get("chunks_total"), form.get("license")]).toEqual(["up-1", "4", "CC BY"]);
   });
 
+  it("sends three chunks at once and declares the chunk size", async () => {
+    get.mockRejectedValue(httpError(404));
+    let inFlight = 0;
+    let most = 0;
+    post.mockImplementation(async (_url, form: FormData) => {
+      inFlight++;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      inFlight--;
+      expect(form.get("chunk_size")).toBe(String(CHUNK));
+      return form.get("chunk_index") === "3" ? { data: { id: "42" } } : { data: {} };
+    });
+    const { promise } = await run();
+    await expect(promise).resolves.toEqual({ id: "42" });
+    expect(most).toBe(3);
+  });
+
+  it("finds the dataset when another chunk than the last completed the upload", async () => {
+    get.mockRejectedValueOnce(httpError(404)).mockResolvedValueOnce({ data: status({ state: "complete", response: { id: "9" } }) });
+    post.mockResolvedValue({ data: {} });
+    const { promise } = await run();
+    await expect(promise).resolves.toEqual({ id: "9" });
+  });
+
+  it("continues an upload started before parallel sending in order, without a chunk size", async () => {
+    get.mockResolvedValue({ data: { ...received(["aaaa"]), contract: { file_name: "flight.zip" } } });
+    post.mockImplementation(async (_url, form: FormData) => {
+      expect(form.get("chunk_size")).toBeNull();
+      return form.get("chunk_index") === "3" ? { data: { id: "42" } } : { data: {} };
+    });
+    const { promise } = await run();
+    await expect(promise).resolves.toEqual({ id: "42" });
+    expect(sentChunks()).toEqual([1, 2, 3]);
+  });
+
+  it("sends only the chunks missing in the middle of a parallel upload", async () => {
+    const parts = ["aaaa", null, "cccc", null];
+    const chunks = parts.map((part) => (part ? { size: part.length, sha256: sha(part) } : null));
+    get.mockResolvedValue({
+      data: status({ chunks_received: 2, bytes_received: 8, chunks, contract: { chunk_size: CHUNK } }),
+    });
+    const { promise } = await run();
+    await expect(promise).resolves.toEqual({ id: "42" });
+    expect(sentChunks().sort()).toEqual([1, 3]);
+  });
+
   it("does not ask the server about a brand-new upload ID", async () => {
     const { promise } = await run({ isNew: true });
     await expect(promise).resolves.toEqual({ id: "42" });
@@ -160,7 +206,7 @@ describe("resumable chunk upload", () => {
     });
     const { promise, events } = await run();
     await expect(promise).resolves.toEqual({ id: "42" });
-    expect(sentChunks()).toEqual([0, 1, 1, 1, 1, 1, 2, 3]);
+    expect(sentChunks().sort()).toEqual([0, 1, 1, 1, 1, 1, 2, 3]);
     expect(events.filter((event) => event.type === "chunk_failed")).toHaveLength(4);
     expect(events.filter((event) => event.type === "stalled")).toHaveLength(1);
     expect(events).toContainEqual({ type: "recovered", chunkIndex: 1, chunksTotal: 4 });
@@ -180,24 +226,22 @@ describe("resumable chunk upload", () => {
     });
     const { promise, events } = await run();
     await expect(promise).resolves.toEqual({ id: "42" });
-    expect(sentChunks()).toEqual([0, 0, 1, 2, 3]);
+    expect(sentChunks().sort()).toEqual([0, 0, 1, 2, 3]);
     expect(events).toContainEqual({ type: "chunk_failed", chunkIndex: 0, chunksTotal: 4, attempt: 1, reason: "no_progress" });
   });
 
   it("refreshes the login after the API rejects the token", async () => {
     get.mockRejectedValue(httpError(404));
-    let rejected = false;
+    const tokens: string[] = [];
     post.mockImplementation(async (_url, form: FormData, config: { headers: Record<string, string> }) => {
-      if (!rejected) {
-        rejected = true;
-        throw httpError(401, "Invalid token");
-      }
-      expect(config.headers.Authorization).toBe("Bearer fresh");
+      if (form.get("chunk_index") === "0") tokens.push(config.headers.Authorization);
+      if (tokens.length === 1 && form.get("chunk_index") === "0") throw httpError(401, "Invalid token");
       return form.get("chunk_index") === "3" ? { data: { id: "42" } } : { data: {} };
     });
     const { promise, getAccessToken } = await run();
     await expect(promise).resolves.toEqual({ id: "42" });
     expect(getAccessToken).toHaveBeenCalledWith(true);
+    expect(tokens).toEqual(["Bearer token", "Bearer fresh"]);
   });
 
   it("stops when cancelled during the pause between retries", async () => {
@@ -223,7 +267,8 @@ describe("resumable chunk upload", () => {
     await vi.advanceTimersByTimeAsync(500);
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(post).toHaveBeenCalledTimes(1);
+    // The first round of parallel chunks went out; none was tried again.
+    expect(new Set(sentChunks()).size).toBe(sentChunks().length);
   });
 
   it("gives up on an upload ID the server no longer accepts", async () => {
@@ -231,7 +276,7 @@ describe("resumable chunk upload", () => {
     post.mockRejectedValue(httpError(409, "Upload has no retry receipts; restart with a new upload ID"));
     const { promise } = await run();
     await expect(promise).rejects.toBeInstanceOf(UploadNotResumableError);
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(new Set(sentChunks()).size).toBe(sentChunks().length);
   });
 
   it("retries a status read that hits a short outage", async () => {
@@ -246,6 +291,7 @@ describe("resumable chunk upload", () => {
     post.mockRejectedValue(httpError(400, "This ZIP contains no drone photos"));
     const { promise } = await run();
     await expect(promise).rejects.toBeInstanceOf(UploadRejectedError);
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(new Set(sentChunks()).size).toBe(sentChunks().length);
+    expect(sentChunks()).not.toContain(3);
   });
 });
