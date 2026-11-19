@@ -6,6 +6,10 @@ when a note waits in the outbox, or with `heartbeat` after 50 quiet minutes. A
 tick cannot report its own stall, so the wait also leaves a note, once per
 stalled tick, when the last tick is too old.
 
+`--outbox messaging-outbox` makes the Messaging thread wait the same way on the
+monitor's new Gmail and Zulip items (DT-1586). Stall notes go only to the
+board's outbox, so a stall is reported once.
+
 The heartbeat exists only because a background command can run at most two
 hours. It comes before the one-hour prompt cache expires, so the thread's
 quiet wake (start the next wait, nothing else) reads its context from the cache
@@ -23,7 +27,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from monitor_tick import DEFAULT_STATE_DIR, OUTBOX, TICK_STATE, iso, load_json, post_outbox, write_atomic
+from monitor_tick import DEFAULT_STATE_DIR, MESSAGING_OUTBOX, OUTBOX, TICK_STATE, iso, load_json, post_outbox, write_atomic
 
 WAIT_STATE = 'board-wait.json'
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -62,10 +66,11 @@ def note_stall(state_dir: Path, now: datetime) -> None:
 	write_atomic(wait_file, json.dumps({**seen, 'stalled_tick': last_tick}) + '\n')
 
 
-def pending(state_dir: Path, now: datetime, started: datetime) -> dict[str, Any]:
-	note_stall(state_dir, now)
+def pending(state_dir: Path, now: datetime, started: datetime, outbox: str = OUTBOX) -> dict[str, Any]:
+	if outbox == OUTBOX:
+		note_stall(state_dir, now)
 	return {
-		'notes': sorted(str(path) for path in (state_dir / OUTBOX).glob('*.md')),
+		'notes': sorted(str(path) for path in (state_dir / outbox).glob('*.md')),
 		'heartbeat': now - started >= HEARTBEAT,
 	}
 
@@ -74,10 +79,10 @@ def _now() -> datetime:
 	return datetime.now(timezone.utc).replace(microsecond=0)
 
 
-def wait(state_dir: Path, poll: int = POLL_SECONDS) -> dict[str, Any]:
+def wait(state_dir: Path, poll: int = POLL_SECONDS, outbox: str = OUTBOX) -> dict[str, Any]:
 	started = _now()
 	while True:
-		found = pending(state_dir, _now(), started)
+		found = pending(state_dir, _now(), started, outbox)
 		if found['notes'] or found['heartbeat']:
 			return found
 		time.sleep(poll)
@@ -87,8 +92,9 @@ def main(argv: list[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 	parser.add_argument('action', choices=('wait',))
 	parser.add_argument('--state-dir', type=Path, default=DEFAULT_STATE_DIR)
+	parser.add_argument('--outbox', choices=(OUTBOX, MESSAGING_OUTBOX), default=OUTBOX)
 	args = parser.parse_args(argv)
-	print(json.dumps(wait(args.state_dir)))
+	print(json.dumps(wait(args.state_dir, outbox=args.outbox)))
 	return 0
 
 
