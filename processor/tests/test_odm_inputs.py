@@ -196,7 +196,7 @@ def test_select_odm_images_rejects_an_area_too_large_for_one_mosaic(tmp_path):
 
 
 def test_select_odm_images_records_band_drops_under_the_shared_reason(tmp_path):
-	rgb = _photo(tmp_path / 'DJI_0010.JPG')
+	rgb = _photo(tmp_path / 'DJI_0010.JPG', FLIGHT)
 	band = _photo(tmp_path / 'DJI_0011.TIF', mode='L')
 
 	selection = select_odm_images([rgb, band], max_extent_km2=30)
@@ -219,6 +219,22 @@ def test_select_odm_images_rejects_an_upload_of_odm_outputs_only(tmp_path):
 
 	with pytest.raises(OdmInputError, match='earlier ODM or WebODM run'):
 		select_odm_images(outputs, max_extent_km2=30)
+
+
+def test_select_odm_images_rejects_photos_without_gps(tmp_path):
+	"""Uploads from before the API checked GPS (dataset 15632) stop before ODM with the upload message."""
+	frames = [_photo(tmp_path / f'{i}.tif') for i in range(14)]
+
+	with pytest.raises(OdmInputError, match='None of the checked photos'):
+		select_odm_images(frames, max_extent_km2=30)
+
+
+def test_select_odm_images_keeps_photos_whose_metadata_cannot_be_read(tmp_path):
+	frames = [tmp_path / f'{i}.dng' for i in range(3)]
+	for frame in frames:
+		frame.write_bytes(b'raw')
+
+	assert select_odm_images(frames, max_extent_km2=30).kept == frames
 
 
 def test_select_odm_images_rejects_band_only_uploads(tmp_path):

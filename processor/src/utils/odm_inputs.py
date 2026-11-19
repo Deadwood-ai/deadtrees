@@ -19,21 +19,23 @@ The functions here only drop files; they never edit images.
 from __future__ import annotations
 
 import math
-import re
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image
 
+from shared.photo_gps import has_gps_position, read_gps_position
 from shared.upload_validation import (
 	MULTISPECTRAL_ONLY_MESSAGE,
+	NO_GPS_MESSAGE,
 	RAW_CAMERA_EXTENSIONS,
 	TIFF_EXTENSIONS,
+	gps_sample,
 	is_multispectral_band,
+	photos_lack_gps,
 )
 
-GPS_IFD = 0x8825
 METRES_PER_DEGREE = 111_320.0
 # A frame is a GPS outlier when it lies this many times further from the flight's median
 # position than the median frame does, and at least OUTLIER_MIN_DISTANCE_M away.
@@ -65,13 +67,6 @@ ODM_PROJECT_FOLDERS = frozenset(
 ODM_OUTPUTS_ONLY_MESSAGE = (
 	'This ZIP only contains results of an earlier ODM or WebODM run (for example odm_orthophoto.tif). '
 	'Please upload the original drone photos, or upload the orthophoto as a GeoTIFF.'
-)
-# ODM 3.6 lets DJI XMP drone-dji:Latitude/Longitude override the EXIF GPS (opendm/photo.py).
-# DJI writes its XMP packet near the start of the JPEG.
-_XMP_SCAN_BYTES = 2 * 1024 * 1024
-_XMP_GPS_PATTERN = re.compile(
-	rb'drone-dji:(?P<attr>Latitude|Longitude)\s*=\s*["\']\s*(?P<attr_value>[+-]?[\d.]+)'
-	rb'|<drone-dji:(?P<element>Latitude|Longitude)>\s*(?P<element_value>[+-]?[\d.]+)'
 )
 
 
@@ -137,48 +132,6 @@ def drop_multispectral_bands(image_files: list[Path]) -> tuple[list[Path], list[
 	return kept, dropped
 
 
-def _gps_degrees(values) -> float:
-	degrees, minutes, seconds = (float(v) for v in values)
-	return degrees + minutes / 60 + seconds / 3600
-
-
-def _exif_gps(image_file: Path) -> dict[str, float]:
-	try:
-		with Image.open(image_file) as image:
-			gps = image.getexif().get_ifd(GPS_IFD)
-		return {
-			'Latitude': _gps_degrees(gps[2]) * (-1 if gps.get(1) == 'S' else 1),
-			'Longitude': _gps_degrees(gps[4]) * (-1 if gps.get(3) == 'W' else 1),
-		}
-	except Exception:
-		return {}
-
-
-def _xmp_gps(image_file: Path) -> dict[str, float]:
-	try:
-		with open(image_file, 'rb') as f:
-			head = f.read(_XMP_SCAN_BYTES)
-	except OSError:
-		return {}
-	found = {}
-	for match in _XMP_GPS_PATTERN.finditer(head):
-		name = (match['attr'] or match['element']).decode()
-		try:
-			found.setdefault(name, float(match['attr_value'] or match['element_value']))
-		except ValueError:
-			continue
-	return found
-
-
-def read_gps_position(image_file: Path) -> tuple[float, float] | None:
-	"""The latitude/longitude ODM will use: DJI XMP over EXIF GPS, or None when unknown."""
-	gps = {**_exif_gps(image_file), **_xmp_gps(image_file)}
-	latitude, longitude = gps.get('Latitude'), gps.get('Longitude')
-	if latitude is None or longitude is None or not (math.isfinite(latitude) and math.isfinite(longitude)):
-		return None
-	return latitude, longitude
-
-
 def _offset_metres(origin: tuple[float, float], position: tuple[float, float]) -> tuple[float, float]:
 	east = (position[1] - origin[1]) * METRES_PER_DEGREE * math.cos(math.radians(origin[0]))
 	north = (position[0] - origin[0]) * METRES_PER_DEGREE
@@ -222,8 +175,9 @@ def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImag
 	"""Apply the ODM-output, DNG, multispectral and GPS-outlier rules, then check the mosaic extent.
 
 	Raises OdmInputError when only earlier ODM outputs or only multispectral band images remain,
-	or when the remaining images span more than ``max_extent_km2``: one ODM run cannot mosaic
-	that area within its memory, so the upload needs to be split.
+	when no sampled image has a GPS position, or when the remaining images span more than
+	``max_extent_km2``: one ODM run cannot mosaic that area within its memory, so the upload
+	needs to be split.
 	"""
 	selection = OdmImageSelection(kept=list(image_files))
 
@@ -244,6 +198,9 @@ def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImag
 		selection.dropped['multispectral band images'] = bands
 
 	positions = {f: p for f in selection.kept if (p := read_gps_position(f)) is not None}
+	# Uploads before the API checked GPS (DT-1582) can still reach ODM without it.
+	if not positions and photos_lack_gps(has_gps_position(f) for f in gps_sample(sorted(selection.kept))):
+		raise OdmInputError(NO_GPS_MESSAGE)
 	positions, outliers = drop_gps_outliers(positions)
 	if outliers:
 		selection.dropped['images with a GPS position far from the rest of the flight'] = outliers
