@@ -1,9 +1,9 @@
 """Input rules that decide whether an upload can be processed at all.
 
-The API applies them when an upload completes and the processor reuses the
-GeoTIFF message, so a contributor sees the same reason in both places. The
-browser mirrors the name rules in `frontend/src/utils/uploadRules.ts`; keep the
-two in step. Rules here only reject inputs the processor is certain to fail
+The API applies them when an upload completes, the CLI before it sends a file,
+and the processor reuses the GeoTIFF and GPS messages, so a contributor sees the
+same reason everywhere. The browser mirrors the name and GPS rules in
+`frontend/src/utils/uploadRules.ts` and `photoGps.ts`; keep them in step. Rules here only reject inputs the processor is certain to fail
 on; anything merely risky is a browser warning, not a rejection.
 
 The browser cannot see how many bands a TIFF in a ZIP has, so the API alone
