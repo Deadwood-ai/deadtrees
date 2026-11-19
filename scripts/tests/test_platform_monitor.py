@@ -3,7 +3,7 @@ import importlib.util
 import json
 import stat
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -49,7 +49,8 @@ def test_healthy_platform_has_no_findings_or_gaps():
 		'origin_main': 'abc', 'deploy': {'paused': False}, 'main_ci': {'migrate': {'conclusion': 'success'}},
 		'prod_oom_kills': [], 'gpu': {'ok': True}, 'workers': [], 'frontend': {'https://deadtrees.earth/': 200},
 	}
-	assert findings.build_findings(snapshot(processing=running()), facts, NOON) == ([], [], [])
+	no_failures = {'ok': True, 'scorecard': {'failures': []}}
+	assert findings.build_findings(snapshot(processing=running()), facts, NOON, no_failures) == ([], [], [])
 
 
 def test_processor_state_restarts_and_disks():
@@ -192,8 +193,10 @@ def test_unchecked_local_surfaces_are_gaps_never_green():
 		'processing-server OOM kills: not checked',
 		'processing-server GPU: not checked',
 		'worker liveness: OperationalError',
+		'processing failures: not read',
 	]
 	assert 'dt-status/*/worker-silent' in unobserved and 'dt-status/deploy/*' in unobserved
+	assert 'dt-status/processing-failure/*' in unobserved
 
 
 # --- Baseline diff ----------------------------------------------------------------
@@ -201,6 +204,74 @@ def test_unchecked_local_surfaces_are_gaps_never_green():
 
 def red(key):
 	return findings.finding('red', 'api', key, f'{key} failed')
+
+
+def failure_group(stage='odm_processing', kind='exit code 137', count=1, external=1, days_ago=1, samples=(15756,)):
+	last = NOON.replace(tzinfo=timezone.utc) - timedelta(days=days_ago)
+	return {
+		'stage': stage, 'kind': kind, 'count': count, 'external': external, 'contributors': 1,
+		'last_at': last.isoformat(), 'samples': list(samples),
+	}
+
+
+def failure_card(*groups):
+	return {'ok': True, 'scorecard': {'failures': list(groups)}}
+
+
+def test_a_recent_failure_cause_of_an_external_contributor_is_one_finding():
+	found, gaps, unobserved = findings.failure_findings(failure_card(failure_group()), NOON)
+	assert gaps == [] and unobserved == []
+	[item] = found
+	assert item['severity'] == 'yellow' and 'confirm' not in item
+	assert item['fingerprint'] == f"dt-status/processing-failure/{findings.failure_key('odm_processing', 'exit code 137')}"
+	assert item['summary'].startswith('odm_processing failure: exit code 137 (1 live dataset(s), 1 external')
+	assert 'e.g. 15756' in item['summary']
+
+
+def test_a_cause_keeps_its_fingerprint_while_its_datasets_change():
+	first = findings.failure_findings(failure_card(failure_group(count=1, samples=(1,))), NOON)[0]
+	later = findings.failure_findings(failure_card(failure_group(count=4, samples=(1, 2, 3, 4))), NOON)[0]
+	assert keys(first) == keys(later)
+	other = findings.failure_findings(failure_card(failure_group(kind='exit code 134')), NOON)[0]
+	assert keys(other) != keys(first)
+
+
+def test_team_only_causes_need_three_datasets():
+	small = findings.failure_findings(failure_card(failure_group(count=2, external=0)), NOON)
+	large = findings.failure_findings(failure_card(failure_group(count=3, external=0)), NOON)
+	assert small[0] == [] and len(large[0]) == 1
+
+
+def test_an_old_cause_starts_no_finding_but_keeps_an_earlier_one_open():
+	group = failure_group(days_ago=30, count=10)
+	found, gaps, unobserved = findings.failure_findings(failure_card(group), NOON)
+	assert found == [] and gaps == []
+	key = f"dt-status/processing-failure/{findings.failure_key('odm_processing', 'exit code 137')}"
+	assert unobserved == [key]
+	earlier = findings.failure_findings(failure_card(failure_group()), NOON)[0]
+	baseline = {'active': {item['fingerprint']: item for item in earlier}}
+	delta, next_baseline = findings.diff_findings(baseline, found, unobserved)
+	assert delta == {} and key in next_baseline['active']
+
+
+def test_a_cause_with_no_live_failures_left_clears():
+	earlier = findings.failure_findings(failure_card(failure_group()), NOON)[0]
+	baseline = {'active': {item['fingerprint']: item for item in earlier}}
+	found, _, unobserved = findings.failure_findings(failure_card(), NOON)
+	delta, _ = findings.diff_findings(baseline, found, unobserved)
+	assert keys(delta['cleared']) == keys(earlier)
+
+
+def test_an_unread_scorecard_is_a_gap_and_keeps_every_failure_finding():
+	for card in (None, {}, {'ok': False, 'error': 'psql timed out'}, {'ok': True, 'scorecard': {}}):
+		found, gaps, unobserved = findings.failure_findings(card, NOON)
+		assert found == [] and gaps == ['processing failures: not read']
+		assert unobserved == ['dt-status/processing-failure/*']
+
+
+def test_build_findings_includes_failure_causes():
+	current, _, _ = findings.build_findings(snapshot(), {}, NOON, failure_card(failure_group()))
+	assert any(item['surface'] == 'processing-failure' for item in current)
 
 
 def test_diff_reports_new_changed_and_cleared():
@@ -630,6 +701,30 @@ def test_a_failed_main_job_is_marked_as_a_finding_in_the_note(tmp_path, monkeypa
 	assert monitor_tick.tick(args, NOON.replace(minute=15), tmp_path) == 0
 	note = next((tmp_path / 'outbox').glob('*.md')).read_text()
 	assert '- [finding] deploys: main migrate job failure at abc1234' in note and 'issue/DT-8' in note
+
+
+def test_a_new_failure_cause_is_marked_as_a_finding_in_the_note(tmp_path, monkeypatch):
+	run_tick(tmp_path, monkeypatch)
+	(tmp_path / 'outbox' / '20261013T120000Z.md').unlink()
+	clean = ([], 'linear=0 gmail=0 posthog=0 project=13440', True, True, 0.0)
+	monkeypatch.setattr(monitor_tick, 'read_inbox', lambda *args: clean)
+	[cause] = findings.failure_findings(failure_card(failure_group()), NOON)[0]
+	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a'), cause], [], []))
+	monkeypatch.setattr(monitor_tick, 'file_findings', lambda *args: (True, '[filed] ok', {cause['fingerprint']: 'DT-9'}, set(), 0.0))
+	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
+	assert monitor_tick.tick(args, NOON.replace(minute=15), tmp_path) == 0
+	note = next((tmp_path / 'outbox').glob('*.md')).read_text()
+	assert 'new processing failure cause' in note
+	assert '- [finding] processing failures: odm_processing failure: exit code 137' in note and 'issue/DT-9' in note
+
+
+def test_the_tick_passes_the_scorecard_to_the_finding_rules(tmp_path, monkeypatch):
+	seen = []
+	run_tick(tmp_path, monkeypatch)
+	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: seen.append(args) or ([], [], []))
+	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
+	assert monitor_tick.tick(args, NOON.replace(minute=15), tmp_path) == 0
+	assert seen[0][3].get('ok') is True
 
 
 def test_a_board_that_cannot_be_built_is_a_gap_and_the_tick_goes_on(tmp_path, monkeypatch):

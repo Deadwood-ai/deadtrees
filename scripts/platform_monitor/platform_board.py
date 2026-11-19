@@ -14,7 +14,7 @@ from fnmatch import fnmatch
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from findings import CONFIRM_RUNS, UNSAFE_RE
+from findings import CONFIRM_RUNS, FAILURE_SURFACE, UNSAFE_RE
 
 GREEN, YELLOW, RED, UNKNOWN = '🟢', '🟡', '🔴', '⚪'
 SEVERITY = {'yellow': YELLOW, 'red': RED}
@@ -272,10 +272,12 @@ def render(rows: list[dict[str, Any]], changed_at: str | None, scorecard: dict[s
 	return '\n'.join(lines) + '\n'
 
 
-def finding_lines(found: list[dict[str, Any]], ci_items: list[dict[str, Any]], issues: dict[str, str]) -> list[str]:
-	"""One `[finding]` line per row that needs a thread, or per failed CI job on main."""
+def finding_lines(found: list[dict[str, Any]], at_once: list[dict[str, Any]], issues: dict[str, str]) -> list[str]:
+	"""One `[finding]` line per row that needs a thread, and per finding that
+	acts at once: a failed CI job on main or a new processing failure cause."""
 	lines = [f"- [finding] {item['row']}: {_clean(item['summary'], 200)} {_link_text(item['issues'])}".rstrip() for item in found]
-	for item in ci_items:
+	for item in at_once:
 		issue = issues.get(str(item.get('fingerprint')))
-		lines.append(f"- [finding] deploys: {_clean(item.get('summary'), 200)} {_link_text([issue] if issue else [])}".rstrip())
+		label = 'processing failures' if item.get('surface') == FAILURE_SURFACE else 'deploys'
+		lines.append(f"- [finding] {label}: {_clean(item.get('summary'), 200)} {_link_text([issue] if issue else [])}".rstrip())
 	return lines

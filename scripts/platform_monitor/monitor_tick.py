@@ -734,9 +734,12 @@ def board_update(
 	reasons, found, next_board = platform_board.wake(previous, rows, now)
 	markdown = platform_board.render(rows, next_board.get('changed_at'), scorecard)
 	ci_items = [item for item in new_findings if platform_board.CI_MARK in str(item.get('fingerprint'))]
-	lines = platform_board.finding_lines(found, ci_items, known)
+	causes = [item for item in new_findings if item.get('surface') == findings_module.FAILURE_SURFACE]
+	lines = platform_board.finding_lines(found, ci_items + causes, known)
 	if ci_items:
 		reasons.append('main job red')
+	if causes:
+		reasons.append('new processing failure cause')
 	section = '\n'.join([f"Board sent because: {'; '.join(reasons)}", *lines, '', markdown]) if reasons else ''
 	return markdown, section, {**next_board, 'posthog_recent': recent}
 
@@ -753,7 +756,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		scorecard = {}
 	last_tick = state.get('last_tick_at')
 	facts = host_facts.collect(now, datetime.fromisoformat(last_tick.replace('Z', '+00:00')) if isinstance(last_tick, str) else None)
-	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now)
+	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now, scorecard)
 	# Baseline, issue map and PostHog cursor live in one state file, written
 	# once at the end, so a tick that dies halfway leaves them consistent.
 	baseline = state.get('baseline') or {}
