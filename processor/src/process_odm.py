@@ -963,7 +963,7 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 		else:
 			other_files.append(file_path)
 
-	# Leave out paired DNGs, multispectral bands and GPS outliers; fail early on an oversized extent.
+	# Leave out earlier ODM outputs, paired DNGs, multispectral bands and GPS outliers; fail early on an oversized extent.
 	selection = select_odm_images(image_files, settings.ODM_MAX_IMAGE_EXTENT_KM2)
 	for reason, dropped in selection.dropped.items():
 		sample = ', '.join(f.name for f in dropped[:5])

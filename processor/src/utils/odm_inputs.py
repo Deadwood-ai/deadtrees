@@ -1,6 +1,6 @@
 """Choose which uploaded files ODM gets, before any ODM container runs (DT-1312).
 
-Three input shapes made ODM fail on otherwise usable uploads:
+Four input shapes made ODM fail on otherwise usable uploads:
 
 * DJI cameras that save every frame twice, as JPG and DNG. ODM decodes the DNG with
   LibRaw, which fails on many DJI raws (DT-913), and the pair doubles the image count.
@@ -9,6 +9,9 @@ Three input shapes made ODM fail on otherwise usable uploads:
   tries a multi-camera band alignment our RGB pipeline does not want.
 * A few frames with a broken GPS fix (e.g. 0/0 or thousands of km away). They stretch the
   reconstruction bounds until the orthophoto raster needs hundreds of GB.
+* Photos zipped together with an earlier ODM or WebODM project. ODM then reconstructs its
+  texture atlases and report charts as if they were camera shots, and texrecon aborts
+  (dataset 15756, DT-1583).
 
 The functions here only drop files; they never edit images.
 """
@@ -42,6 +45,27 @@ MIN_IMAGES_FOR_OUTLIER_CHECK = 3
 # Ground an image covers around its camera position; keeps a long thin line of positions from having ~0 area.
 FOOTPRINT_MARGIN_M = 100.0
 FAILED_FIX = (0.0, 0.0)
+# Folders an ODM/WebODM project writes next to its ``images`` folder; files in them are outputs, not photos.
+ODM_PROJECT_FOLDERS = frozenset(
+	{
+		'odm_dem',
+		'odm_filterpoints',
+		'odm_georeferencing',
+		'odm_meshing',
+		'odm_orthophoto',
+		'odm_report',
+		'odm_texturing',
+		'odm_texturing_25d',
+		'opensfm',
+		'openmvs',
+		'3d_tiles',
+		'entwine_pointcloud',
+	}
+)
+ODM_OUTPUTS_ONLY_MESSAGE = (
+	'This ZIP only contains results of an earlier ODM or WebODM run (for example odm_orthophoto.tif). '
+	'Please upload the original drone photos, or upload the orthophoto as a GeoTIFF.'
+)
 # ODM 3.6 lets DJI XMP drone-dji:Latitude/Longitude override the EXIF GPS (opendm/photo.py).
 # DJI writes its XMP packet near the start of the JPEG.
 _XMP_SCAN_BYTES = 2 * 1024 * 1024
@@ -61,6 +85,20 @@ class OdmImageSelection:
 	# Human-readable reason -> files left out for it, in the order the rules ran.
 	dropped: dict[str, list[Path]] = field(default_factory=dict)
 	extent_km2: float | None = None
+
+
+def _is_odm_output(image_file: Path) -> bool:
+	if image_file.name.lower().startswith('odm_'):
+		return True
+	return any(folder.lower() in ODM_PROJECT_FOLDERS for folder in image_file.parent.parts)
+
+
+def drop_odm_outputs(image_files: list[Path]) -> tuple[list[Path], list[Path]]:
+	"""Drop images an earlier ODM run wrote: files named ``odm_*`` or inside an ODM project folder."""
+	kept, dropped = [], []
+	for image_file in image_files:
+		(dropped if _is_odm_output(image_file) else kept).append(image_file)
+	return kept, dropped
 
 
 def drop_paired_raw_images(image_files: list[Path]) -> tuple[list[Path], list[Path]]:
@@ -181,13 +219,19 @@ def gps_extent_km2(positions: list[tuple[float, float]]) -> float:
 
 
 def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImageSelection:
-	"""Apply the DNG, multispectral and GPS-outlier rules, then check the mosaic extent.
+	"""Apply the ODM-output, DNG, multispectral and GPS-outlier rules, then check the mosaic extent.
 
-	Raises OdmInputError when only multispectral band images remain, or when the remaining
-	images span more than ``max_extent_km2``: one ODM run cannot mosaic that area within its
-	memory, so the upload needs to be split.
+	Raises OdmInputError when only earlier ODM outputs or only multispectral band images remain,
+	or when the remaining images span more than ``max_extent_km2``: one ODM run cannot mosaic
+	that area within its memory, so the upload needs to be split.
 	"""
 	selection = OdmImageSelection(kept=list(image_files))
+
+	selection.kept, odm_outputs = drop_odm_outputs(selection.kept)
+	if odm_outputs:
+		if not selection.kept:
+			raise OdmInputError(ODM_OUTPUTS_ONLY_MESSAGE)
+		selection.dropped['outputs of an earlier ODM run'] = odm_outputs
 
 	selection.kept, paired_raw = drop_paired_raw_images(selection.kept)
 	if paired_raw:
