@@ -6,6 +6,7 @@ from shared.settings import settings
 from shared.models import Ortho, QueueTask
 from shared.logger import logger
 from shared.logging import LogContext, LogCategory
+from shared.retry import retry_on_transient_error
 from shared.embedding_model import load_openclip, tile_background_sims
 
 from .utils.local_ortho import ensure_local_ortho
@@ -15,6 +16,18 @@ from .exceptions import AuthenticationError, DatasetError, ProcessingError
 # Insert tile rows in chunks to keep PostgREST request bodies reasonable.
 # Matches the insert_tile_embeddings RPC's server-side cap; change both together.
 _INSERT_CHUNK_SIZE = 200
+
+
+@retry_on_transient_error
+def _call_embedding_rpc(client, name: str, params: dict):
+	"""Run one claim-checked embedding RPC, retrying a brief network or DNS failure.
+
+	A repeat cannot corrupt data: every RPC re-checks the queue claim, and
+	``insert_tile_embeddings`` rejects a chunk whose offset no longer matches, so
+	a chunk that committed before its response was lost fails instead of
+	duplicating rows.
+	"""
+	return client.rpc(name, params).execute()
 
 
 def _embedding_to_pgvector(embedding) -> str:
@@ -85,7 +98,7 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 
 	claim = {'p_task_id': task.id, 'p_claimed_at': task.claimed_at.isoformat() if task.claimed_at else None}
 	with use_client(token) as client:
-		client.rpc('begin_tile_embeddings', claim).execute()
+		_call_embedding_rpc(client, 'begin_tile_embeddings', claim)
 	logger.info(
 		'Starting tile embedding',
 		LogContext(category=LogCategory.EMBEDDINGS, dataset_id=task.dataset_id, user_id=user.id, token=token),
@@ -132,13 +145,14 @@ def process_embeddings(task: QueueTask, token: str, temp_dir: Path):
 		rows = _rows_from_embeddings(embeddings, bg_sims)
 		with use_client(token) as client:
 			for start in range(0, len(rows), _INSERT_CHUNK_SIZE):
-				client.rpc(
+				_call_embedding_rpc(
+					client,
 					'insert_tile_embeddings',
 					{**claim, 'p_offset': start, 'p_rows': rows[start : start + _INSERT_CHUNK_SIZE]},
-				).execute()
+				)
 			# The RPC validates the complete count, refreshes AOI membership and sets
 			# the dataset's search-ready flag in the same transaction.
-			client.rpc('complete_tile_embeddings', {**claim, 'p_expected_count': len(rows)}).execute()
+			_call_embedding_rpc(client, 'complete_tile_embeddings', {**claim, 'p_expected_count': len(rows)})
 
 		logger.info(
 			f'Stored {len(embeddings)} tile embeddings',

@@ -112,3 +112,51 @@ def test_background_prompt_bank_is_locked():
 	assert len(BACKGROUND_PROMPTS) == 6
 	assert all(isinstance(p, str) and p.strip() for p in BACKGROUND_PROMPTS)
 	assert EMBEDDING_DIM == 1024
+
+
+class _FlakyRpcClient:
+	"""Fake Supabase client whose RPCs raise the queued errors, then succeed."""
+
+	def __init__(self, *errors):
+		self.errors = list(errors)
+		self.calls = []
+
+	def rpc(self, name, params):
+		self.calls.append((name, params))
+		client = self
+
+		class _Request:
+			def execute(self):
+				if client.errors:
+					raise client.errors.pop(0)
+				return 'ok'
+
+		return _Request()
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+	delays = []
+	monkeypatch.setattr('shared.retry.time.sleep', delays.append)
+	return delays
+
+
+def test_embedding_rpc_retries_a_dns_failure(no_sleep):
+	# deepl1, 15718 (DT-1581): the completion RPC failed on a brief DNS outage.
+	import httpx
+
+	client = _FlakyRpcClient(httpx.ConnectError('[Errno -3] Temporary failure in name resolution'))
+	params = {'p_task_id': 1, 'p_claimed_at': None, 'p_expected_count': 3}
+
+	assert pe._call_embedding_rpc(client, 'complete_tile_embeddings', params) == 'ok'
+	assert client.calls == [('complete_tile_embeddings', params)] * 2
+	assert no_sleep == [1.0]
+
+
+def test_embedding_rpc_does_not_retry_a_rejected_chunk(no_sleep):
+	client = _FlakyRpcClient(Exception('embedding chunk offset mismatch'))
+
+	with pytest.raises(Exception, match='offset mismatch'):
+		pe._call_embedding_rpc(client, 'insert_tile_embeddings', {'p_offset': 200})
+	assert len(client.calls) == 1
+	assert no_sleep == []
