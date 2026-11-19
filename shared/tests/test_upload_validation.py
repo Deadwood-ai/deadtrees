@@ -1,3 +1,4 @@
+import io
 import json
 import zipfile
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from PIL import Image
 from rasterio.transform import from_origin
 
 from shared.upload_validation import (
@@ -13,6 +15,7 @@ from shared.upload_validation import (
 	ensure_georeferenced_geotiff,
 	ensure_processable_zip,
 	is_multispectral_band,
+	tiff_samples_per_pixel,
 )
 
 
@@ -62,6 +65,60 @@ def test_ensure_processable_zip_reads_archive_names(tmp_path: Path):
 
 	with pytest.raises(UnprocessableUploadError, match='multispectral'):
 		ensure_processable_zip(zip_path)
+
+
+def _tiff_bytes(mode: str) -> bytes:
+	buffer = io.BytesIO()
+	Image.new(mode, (4, 4)).save(buffer, format='TIFF')
+	return buffer.getvalue()
+
+
+def _zip_with(tmp_path: Path, entries: dict[str, bytes]) -> Path:
+	zip_path = tmp_path / 'upload.zip'
+	with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+		for name, data in entries.items():
+			archive.writestr(name, data)
+	return zip_path
+
+
+@pytest.mark.parametrize('mode', ['1', 'L', 'P', 'I;16', 'I;16B', 'F', 'LA', 'RGB', 'RGBA', 'CMYK'])
+def test_tiff_header_agrees_with_the_processor_band_count(mode):
+	"""The processor counts bands with Pillow; the header read must say the same."""
+	data = _tiff_bytes(mode)
+	with Image.open(io.BytesIO(data)) as image:
+		single_band = len(image.getbands()) == 1
+	assert (tiff_samples_per_pixel(data) == 1) == single_band
+
+
+def test_tiff_header_read_gives_up_when_the_ifd_is_not_in_the_head():
+	data = _tiff_bytes('L')
+	assert tiff_samples_per_pixel(data[:9]) is None
+	assert tiff_samples_per_pixel(b'not a tiff') is None
+
+
+def test_rejects_zip_of_single_band_tiffs_with_rgb_like_names(tmp_path: Path):
+	"""DJI P4 Multispectral band files look like RGB frames by name (DT-1584)."""
+	zip_path = _zip_with(tmp_path, {f'flight/DJI_{i:04d}.TIF': _tiff_bytes('L') for i in range(11, 16)})
+
+	with pytest.raises(UnprocessableUploadError, match='only contains multispectral band images'):
+		ensure_processable_zip(zip_path)
+
+
+def test_accepts_zip_of_rgb_tiffs_after_band_files(tmp_path: Path):
+	entries = {f'DJI_{i:04d}.TIF': _tiff_bytes('L') for i in range(11, 16)}
+	entries['DJI_0020.TIF'] = _tiff_bytes('RGB')
+	ensure_processable_zip(_zip_with(tmp_path, entries))
+
+
+def test_accepts_single_band_tiffs_next_to_rgb_jpgs(tmp_path: Path):
+	entries = {f'DJI_{i:04d}.TIF': _tiff_bytes('L') for i in range(11, 16)}
+	entries.update({'DJI_0010.JPG': b'jpg', 'DJI_0020.JPG': b'jpg'})
+	ensure_processable_zip(_zip_with(tmp_path, entries))
+
+
+def test_accepts_tiffs_whose_bands_cannot_be_read(tmp_path: Path):
+	"""An unreadable TIFF may still reach ODM, so it never counts as a band image."""
+	ensure_processable_zip(_zip_with(tmp_path, {'DJI_0001.TIF': b'tiff', 'DJI_0002.TIF': b'tiff'}))
 
 
 def _write_tif(path: Path, crs=None, transform=None):
