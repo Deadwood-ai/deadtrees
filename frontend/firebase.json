@@ -37,6 +37,42 @@
             "value": "public, max-age=31536000, immutable"
           }
         ]
+      },
+      {
+        "source": "/@(sign-in|sign-up|forgot-password|reset-password|profile|factory|dataset-audit|priwa-field)",
+        "headers": [
+          {
+            "key": "X-Robots-Tag",
+            "value": "noindex"
+          }
+        ]
+      },
+      {
+        "source": "/@(sign-in|sign-up|forgot-password|reset-password|profile|factory|dataset-audit|priwa-field)/**",
+        "headers": [
+          {
+            "key": "X-Robots-Tag",
+            "value": "noindex"
+          }
+        ]
+      },
+      {
+        "source": "/releases/disturbance-benchmark",
+        "headers": [
+          {
+            "key": "X-Robots-Tag",
+            "value": "noindex"
+          }
+        ]
+      },
+      {
+        "source": "/releases/disturbance-benchmark/**",
+        "headers": [
+          {
+            "key": "X-Robots-Tag",
+            "value": "noindex"
+          }
+        ]
       }
     ],
     "frameworksBackend": {

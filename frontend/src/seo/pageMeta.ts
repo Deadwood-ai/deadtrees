@@ -119,7 +119,7 @@ const INDEXABLE_PAGES: Record<string, PageMeta> = {
   },
 };
 
-const PRIVATE_PAGE_TITLES: Record<string, string> = {
+export const PRIVATE_PAGE_TITLES: Record<string, string> = {
   "/sign-in": "Sign in",
   "/sign-up": "Sign up",
   "/forgot-password": "Forgot password",
