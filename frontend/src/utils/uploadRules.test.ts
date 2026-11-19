@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   checkGeoTiffGeoreference,
   checkRawImageNames,
+  gpsSample,
   isMultispectralBand,
+  photosLackGps,
+  rgbPhotoNames,
 } from "./uploadRules";
 
 const photos = (count: number, ext = "JPG") =>
@@ -120,5 +123,31 @@ describe("real past uploads", () => {
     } else {
       expect(warnings).toEqual([]);
     }
+  });
+});
+
+describe("GPS sample", () => {
+  it("spreads over the whole flight like the server", () => {
+    const names = Array.from({ length: 101 }, (_, i) => `${String(i).padStart(3, "0")}.JPG`);
+    expect(gpsSample(names)).toEqual(["000.JPG", "025.JPG", "050.JPG", "075.JPG", "100.JPG"]);
+    expect(gpsSample(names.slice(0, 3))).toEqual(names.slice(0, 3));
+  });
+
+  it("rounds halves up, matching shared/upload_validation.py", () => {
+    // step 2.5: index 2 * 2.5 = 5 and 1 * 2.5 = 2.5 -> 3
+    const names = Array.from({ length: 11 }, (_, i) => `${String(i).padStart(2, "0")}.JPG`);
+    expect(gpsSample(names)).toEqual(["00.JPG", "03.JPG", "05.JPG", "08.JPG", "10.JPG"]);
+  });
+
+  it("prefers the JPG of a DNG pair and skips band images", () => {
+    expect(
+      rgbPhotoNames(["a/DJI_0002.DNG", "a/DJI_0001.DNG", "a/DJI_0001.JPG", "a/DJI_0001_MS_G.TIF", "a/notes.txt"]),
+    ).toEqual(["a/DJI_0001.JPG", "a/DJI_0002.DNG"]);
+  });
+
+  it("only lacks GPS when every checked photo was read without one", () => {
+    expect(photosLackGps([false, false])).toBe(true);
+    expect(photosLackGps([false, null])).toBe(false);
+    expect(photosLackGps([])).toBe(false);
   });
 });

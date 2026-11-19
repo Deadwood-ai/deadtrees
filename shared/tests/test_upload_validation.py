@@ -246,6 +246,8 @@ def test_gps_sample_spreads_over_the_whole_flight():
 	names = [f'{i:03d}.JPG' for i in range(101)]
 	assert gps_sample(names) == ['000.JPG', '025.JPG', '050.JPG', '075.JPG', '100.JPG']
 	assert gps_sample(names[:3]) == names[:3]
+	# Halves round up, matching the browser's Math.round (uploadRules.test.ts).
+	assert gps_sample([f'{i:02d}.JPG' for i in range(11)]) == ['00.JPG', '03.JPG', '05.JPG', '08.JPG', '10.JPG']
 
 
 def test_rgb_photo_names_prefers_the_jpg_of_a_dng_pair_and_skips_bands():
