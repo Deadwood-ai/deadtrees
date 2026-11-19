@@ -795,3 +795,15 @@ def test_a_paused_or_silent_audit_worker_is_a_finding(tmp_path):
 	assert host_facts.audit_worker(tmp_path / 'missing.json') is None
 	(tmp_path / 'status.json').write_text(json.dumps(paused))
 	assert host_facts.audit_worker(tmp_path / 'status.json')['state'] == 'paused'
+
+
+def test_messaging_lines_keep_mail_and_zulip_only():
+	items = [
+		'- [linear] [DT-1](https://linear.app/x): comment',
+		'- [gmail] Dominik Sperlich: LFV stations',
+		'- [zulip] Clemens in project_deadtree.earth/AOI paper: share draft',
+		'- [posthog] id=1 occurrences=2 users=1 first_seen=x name=y',
+		'- [gap] inbox: read failed',
+	]
+	assert monitor_tick.messaging_lines(items) == items[1:3]
+

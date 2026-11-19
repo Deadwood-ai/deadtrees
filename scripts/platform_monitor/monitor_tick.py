@@ -55,6 +55,10 @@ BOARD_FILE = 'platform-board.md'
 # A relay session forwards each note here to the project coordinator and
 # deletes it; the tick writes one only when something changed or failed.
 OUTBOX = 'outbox'
+# The Messaging thread waits on this folder the same way and deletes a note
+# once it has handled its Gmail and Zulip items (DT-1586).
+MESSAGING_OUTBOX = 'messaging-outbox'
+MESSAGING_TAGS = ('- [gmail]', '- [zulip]')
 SHADOW_LOG = 'shadow.jsonl'
 DIGESTS = 'digests'
 DIGEST_RETENTION = timedelta(days=2)
@@ -715,11 +719,16 @@ def read_inbox(prompt: str, since: datetime, args: argparse.Namespace, workdir: 
 	return items, checked, inbox_ok, posthog_ok, cost
 
 
-def post_outbox(state_dir: Path, now: datetime, text: str) -> None:
+def post_outbox(state_dir: Path, now: datetime, text: str, folder: str = OUTBOX) -> None:
 	# The relay forwards and removes `*.md`; it ignores `*.tmp`.
-	outbox = state_dir / OUTBOX
+	outbox = state_dir / folder
 	outbox.mkdir(exist_ok=True)
 	write_atomic(outbox / f"{now.strftime('%Y%m%dT%H%M%SZ')}.md", text)
+
+
+def messaging_lines(items: list[str]) -> list[str]:
+	"""The inbox items the Messaging thread answers: mail and Zulip, not Linear or PostHog."""
+	return [line for line in items if line.startswith(MESSAGING_TAGS)]
 
 
 def board_update(
@@ -866,6 +875,15 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 			post_outbox(args.state_dir, now, note.rstrip('\n') + '\n')
 		except OSError as exc:
 			print(f'outbox note not written: {type(exc).__name__}', file=sys.stderr)
+			return 1
+	# Only when the inbox window moved on: otherwise the next tick reads the
+	# same items again and would note them twice.
+	messaging = messaging_lines(items) if inbox_ok and zulip_ok else []
+	if messaging:
+		try:
+			post_outbox(args.state_dir, now, f'{header}\n\n' + redact('\n'.join(messaging)) + '\n', MESSAGING_OUTBOX)
+		except OSError as exc:
+			print(f'messaging note not written: {type(exc).__name__}', file=sys.stderr)
 			return 1
 	return 0
 
