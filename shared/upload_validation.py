@@ -2,13 +2,18 @@
 
 The API applies them when an upload completes and the processor reuses the
 GeoTIFF message, so a contributor sees the same reason in both places. The
-browser mirrors these rules in `frontend/src/utils/uploadRules.ts`; keep the
+browser mirrors the name rules in `frontend/src/utils/uploadRules.ts`; keep the
 two in step. Rules here only reject inputs the processor is certain to fail
 on; anything merely risky is a browser warning, not a rejection.
+
+The browser cannot see how many bands a TIFF in a ZIP has, so the API alone
+rejects a ZIP whose only photos are single-band TIFFs (DT-1584).
 """
 
 import re
+import struct
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -39,6 +44,47 @@ class UnprocessableUploadError(ValueError):
 
 def is_multispectral_band(file_name: str) -> bool:
 	return bool(_MULTISPECTRAL_BAND.search(PurePosixPath(file_name).name))
+
+
+# A TIFF's first IFD sits right after the 8-byte header in camera files. Reading this much of
+# each ZIP entry finds it without inflating whole 8 MB band images.
+_TIFF_HEAD_BYTES = 64 * 1024
+_SAMPLES_PER_PIXEL_TAG = 277
+
+
+def tiff_samples_per_pixel(head: bytes) -> int | None:
+	"""SamplesPerPixel of a classic TIFF's first image, or None when `head` does not hold its IFD.
+
+	One sample per pixel is what the processor's Pillow check sees as a one-band image
+	(`processor/src/utils/odm_inputs.py`), so both sides agree on band files.
+	"""
+	if head[:4] == b'II*\x00':
+		order = '<'
+	elif head[:4] == b'MM\x00*':
+		order = '>'
+	else:
+		return None
+	if len(head) < 8:
+		return None
+	(ifd_offset,) = struct.unpack(f'{order}I', head[4:8])
+	if ifd_offset + 2 > len(head):
+		return None
+	(entry_count,) = struct.unpack(f'{order}H', head[ifd_offset : ifd_offset + 2])
+	entries_end = ifd_offset + 2 + 12 * entry_count
+	if entries_end > len(head):
+		return None
+	for start in range(ifd_offset + 2, entries_end, 12):
+		tag, value_type = struct.unpack(f'{order}HH', head[start : start + 4])
+		if tag == _SAMPLES_PER_PIXEL_TAG:
+			value_format = {3: 'H', 4: 'I'}.get(value_type)
+			if value_format is None:
+				return None
+			(samples,) = struct.unpack(
+				f'{order}{value_format}', head[start + 8 : start + 8 + struct.calcsize(value_format)]
+			)
+			return samples
+	# The TIFF 6.0 default when the tag is missing.
+	return 1
 
 
 def raw_image_names(entry_names: Iterable[str]) -> list[str]:
@@ -73,9 +119,31 @@ def check_raw_image_names(entry_names: Iterable[str]) -> None:
 		)
 
 
+def _check_tiff_band_counts(archive: zipfile.ZipFile) -> None:
+	"""Reject a ZIP whose only photos are single-band TIFFs; ODM gets no image from it.
+
+	Reads only the head of each TIFF and stops at the first one that is not clearly
+	single-band, so a usable upload costs one header read.
+	"""
+	photos = [name for name in raw_image_names(archive.namelist()) if not is_multispectral_band(name)]
+	if any(PurePosixPath(name).suffix.lower() not in TIFF_EXTENSIONS for name in photos):
+		return
+	for name in photos:
+		try:
+			with archive.open(name) as entry:
+				head = entry.read(_TIFF_HEAD_BYTES)
+		except (RuntimeError, OSError, zipfile.BadZipFile, zlib.error):
+			# Encrypted or damaged entries are not this rule's call; leave them to the processor.
+			return
+		if tiff_samples_per_pixel(head) != 1:
+			return
+	raise UnprocessableUploadError(MULTISPECTRAL_ONLY_MESSAGE)
+
+
 def ensure_processable_zip(zip_path: Path) -> None:
 	with zipfile.ZipFile(zip_path, 'r') as archive:
 		check_raw_image_names(archive.namelist())
+		_check_tiff_band_counts(archive)
 
 
 def missing_crs_message(src) -> str | None:

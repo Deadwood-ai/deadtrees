@@ -9,6 +9,7 @@ from rasterio.transform import from_origin
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from api.src.server import app
 from api.src.utils.file_utils import detect_upload_type, UploadType
@@ -238,6 +239,21 @@ def test_chunk_endpoint_rejects_multispectral_only_zip(auth_token):
 			archive.writestr(f'DJI_0001_MS_{band}.TIF', b'band')
 
 	response = _final_chunk(auth_token, 'bands.zip', buffer.getvalue(), UploadType.RAW_IMAGES_ZIP)
+
+	assert response.status_code == 400
+	assert 'only contains multispectral band images' in response.json()['detail']
+
+
+def test_chunk_endpoint_rejects_zip_of_single_band_tiffs(auth_token):
+	"""DJI P4 Multispectral band TIFs have RGB-like names; their single band gives them away (DT-1584)."""
+	buffer = io.BytesIO()
+	with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+		for i in range(11, 16):
+			band = io.BytesIO()
+			Image.new('L', (4, 4)).save(band, format='TIFF')
+			archive.writestr(f'DJI_{i:04d}.TIF', band.getvalue())
+
+	response = _final_chunk(auth_token, 'p4m.zip', buffer.getvalue(), UploadType.RAW_IMAGES_ZIP)
 
 	assert response.status_code == 400
 	assert 'only contains multispectral band images' in response.json()['detail']
