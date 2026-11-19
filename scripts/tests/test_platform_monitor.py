@@ -236,6 +236,14 @@ def test_a_cause_keeps_its_fingerprint_while_its_datasets_change():
 	assert keys(other) != keys(first)
 
 
+def test_a_time_without_zone_is_read_as_utc_and_a_bad_one_starts_nothing():
+	naive = failure_group() | {'last_at': '2026-10-12T09:00:00'}
+	assert len(findings.failure_findings(failure_card(naive), NOON)[0]) == 1
+	bad = failure_group() | {'last_at': None}
+	found, _, unobserved = findings.failure_findings(failure_card(bad), NOON)
+	assert found == [] and len(unobserved) == 1
+
+
 def test_team_only_causes_need_three_datasets():
 	small = findings.failure_findings(failure_card(failure_group(count=2, external=0)), NOON)
 	large = findings.failure_findings(failure_card(failure_group(count=3, external=0)), NOON)

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatch
 from typing import Any
 
@@ -296,6 +296,8 @@ def failure_findings(
 			last = datetime.fromisoformat(str(group.get('last_at')))
 		except ValueError:
 			last = None
+		if last and last.tzinfo is None:
+			last = last.replace(tzinfo=timezone.utc)
 		if last and last >= now - FAILURE_WINDOW and (external or count >= FAILURE_MIN_DATASETS):
 			samples = ' '.join(str(item) for item in group.get('samples') or [])
 			found.append(finding(
