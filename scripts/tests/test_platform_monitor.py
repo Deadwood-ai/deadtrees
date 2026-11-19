@@ -697,6 +697,39 @@ def test_a_board_change_alone_leaves_a_note_with_no_digest_lines(tmp_path, monke
 	assert '🟡 deepl1 · ' in note and 'issue/DT-8' in note
 
 
+def messaging_tick(tmp_path, monkeypatch, minute):
+	inbox = (['- [gmail] Dominik Sperlich: LFV stations', '- [linear] [DT-1](https://x): y'],
+		'linear=1 gmail=1 posthog=0 project=13440', True, True, 0.0)
+	monkeypatch.setattr(monitor_tick, 'read_inbox', lambda *args: inbox)
+	monkeypatch.setattr(monitor_tick.findings_module, 'build_findings', lambda *args: ([red('a')], [], []))
+	args = monitor_tick.parse_args(['--state-dir', str(tmp_path), '--zuliprc', str(tmp_path / 'missing')])
+	assert monitor_tick.tick(args, NOON.replace(minute=minute), tmp_path) == 0
+	return json.loads((tmp_path / monitor_tick.TICK_STATE).read_text())
+
+
+def test_new_mail_items_become_one_messaging_note(tmp_path, monkeypatch):
+	run_tick(tmp_path, monkeypatch)
+	state = messaging_tick(tmp_path, monkeypatch, 30)
+	notes = list((tmp_path / monitor_tick.MESSAGING_OUTBOX).glob('*.md'))
+	assert len(notes) == 1
+	text = notes[0].read_text()
+	assert '- [gmail] Dominik Sperlich: LFV stations' in text and '[linear]' not in text
+	assert state['inbox_since'] == '2026-10-13T12:30:00Z'
+
+
+def test_a_failed_messaging_note_keeps_the_inbox_window(tmp_path, monkeypatch):
+	run_tick(tmp_path, monkeypatch)
+	before = json.loads((tmp_path / monitor_tick.TICK_STATE).read_text())['inbox_since']
+	(tmp_path / monitor_tick.MESSAGING_OUTBOX).write_text('not a folder')  # the write fails
+	state = messaging_tick(tmp_path, monkeypatch, 30)
+	assert state['inbox_since'] == before
+	# Once the folder works again, the next tick notes the items it read again.
+	(tmp_path / monitor_tick.MESSAGING_OUTBOX).unlink()
+	state = messaging_tick(tmp_path, monkeypatch, 45)
+	assert len(list((tmp_path / monitor_tick.MESSAGING_OUTBOX).glob('*.md'))) == 1
+	assert state['inbox_since'] == '2026-10-13T12:45:00Z'
+
+
 def test_a_failed_main_job_is_marked_as_a_finding_in_the_note(tmp_path, monkeypatch):
 	run_tick(tmp_path, monkeypatch)
 	(tmp_path / 'outbox' / '20261013T120000Z.md').unlink()

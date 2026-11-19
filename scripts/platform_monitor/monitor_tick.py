@@ -856,10 +856,21 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		'verdict': findings_module.verdict(current), 'checked': checked,
 		'inbox_ok': inbox_ok, 'posthog_ok': posthog_ok, 'filed': sorted(filing), 'cost_usd': round(cost, 4),
 	})
+	# The Messaging note comes before the state, unlike the board note: it
+	# changes nothing in Linear, and a failed write keeps the inbox window where
+	# it was, so the next tick reads these items again instead of losing them.
+	window_read = inbox_ok and zulip_ok
+	messaging = messaging_lines(items) if window_read else []
+	if messaging:
+		try:
+			post_outbox(args.state_dir, now, f'{header}\n\n' + redact('\n'.join(messaging)) + '\n', MESSAGING_OUTBOX)
+		except OSError as exc:
+			print(f'messaging note not written: {type(exc).__name__}', file=sys.stderr)
+			window_read = False
 	write_atomic(tick_file, json.dumps({
 		'last_tick_at': iso(now),
-		# The inbox window only moves past what every source read.
-		'inbox_since': iso(now) if inbox_ok and zulip_ok else iso(since),
+		# The inbox window only moves past what every source read and passed on.
+		'inbox_since': iso(now) if window_read else iso(since),
 		'baseline': baseline,
 		'issues': known,
 		'posthog_seen': seen_posthog,
@@ -875,15 +886,6 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 			post_outbox(args.state_dir, now, note.rstrip('\n') + '\n')
 		except OSError as exc:
 			print(f'outbox note not written: {type(exc).__name__}', file=sys.stderr)
-			return 1
-	# Only when the inbox window moved on: otherwise the next tick reads the
-	# same items again and would note them twice.
-	messaging = messaging_lines(items) if inbox_ok and zulip_ok else []
-	if messaging:
-		try:
-			post_outbox(args.state_dir, now, f'{header}\n\n' + redact('\n'.join(messaging)) + '\n', MESSAGING_OUTBOX)
-		except OSError as exc:
-			print(f'messaging note not written: {type(exc).__name__}', file=sys.stderr)
 			return 1
 	return 0
 
