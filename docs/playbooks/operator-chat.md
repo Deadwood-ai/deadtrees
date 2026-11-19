@@ -227,6 +227,16 @@ unread tick because SSH banner timeouts flap. A row newly red on two ticks and a
 failed job on main also get a `- [finding]` line above the board, which the
 coordinator turns into one read-only thread per Linear issue.
 
+Processing failures get the same treatment by cause, not by row. The scorecard
+groups live (not archived) datasets with an error by stage and error class, the
+same grouping as the Factory attention list. A cause becomes one finding, one
+Linear issue in Triage and one `- [finding] processing failures:` line when it
+failed again within 14 days and reached an external contributor or 3 datasets.
+Older or smaller causes start nothing but keep an earlier finding open, and a
+cause clears once no live dataset has it. The thread diagnoses the cause and
+ships a fix under standing ship; reruns still need Janusch's words. The
+headline's error count is live datasets only (DT-1580).
+
 App errors are coloured by script from the inbox call's proven PostHog read: 🟡
 for 24 hours after a new or spiking error, ⚪ when PostHog was not read. The
 board's headline carries the changed time and the factory counts. The north star
