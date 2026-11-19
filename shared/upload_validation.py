@@ -13,6 +13,7 @@ rejects a ZIP whose only photos are single-band TIFFs (DT-1584).
 import re
 import struct
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -63,6 +64,8 @@ def tiff_samples_per_pixel(head: bytes) -> int | None:
 		order = '>'
 	else:
 		return None
+	if len(head) < 8:
+		return None
 	(ifd_offset,) = struct.unpack(f'{order}I', head[4:8])
 	if ifd_offset + 2 > len(head):
 		return None
@@ -76,7 +79,9 @@ def tiff_samples_per_pixel(head: bytes) -> int | None:
 			value_format = {3: 'H', 4: 'I'}.get(value_type)
 			if value_format is None:
 				return None
-			(samples,) = struct.unpack(f'{order}{value_format}', head[start + 8 : start + 8 + struct.calcsize(value_format)])
+			(samples,) = struct.unpack(
+				f'{order}{value_format}', head[start + 8 : start + 8 + struct.calcsize(value_format)]
+			)
 			return samples
 	# The TIFF 6.0 default when the tag is missing.
 	return 1
@@ -124,9 +129,14 @@ def _check_tiff_band_counts(archive: zipfile.ZipFile) -> None:
 	if any(PurePosixPath(name).suffix.lower() not in TIFF_EXTENSIONS for name in photos):
 		return
 	for name in photos:
-		with archive.open(name) as entry:
-			if tiff_samples_per_pixel(entry.read(_TIFF_HEAD_BYTES)) != 1:
-				return
+		try:
+			with archive.open(name) as entry:
+				head = entry.read(_TIFF_HEAD_BYTES)
+		except (RuntimeError, OSError, zipfile.BadZipFile, zlib.error):
+			# Encrypted or damaged entries are not this rule's call; leave them to the processor.
+			return
+		if tiff_samples_per_pixel(head) != 1:
+			return
 	raise UnprocessableUploadError(MULTISPECTRAL_ONLY_MESSAGE)
 
 

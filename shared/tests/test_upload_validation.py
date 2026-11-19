@@ -94,6 +94,17 @@ def test_tiff_header_read_gives_up_when_the_ifd_is_not_in_the_head():
 	data = _tiff_bytes('L')
 	assert tiff_samples_per_pixel(data[:9]) is None
 	assert tiff_samples_per_pixel(b'not a tiff') is None
+	assert tiff_samples_per_pixel(b'II*\x00ab') is None
+
+
+def test_leaves_encrypted_tiff_entries_to_the_processor(tmp_path: Path, monkeypatch):
+	zip_path = _zip_with(tmp_path, {f'DJI_{i:04d}.TIF': _tiff_bytes('L') for i in range(11, 16)})
+
+	def _encrypted(*_args, **_kwargs):
+		raise RuntimeError('File is encrypted, password required for extraction')
+
+	monkeypatch.setattr(zipfile.ZipFile, 'open', _encrypted)
+	ensure_processable_zip(zip_path)
 
 
 def test_rejects_zip_of_single_band_tiffs_with_rgb_like_names(tmp_path: Path):

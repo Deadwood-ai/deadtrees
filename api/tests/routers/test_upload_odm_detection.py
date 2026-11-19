@@ -3,13 +3,13 @@ import zipfile
 from uuid import uuid4
 
 import numpy as np
-from PIL import Image
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from api.src.server import app
 from api.src.utils.file_utils import detect_upload_type, UploadType
