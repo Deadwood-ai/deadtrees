@@ -14,6 +14,7 @@ import io
 import math
 import re
 import struct
+import tempfile
 import zipfile
 import zlib
 from pathlib import Path, PurePosixPath
@@ -51,8 +52,10 @@ NO_GPS_MESSAGE = (
 GPS_SAMPLE_SIZE = 5
 # How far into a compressed photo the check may read. Some TIFFs keep their metadata
 # at the very end (dataset 15632: 485 MB each); a photo whose metadata lies further
-# counts as unreadable rather than costing the upload a minute of decompression.
-GPS_READ_LIMIT_BYTES = 1024 * 1024 * 1024
+# counts as unreadable. Each photo is decompressed at most once up to this point.
+GPS_READ_LIMIT_BYTES = 512 * 1024 * 1024
+# Decompressed bytes kept in memory per photo before the copy moves to a temporary file.
+_SPOOL_MEMORY_BYTES = 16 * 1024 * 1024
 
 
 class UnprocessableUploadError(ValueError):
@@ -184,15 +187,22 @@ def _check_tiff_band_counts(archive: zipfile.ZipFile) -> None:
 
 
 class _BoundedReader(io.RawIOBase):
-	"""A ZIP entry that reads as empty past ``limit`` and seeks without decompressing.
+	"""A ZIP entry that reads as empty past ``limit``, decompressed at most once.
 
-	Parsers seek freely (Pillow asks a TIFF for its size by seeking to the end); a
-	real seek in a compressed entry decompresses everything before the target. This
-	view only moves the entry when bytes within the limit are read.
+	Parsers seek freely (Pillow asks a TIFF for its size by seeking to the end and
+	jumps back and forth between tags), and every backward seek in a compressed
+	entry restarts its decompression. This view reads the entry strictly forward,
+	keeps what it decompressed in a spooled copy and serves every read from that
+	copy. ``reached_limit`` tells whether a read was cut short by the limit, so a
+	parser's answer may rest on missing bytes.
 	"""
 
 	def __init__(self, raw, size: int, limit: int):
-		self._raw, self._size, self._limit, self._position = raw, size, limit, 0
+		self._raw, self._size, self._limit = raw, size, limit
+		self._copy = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MEMORY_BYTES)
+		self._copied = 0
+		self._position = 0
+		self.reached_limit = False
 
 	def readable(self) -> bool:
 		return True
@@ -208,16 +218,32 @@ class _BoundedReader(io.RawIOBase):
 		self._position = max(base + offset, 0)
 		return self._position
 
+	def _copy_up_to(self, end: int) -> None:
+		self._copy.seek(self._copied)
+		while self._copied < end:
+			chunk = self._raw.read(min(end - self._copied, 1024 * 1024))
+			if not chunk:
+				break
+			self._copy.write(chunk)
+			self._copied += len(chunk)
+
 	def readinto(self, buffer) -> int:
-		count = min(len(buffer), min(self._limit, self._size) - self._position)
-		if count <= 0:
+		end = min(self._position + len(buffer), self._size)
+		if end > self._limit:
+			self.reached_limit = True
+			end = self._limit
+		if end <= self._position:
 			return 0
-		if self._raw.tell() != self._position:
-			self._raw.seek(self._position)
-		data = self._raw.read(count)
+		self._copy_up_to(end)
+		self._copy.seek(self._position)
+		data = self._copy.read(min(end, self._copied) - self._position)
 		buffer[: len(data)] = data
 		self._position += len(data)
 		return len(data)
+
+	def close(self) -> None:
+		self._copy.close()
+		super().close()
 
 
 def photos_lack_gps(answers: Iterable[bool | None]) -> bool:
@@ -235,9 +261,10 @@ def check_photo_positions(archive: zipfile.ZipFile, read_limit: int = GPS_READ_L
 	answers = []
 	for name in gps_sample(rgb_photo_names(archive.namelist())):
 		try:
-			with archive.open(name) as entry:
-				view = _BoundedReader(entry, archive.getinfo(name).file_size, read_limit)
-				answers.append(has_gps_position(io.BufferedReader(view)))
+			with archive.open(name) as entry, _BoundedReader(entry, archive.getinfo(name).file_size, read_limit) as view:
+				answer = has_gps_position(io.BufferedReader(view))
+				# "No GPS" read from a cut-off copy is no evidence.
+				answers.append(None if answer is False and view.reached_limit else answer)
 		except (RuntimeError, OSError, zipfile.BadZipFile, zlib.error):
 			# Encrypted or damaged entries are not this rule's call; leave them to the processor.
 			return

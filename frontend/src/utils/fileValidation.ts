@@ -210,7 +210,7 @@ const zipInspectionErrorMessage = (error: unknown): string => {
 };
 
 // Largest photo the browser unpacks to read its metadata. A larger one counts as
-// unreadable; the API checks it after upload, reading up to 1 GB per photo.
+// unreadable; the API checks it after upload, reading up to 512 MB per photo.
 export const GPS_READ_LIMIT_BYTES = 256 * 1024 * 1024;
 
 type ZipPhotoEntry = Pick<ZipEntry, "name" | "size" | "arrayBuffer">;

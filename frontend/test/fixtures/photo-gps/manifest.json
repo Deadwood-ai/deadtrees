@@ -46,6 +46,11 @@
       "note": "TIFF cut before its metadata: unknown, never a rejection"
     },
     {
+      "file": "gps-block-cut-off.tif",
+      "has_gps": null,
+      "note": "TIFF whose GPS block points past the end: unknown, not \"no GPS\""
+    },
+    {
       "file": "not-a-photo.jpg",
       "has_gps": null,
       "note": "unreadable bytes: unknown"

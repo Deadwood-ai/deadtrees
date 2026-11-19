@@ -82,6 +82,7 @@ cases = {
     'gps-big-endian.tif': (tiff('>', gps=(-33.5, -70.25)), True, 'big-endian TIFF with GPS, metadata after pixels'),
     'no-gps-metadata-at-end.tif': (tiff(), False, 'TIFF without GPS whose metadata follows the pixels (like dataset 15632)'),
     'truncated.tif': (tiff(truncate=True), None, 'TIFF cut before its metadata: unknown, never a rejection'),
+    'gps-block-cut-off.tif': (tiff(gps=(48.0, 7.85), ifd_at_end=False)[:134], None, 'TIFF whose GPS block points past the end: unknown, not "no GPS"'),
     'not-a-photo.jpg': (b'this is not an image', None, 'unreadable bytes: unknown'),
 }
 manifest = {'cases': []}

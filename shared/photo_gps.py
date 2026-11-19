@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import re
+import warnings
 from pathlib import Path
 from typing import BinaryIO
 
@@ -96,12 +97,16 @@ def has_gps_position(photo: Photo) -> bool | None:
 	if read_gps_position(photo) is not None:
 		return True
 	try:
-		with _open_image(photo) as image:
+		# Pillow reports a cut-off metadata block as a warning and returns what it read.
+		with warnings.catch_warnings(record=True) as caught, _open_image(photo) as image:
+			warnings.simplefilter('always')
 			exif = image.getexif()
-			if GPS_IFD not in exif:
-				return False
-			gps = exif.get_ifd(GPS_IFD)
+			gps = exif.get_ifd(GPS_IFD) if GPS_IFD in exif else {}
 	except Exception:
 		return None
+	if any('EXIF' in str(warning.message) for warning in caught):
+		return None
+	if GPS_IFD not in exif:
+		return False
 	# A GPS block without both coordinates is how cameras record "no fix".
-	return True if GPS_LATITUDE in gps and GPS_LONGITUDE in gps else False
+	return GPS_LATITUDE in gps and GPS_LONGITUDE in gps

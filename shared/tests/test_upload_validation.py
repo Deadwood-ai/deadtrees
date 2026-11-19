@@ -11,6 +11,7 @@ from rasterio.transform import from_origin
 
 from shared.upload_validation import (
 	UnprocessableUploadError,
+	_BoundedReader,
 	check_photo_positions,
 	check_raw_image_names,
 	ensure_georeferenced_geotiff,
@@ -304,3 +305,46 @@ def test_ensure_processable_upload_picks_the_rules_by_extension(tmp_path: Path):
 	with pytest.raises(UnprocessableUploadError, match='no coordinate reference system'):
 		ensure_processable_upload(plain)
 	ensure_processable_upload(tmp_path / 'labels.gpkg')
+
+
+@needs_photo_fixtures
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_gps_block_beyond_the_read_limit_never_rejects(tmp_path: Path):
+	"""IFD0 is readable but the GPS block lies past the limit: Pillow returns an empty block, not an error."""
+	tif = (_PHOTO_FIXTURES / 'gps-ifd-first.tif').read_bytes()
+	path = _zip_of(tmp_path / 'flight.zip', {f'{i}.tif': tif for i in range(3)})
+	with zipfile.ZipFile(path) as archive:
+		check_photo_positions(archive, read_limit=134)
+
+
+class _CountingStream(io.BytesIO):
+	def __init__(self, data: bytes):
+		super().__init__(data)
+		self.bytes_read = 0
+		self.seeks = 0
+
+	def read(self, size=-1):
+		data = super().read(size)
+		self.bytes_read += len(data)
+		return data
+
+	def seek(self, offset, whence=io.SEEK_SET):
+		self.seeks += 1
+		return super().seek(offset, whence)
+
+
+@needs_photo_fixtures
+@pytest.mark.parametrize('name', ['gps-big-endian.tif', 'no-gps-metadata-at-end.tif', 'gps.jpg'])
+def test_bounded_reader_decompresses_each_byte_once(name):
+	"""Parser seeks never reach the entry, so a backward jump cannot restart its decompression."""
+	data = (_PHOTO_FIXTURES / name).read_bytes()
+	raw = _CountingStream(data)
+	raw.seeks = 0
+	view = _BoundedReader(raw, len(data), limit=len(data))
+
+	from shared.photo_gps import has_gps_position
+
+	has_gps_position(io.BufferedReader(view))
+
+	assert raw.seeks == 0
+	assert raw.bytes_read <= len(data)
