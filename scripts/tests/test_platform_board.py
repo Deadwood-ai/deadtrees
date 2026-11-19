@@ -280,6 +280,13 @@ def test_finding_lines_cover_rows_and_failed_main_jobs():
 	assert lines[1].endswith('issue/DT-2)')
 
 
+def test_a_failure_cause_finding_line_names_processing_failures():
+	item = findings.finding('yellow', findings.FAILURE_SURFACE, 'odm_processing:abc', 'odm_processing failure: exit code 137')
+	[line] = platform_board.finding_lines([], [item], {item['fingerprint']: 'DT-3'})
+	assert line.startswith('- [finding] processing failures: odm_processing failure: exit code 137')
+	assert line.endswith('issue/DT-3)')
+
+
 # --- Main CI ------------------------------------------------------------------
 
 

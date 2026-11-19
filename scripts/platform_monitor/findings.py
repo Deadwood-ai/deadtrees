@@ -2,7 +2,8 @@
 
 The finding rules live here, not in a model prompt: the monitor's model calls
 only file what this module reports. Input is the `operator_status.py` JSON
-snapshot plus the processing-server facts from `host_facts.py`.
+snapshot, the processing-server facts from `host_facts.py` and the live
+failure groups from `data_factory_scorecard.py`.
 
 A finding is a dict with `severity` (`red` or `yellow`), `surface`,
 `fingerprint` (`dt-status/<surface>/<key>`) and `summary`. A coverage gap is a
@@ -13,8 +14,9 @@ run, so a finding filed earlier is kept, not cleared, while its check is down.
 
 from __future__ import annotations
 
+import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatch
 from typing import Any
 
@@ -34,6 +36,13 @@ CONFIRM_RUNS = 2
 CI_FAILED = ('failure', 'timed_out', 'startup_failure')
 # Findings that come from a host's own status probe; unobserved while it fails.
 HOST_KEYS = ('disk:*', 'processor', 'restarts', 'oom-killed', 'release', 'api-*', 'cron:*', 'age:*')
+# A failure cause becomes a finding (one Linear issue, one fix thread) only when
+# it failed again recently and reached an external contributor or this many
+# datasets. Older or smaller causes keep an earlier finding open but start none,
+# so the October backlog does not open a thread per cause at once.
+FAILURE_WINDOW = timedelta(days=14)
+FAILURE_MIN_DATASETS = 3
+FAILURE_SURFACE = 'processing-failure'
 
 
 # Summaries reach a model with Linear write tools, and parts of them (log
@@ -263,8 +272,47 @@ def audit_worker_findings(status: dict[str, Any] | None, now: datetime) -> list[
 	return []
 
 
+def failure_key(stage: str, kind: str) -> str:
+	"""A stable key per cause; the error class itself is too long for a fingerprint."""
+	digest = hashlib.sha1(f'{stage}\n{kind}'.encode()).hexdigest()[:10]
+	return f'{stage}:{digest}'
+
+
+def failure_findings(
+	scorecard: dict[str, Any] | None, now: datetime
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+	"""One finding per live failure cause that needs a fix thread (see FAILURE_WINDOW)."""
+	scorecard = scorecard or {}
+	groups = (scorecard.get('scorecard') or {}).get('failures') if scorecard.get('ok') else None
+	if not isinstance(groups, list):
+		return [], ['processing failures: not read'], [f'dt-status/{FAILURE_SURFACE}/*']
+	found: list[dict[str, Any]] = []
+	unobserved: list[str] = []
+	for group in groups:
+		stage, kind = str(group.get('stage') or 'unknown'), str(group.get('kind') or 'unknown')
+		key = failure_key(stage, kind)
+		count, external = int(group.get('count') or 0), int(group.get('external') or 0)
+		try:
+			last = datetime.fromisoformat(str(group.get('last_at')))
+		except ValueError:
+			last = None
+		if last and last.tzinfo is None:
+			last = last.replace(tzinfo=timezone.utc)
+		if last and last >= now - FAILURE_WINDOW and (external or count >= FAILURE_MIN_DATASETS):
+			samples = ' '.join(str(item) for item in group.get('samples') or [])
+			found.append(finding(
+				'yellow', FAILURE_SURFACE, key,
+				f'{stage} failure: {kind} ({count} live dataset(s), {external} external,'
+				f' latest {str(group.get("last_at"))[:10]}, e.g. {samples})',
+			))
+		else:
+			# Still failing, so an earlier finding stays open, but none starts.
+			unobserved.append(f'dt-status/{FAILURE_SURFACE}/{key}')
+	return found, [], unobserved
+
+
 def build_findings(
-	snapshot: dict[str, Any], facts: dict[str, Any], now: datetime
+	snapshot: dict[str, Any], facts: dict[str, Any], now: datetime, scorecard: dict[str, Any] | None = None
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
 	"""Findings, coverage gaps and the fingerprint patterns not observed."""
 	found, gaps, unobserved = platform_findings(snapshot, now, facts.get('origin_main'), facts.get('main_history'))
@@ -272,9 +320,14 @@ def build_findings(
 	ci, ci_gaps, ci_unobserved = main_ci_findings(facts.get('main_ci'))
 	local, local_gaps, local_unobserved = local_findings(facts)
 	local += audit_worker_findings(facts.get('audit_worker'), now)
-	unique = {item['fingerprint']: item for item in found + deploy + ci + local}
+	failures, failure_gaps, failure_unobserved = failure_findings(scorecard, now)
+	unique = {item['fingerprint']: item for item in found + deploy + ci + local + failures}
 	ordered = sorted(unique.values(), key=lambda item: (item['severity'] != 'red', item['fingerprint']))
-	return ordered, gaps + deploy_gaps + ci_gaps + local_gaps, unobserved + deploy_unobserved + ci_unobserved + local_unobserved
+	return (
+		ordered,
+		gaps + deploy_gaps + ci_gaps + local_gaps + failure_gaps,
+		unobserved + deploy_unobserved + ci_unobserved + local_unobserved + failure_unobserved,
+	)
 
 
 def verdict(findings: list[dict[str, Any]]) -> str:
