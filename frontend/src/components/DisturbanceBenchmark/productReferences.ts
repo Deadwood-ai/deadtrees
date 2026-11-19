@@ -10,9 +10,9 @@ export const PRODUCT_REFERENCES: Record<
   }
 > = {
   da: {
-    fullName: "OPERA Surface Disturbance Alert",
+    fullName: "OPERA Annual Surface Disturbance",
     description:
-      "Detects vegetation disturbance from Harmonized Landsat and Sentinel-2 observations.",
+      "Summarizes DIST-ALERT detections annually from Harmonized Landsat and Sentinel-2 observations (DIST-ANN).",
     url: "https://www.jpl.nasa.gov/go/opera/products/dist-product-suite/",
   },
   dte: {

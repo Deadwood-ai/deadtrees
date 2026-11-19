@@ -9,6 +9,7 @@ import BenchmarkSitePicker from "../components/DisturbanceBenchmark/BenchmarkSit
 import BenchmarkSpatialGrid from "../components/DisturbanceBenchmark/BenchmarkSpatialGrid";
 import BenchmarkTemporalPanel from "../components/DisturbanceBenchmark/BenchmarkTemporalPanel";
 import BenchmarkMethods from "../components/DisturbanceBenchmark/BenchmarkMethods";
+import { approvedBenchmarkSites } from "../components/DisturbanceBenchmark/approvedSiteSelection";
 import { useBenchmarkAsset } from "../components/DisturbanceBenchmark/BenchmarkAccess";
 import type {
   IBenchmarkCatalog,
@@ -34,7 +35,7 @@ export default function DisturbanceBenchmarkRelease() {
       loadBenchmark<IBenchmarkCatalog>(benchmarkAsset("catalog.json"), signal),
     staleTime: Infinity,
   });
-  const entries = catalog.data?.sites || [];
+  const entries = approvedBenchmarkSites(catalog.data?.sites || []);
   const products = catalog.data?.products || [];
   const requested = searchParams.get("site");
   const selected =
