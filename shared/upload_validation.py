@@ -1,17 +1,20 @@
 """Input rules that decide whether an upload can be processed at all.
 
-The API applies them when an upload completes and the processor reuses the
-GeoTIFF message, so a contributor sees the same reason in both places. The
-browser mirrors the name rules in `frontend/src/utils/uploadRules.ts`; keep the
-two in step. Rules here only reject inputs the processor is certain to fail
+The API applies them when an upload completes, the CLI before it sends a file,
+and the processor reuses the GeoTIFF and GPS messages, so a contributor sees the
+same reason everywhere. The browser mirrors the name and GPS rules in
+`frontend/src/utils/uploadRules.ts` and `photoGps.ts`; keep them in step. Rules here only reject inputs the processor is certain to fail
 on; anything merely risky is a browser warning, not a rejection.
 
 The browser cannot see how many bands a TIFF in a ZIP has, so the API alone
 rejects a ZIP whose only photos are single-band TIFFs (DT-1584).
 """
 
+import io
+import math
 import re
 import struct
+import tempfile
 import zipfile
 import zlib
 from pathlib import Path, PurePosixPath
@@ -20,6 +23,8 @@ from typing import Iterable
 import rasterio
 from rasterio.errors import CRSError, RasterioError
 from rasterio.transform import Affine
+
+from shared.photo_gps import has_gps_position
 
 # Photo formats the ODM run accepts from a raw-image ZIP.
 RAW_IMAGE_EXTENSIONS = frozenset({'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.dng', '.raw', '.bmp', '.webp'})
@@ -36,6 +41,21 @@ MULTISPECTRAL_ONLY_MESSAGE = (
 	'deadtrees.earth needs the RGB photos from the flight. '
 	'Add the RGB JPGs, or upload an RGB orthomosaic as a GeoTIFF.'
 )
+
+
+NO_GPS_MESSAGE = (
+	'None of the checked photos in this ZIP has a GPS position, so they cannot be placed on the map. '
+	'Upload the original drone photos with their GPS data. '
+	'If these files are already orthomosaics, upload each .tif directly as a GeoTIFF.'
+)
+# Photos read for GPS, spread evenly over the ZIP, so the check stays a few reads long.
+GPS_SAMPLE_SIZE = 5
+# How far into a compressed photo the check may read. Some TIFFs keep their metadata
+# at the very end (dataset 15632: 485 MB each); a photo whose metadata lies further
+# counts as unreadable. Each photo is decompressed at most once up to this point.
+GPS_READ_LIMIT_BYTES = 512 * 1024 * 1024
+# Decompressed bytes kept in memory per photo before the copy moves to a temporary file.
+_SPOOL_MEMORY_BYTES = 16 * 1024 * 1024
 
 
 class UnprocessableUploadError(ValueError):
@@ -99,6 +119,32 @@ def raw_image_names(entry_names: Iterable[str]) -> list[str]:
 	]
 
 
+def _photo_key(name: str) -> str:
+	"""A JPG and its DNG twin are one photo."""
+	return str(PurePosixPath(name).with_suffix('')).lower()
+
+
+def rgb_photo_names(entry_names: Iterable[str]) -> list[str]:
+	"""One entry per photo: RGB images only, preferring a JPG over its DNG twin, sorted by name."""
+	photos: dict[str, str] = {}
+	for name in sorted(raw_image_names(entry_names)):
+		if is_multispectral_band(name):
+			continue
+		key = _photo_key(name)
+		if key not in photos or PurePosixPath(photos[key]).suffix.lower() in RAW_CAMERA_EXTENSIONS:
+			photos[key] = name
+	return sorted(photos.values())
+
+
+def gps_sample(photo_names: list[str], size: int = GPS_SAMPLE_SIZE) -> list[str]:
+	"""Up to ``size`` photos spread evenly from first to last, so one bad stretch cannot decide alone."""
+	if len(photo_names) <= size:
+		return list(photo_names)
+	step = (len(photo_names) - 1) / (size - 1)
+	# Rounds halves up like the browser's Math.round, so both pick the same photos.
+	return [photo_names[math.floor(i * step + 0.5)] for i in range(size)]
+
+
 def check_raw_image_names(entry_names: Iterable[str]) -> None:
 	"""Reject a raw-image ZIP that cannot be stitched into an orthomosaic."""
 	images = raw_image_names(entry_names)
@@ -112,7 +158,7 @@ def check_raw_image_names(entry_names: Iterable[str]) -> None:
 			'Check that the photos are inside the archive.'
 		)
 	# A JPG and its DNG twin are one photo; the processor drops the DNG.
-	if len({str(PurePosixPath(name).with_suffix('')).lower() for name in rgb_images}) == 1:
+	if len({_photo_key(name) for name in rgb_images}) == 1:
 		raise UnprocessableUploadError(
 			'This ZIP contains only one image, and an orthomosaic needs many overlapping photos. '
 			'If this image is already an orthomosaic, upload the .tif file directly as a GeoTIFF.'
@@ -140,10 +186,108 @@ def _check_tiff_band_counts(archive: zipfile.ZipFile) -> None:
 	raise UnprocessableUploadError(MULTISPECTRAL_ONLY_MESSAGE)
 
 
+class _BoundedReader(io.RawIOBase):
+	"""A ZIP entry that reads as empty past ``limit``, decompressed at most once.
+
+	Parsers seek freely (Pillow asks a TIFF for its size by seeking to the end and
+	jumps back and forth between tags), and every backward seek in a compressed
+	entry restarts its decompression. This view reads the entry strictly forward,
+	keeps what it decompressed in a spooled copy and serves every read from that
+	copy. ``reached_limit`` tells whether a read was cut short by the limit, so a
+	parser's answer may rest on missing bytes.
+	"""
+
+	def __init__(self, raw, size: int, limit: int):
+		self._raw, self._size, self._limit = raw, size, limit
+		self._copy = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MEMORY_BYTES)
+		self._copied = 0
+		self._position = 0
+		self.reached_limit = False
+
+	def readable(self) -> bool:
+		return True
+
+	def seekable(self) -> bool:
+		return True
+
+	def tell(self) -> int:
+		return self._position
+
+	def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+		base = {io.SEEK_SET: 0, io.SEEK_CUR: self._position, io.SEEK_END: self._size}[whence]
+		self._position = max(base + offset, 0)
+		return self._position
+
+	def _copy_up_to(self, end: int) -> None:
+		self._copy.seek(self._copied)
+		while self._copied < end:
+			chunk = self._raw.read(min(end - self._copied, 1024 * 1024))
+			if not chunk:
+				break
+			self._copy.write(chunk)
+			self._copied += len(chunk)
+
+	def readinto(self, buffer) -> int:
+		end = min(self._position + len(buffer), self._size)
+		if end > self._limit:
+			self.reached_limit = True
+			end = self._limit
+		if end <= self._position:
+			return 0
+		self._copy_up_to(end)
+		self._copy.seek(self._position)
+		data = self._copy.read(min(end, self._copied) - self._position)
+		buffer[: len(data)] = data
+		self._position += len(data)
+		return len(data)
+
+	def close(self) -> None:
+		self._copy.close()
+		super().close()
+
+
+def photos_lack_gps(answers: Iterable[bool | None]) -> bool:
+	"""True when photos were checked and every one was read and has no GPS position.
+
+	ODM cannot place such photos, and the platform has no ground control point
+	input. A photo whose metadata cannot be read never counts against the upload.
+	"""
+	answers = list(answers)
+	return bool(answers) and all(answer is False for answer in answers)
+
+
+def check_photo_positions(archive: zipfile.ZipFile, read_limit: int = GPS_READ_LIMIT_BYTES) -> None:
+	"""Reject a ZIP whose sampled photos all lack a GPS position."""
+	answers = []
+	for name in gps_sample(rgb_photo_names(archive.namelist())):
+		try:
+			with archive.open(name) as entry, _BoundedReader(entry, archive.getinfo(name).file_size, read_limit) as view:
+				answer = has_gps_position(io.BufferedReader(view))
+				# "No GPS" read from a cut-off copy is no evidence.
+				answers.append(None if answer is False and view.reached_limit else answer)
+		except (RuntimeError, OSError, zipfile.BadZipFile, zlib.error):
+			# Encrypted or damaged entries are not this rule's call; leave them to the processor.
+			return
+		if answers[-1] is not False:
+			return
+	if photos_lack_gps(answers):
+		raise UnprocessableUploadError(NO_GPS_MESSAGE)
+
+
 def ensure_processable_zip(zip_path: Path) -> None:
 	with zipfile.ZipFile(zip_path, 'r') as archive:
 		check_raw_image_names(archive.namelist())
 		_check_tiff_band_counts(archive)
+		check_photo_positions(archive)
+
+
+def ensure_processable_upload(path: Path) -> None:
+	"""Apply the rules for the upload type the API derives from the file extension."""
+	suffix = path.suffix.lower()
+	if suffix == '.zip':
+		ensure_processable_zip(path)
+	elif suffix in TIFF_EXTENSIONS:
+		ensure_georeferenced_geotiff(path)
 
 
 def missing_crs_message(src) -> str | None:

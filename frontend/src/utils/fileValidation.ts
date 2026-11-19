@@ -1,7 +1,16 @@
 import { UploadType } from "../types/dataset";
-import { unzipRaw } from "unzipit";
+import { unzipRaw, type ZipEntry } from "unzipit";
 import { fromBlob } from "geotiff";
-import { checkGeoTiffGeoreference, checkRawImageNames, type GeoTiffGeoreference } from "./uploadRules";
+import { hasGpsPosition } from "./photoGps";
+import {
+  checkGeoTiffGeoreference,
+  checkRawImageNames,
+  gpsSample,
+  NO_GPS_MESSAGE,
+  photosLackGps,
+  rgbPhotoNames,
+  type GeoTiffGeoreference,
+} from "./uploadRules";
 
 export const detectUploadType = (fileName: string): UploadType => {
   const ext = fileName.toLowerCase().split(".").pop();
@@ -144,10 +153,8 @@ export const validateGeoTiffUpload = async (file: Blob): Promise<string[]> => {
 const ALLOWED_ZIP_METHODS = new Set([0, 8]); // stored, deflate
 const ALLOWED_ZIP_METHODS_TEXT = "stored (method 0), deflate (method 8)";
 
-type ZipEntryWithCompressionMethod = {
-  name: string;
-  compressionMethod?: number;
-};
+// unzipit reads the compression method but leaves it out of its ZipEntry type.
+type ZipEntryWithCompressionMethod = ZipEntry & { compressionMethod?: number };
 
 const methodName = (method: number): string => {
   switch (method) {
@@ -202,6 +209,33 @@ const zipInspectionErrorMessage = (error: unknown): string => {
     "No upload has started. Code: ZIP_INSPECTION_FAILED.";
 };
 
+// Largest photo the browser unpacks to read its metadata. A larger one counts as
+// unreadable; the API checks it after upload, reading up to 512 MB per photo.
+export const GPS_READ_LIMIT_BYTES = 256 * 1024 * 1024;
+
+type ZipPhotoEntry = Pick<ZipEntry, "name" | "size" | "arrayBuffer">;
+
+const readGpsAnswer = async (entry: ZipPhotoEntry): Promise<boolean | null> => {
+  if (entry.size > GPS_READ_LIMIT_BYTES) return null;
+  try {
+    return hasGpsPosition(new Uint8Array(await entry.arrayBuffer()));
+  } catch {
+    return null;
+  }
+};
+
+/** Rejects a ZIP whose sampled photos were all read and none has a GPS position. */
+export const checkPhotoPositions = async (entries: ZipPhotoEntry[]): Promise<void> => {
+  const byName = new Map(entries.map((entry) => [entry.name, entry]));
+  const answers: (boolean | null)[] = [];
+  for (const name of gpsSample(rgbPhotoNames([...byName.keys()]))) {
+    const answer = await readGpsAnswer(byName.get(name)!);
+    answers.push(answer);
+    if (answer !== false) return;
+  }
+  if (photosLackGps(answers)) throw new Error(NO_GPS_MESSAGE);
+};
+
 /** Rejects ZIPs we cannot read or process and returns warnings for risky ones. */
 export const validateZipUpload = async (file: File): Promise<string[]> => {
   let entries: ZipEntryWithCompressionMethod[] = [];
@@ -232,5 +266,7 @@ export const validateZipUpload = async (file: File): Promise<string[]> => {
     );
   }
 
-  return checkRawImageNames(entries.map((entry) => entry.name));
+  const warnings = checkRawImageNames(entries.map((entry) => entry.name));
+  await checkPhotoPositions(entries);
+  return warnings;
 };

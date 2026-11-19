@@ -43,6 +43,40 @@ const rawImageNames = (entryNames: string[]) =>
       RAW_IMAGE_EXTENSIONS.has(extension(name)),
   );
 
+export const NO_GPS_MESSAGE =
+  "None of the checked photos in this ZIP has a GPS position, so they cannot be placed on the map. " +
+  "Upload the original drone photos with their GPS data. " +
+  "If these files are already orthomosaics, upload each .tif directly as a GeoTIFF.";
+// Photos read for GPS, spread evenly over the ZIP, so the check stays a few reads long.
+export const GPS_SAMPLE_SIZE = 5;
+
+const photoKey = (name: string) =>
+  name.slice(0, name.length - extension(name).length).toLowerCase();
+
+/** One entry per photo: RGB images only, preferring a JPG over its DNG twin, sorted by name. */
+export const rgbPhotoNames = (entryNames: string[]): string[] => {
+  const photos = new Map<string, string>();
+  for (const name of [...rawImageNames(entryNames)].sort()) {
+    if (isMultispectralBand(name)) continue;
+    const kept = photos.get(photoKey(name));
+    if (kept === undefined || RAW_CAMERA_EXTENSIONS.has(extension(kept))) {
+      photos.set(photoKey(name), name);
+    }
+  }
+  return [...photos.values()].sort();
+};
+
+/** Up to `size` photos spread evenly from first to last, so one bad stretch cannot decide alone. */
+export const gpsSample = (photoNames: string[], size = GPS_SAMPLE_SIZE): string[] => {
+  if (photoNames.length <= size) return [...photoNames];
+  const step = (photoNames.length - 1) / (size - 1);
+  return Array.from({ length: size }, (_, i) => photoNames[Math.floor(i * step + 0.5)]);
+};
+
+/** True when photos were checked and every one was read and has no GPS position. */
+export const photosLackGps = (answers: (boolean | null)[]): boolean =>
+  answers.length > 0 && answers.every((answer) => answer === false);
+
 /** Throws for a ZIP that cannot process; returns warnings for a risky one. */
 export const checkRawImageNames = (entryNames: string[]): string[] => {
   const images = rawImageNames(entryNames);
@@ -62,11 +96,7 @@ export const checkRawImageNames = (entryNames: string[]): string[] => {
     );
   }
   // A JPG and its DNG twin are one photo; the processor drops the DNG.
-  const photoCount = new Set(
-    rgbImages.map((name) =>
-      name.slice(0, name.length - extension(name).length).toLowerCase(),
-    ),
-  ).size;
+  const photoCount = new Set(rgbImages.map(photoKey)).size;
   if (photoCount === 1) {
     throw new Error(
       "This ZIP contains only one image, and an orthomosaic needs many overlapping photos. " +

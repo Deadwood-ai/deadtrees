@@ -30,6 +30,8 @@ setup(
 		'pydantic-partial>=0.3.1',
 		'pydantic-settings>=2.0.0',
 		'fiona>=1.9.0',
+		# Reads photo metadata for the GPS check before an upload (shared/photo_gps.py).
+		'pillow>=10.0.0',
 	],
 	extras_require={
 		'test': [
