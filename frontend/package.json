@@ -25,7 +25,7 @@
   "dependencies": {
     "@ant-design/charts": "^2.6.7",
     "@ant-design/icons": "^5.6.1",
-    "@esri/wayback-core": "^1.1.0",
+    "@esri/wayback-core": "^2.0.0",
     "@geoapify/geocoder-autocomplete": "^2.2.1",
     "@geoapify/react-geocoder-autocomplete": "^2.0.1",
     "@supabase/supabase-js": "^2.118.0",
