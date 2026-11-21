@@ -28,7 +28,9 @@ GitHub Actions on pushes to `main`:
   Firebase live channel when `frontend/**` changes.
 - `.github/workflows/supabase-migrate-on-merge.yml` runs
   `supabase migration up --db-url "$SUPABASE_DB_URL_PROD"` when `supabase/**`
-  changes.
+  changes. The job runs in the `production` environment: it waits for a
+  maintainer to approve it under the run's "Review deployments", and only
+  `main` can use the environment's database secret.
 - `.github/workflows/create-release.yml` creates the CalVer GitHub Release and
   builds/pushes the API image to `ghcr.io/deadwood-ai/deadwood-api`.
 
