@@ -875,6 +875,9 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
     source?.clear();
     if (selectRef.current) selectRef.current.getFeatures().clear();
     setSelection([]);
+    // A cleared editor starts over: undo must not bring back what was removed here.
+    historyRef.current = [];
+    setCanUndo(false);
   }, []);
 
   const setOverlayVisible = useCallback((visible: boolean) => {

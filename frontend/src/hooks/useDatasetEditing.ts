@@ -10,6 +10,8 @@ import type { User } from "@supabase/supabase-js";
 
 import usePolygonEditor from "./usePolygonEditor";
 import useAISegmentation from "./useAISegmentation";
+import { useAreaTools } from "./useAreaTools";
+import { addArea } from "../utils/areaEdits";
 import {
   usePredictionLabel,
   useLoadGeometriesForEditing,
@@ -86,7 +88,10 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
   });
 
   const { data: predictionLabel } = usePredictionLabel(datasetId, editingLayerType);
-  const { data: loadedGeometries } = useLoadGeometriesForEditing(predictionLabel?.id, editingLayerType);
+  const { data: loadedGeometries, isFetching: isFetchingGeometries } = useLoadGeometriesForEditing(
+    predictionLabel?.id,
+    editingLayerType,
+  );
   const saveCorrections = useSaveCorrections();
 
   // Editor hooks
@@ -98,6 +103,17 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     onBeforeAddFeatures: editor.saveHistorySnapshot,
   });
   const disableAI = ai.disable;
+  const areaTools = useAreaTools({
+    mapRef: mapRef as React.MutableRefObject<OLMap | null>,
+    getTargetSource: () => editor.getOverlayLayer()?.getSource(),
+    onBeforeChange: editor.saveHistorySnapshot,
+    findInArea: ai.findInArea,
+  });
+  const { cancel: cancelAreaTool, discardPreview } = areaTools;
+  // Text for "Find in area"; follows the layer until the user types their own.
+  const [findPrompt, setFindPrompt] = useState("");
+  // Polygons copied from the other layer, merged in once that layer has loaded.
+  const pendingCopyRef = useRef<Geometry[]>([]);
 
   // Derived state
   const hasDeadwood = !!deadwoodLabel.data?.id;
@@ -148,6 +164,13 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     [datasetId, user, navigate, editor, emitDebugEvent, hasDeadwood, hasForestCover]
   );
 
+  /** Ends AI, area drawing and any search preview; unlocks the map. */
+  const stopTools = useCallback(() => {
+    disableAI();
+    cancelAreaTool();
+    discardPreview();
+  }, [disableAI, cancelAreaTool, discardPreview]);
+
   // Cancel editing
   const handleCancelEditing = useCallback(() => {
     if (datasetId && editingLayerType) {
@@ -156,18 +179,21 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         layer_type: editingLayerType,
       });
     }
-    disableAI(); // ends an AI refine session and unlocks the map
+    stopTools();
     editor.stopEditing();
     editor.getOverlayLayer()?.getSource()?.clear();
     setIsEditing(false);
     setEditingLayerType(null);
     setInitialFeatures([]);
     message.info("Editing cancelled");
-  }, [datasetId, editingLayerType, editor, disableAI]);
+  }, [datasetId, editingLayerType, editor, stopTools]);
 
-  // Save edits
-  const handleSaveEdits = useCallback(async () => {
-    if (!predictionLabel?.id || !editingLayerType || !user?.id || !datasetId) return;
+  /**
+   * Saves the active layer's changes and keeps editing. Returns false when the save failed,
+   * true when it was saved or there was nothing to save.
+   */
+  const saveCurrentLayer = useCallback(async ({ quiet = false } = {}): Promise<boolean> => {
+    if (!predictionLabel?.id || !editingLayerType || !user?.id || !datasetId) return false;
 
     setIsSaving(true);
     try {
@@ -187,9 +213,8 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
       });
 
       if (deletions.length === 0 && additions.length === 0) {
-        message.info("No changes to save");
-        setIsSaving(false);
-        return;
+        if (!quiet) message.info("No changes to save");
+        return true;
       }
 
       const result = await saveCorrections.mutateAsync({
@@ -212,8 +237,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         } else {
           message.error(result.message);
         }
-        setIsSaving(false);
-        return;
+        return false;
       }
 
       message.success("Corrections saved successfully!");
@@ -221,13 +245,8 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         dataset_id: datasetId,
         layer_type: editingLayerType,
       });
-      disableAI(); // ends an AI refine session and unlocks the map
-      editor.stopEditing();
-      editor.getOverlayLayer()?.getSource()?.clear();
-      setIsEditing(false);
-      setEditingLayerType(null);
-      setInitialFeatures([]);
       setRefreshKey((k) => k + 1);
+      return true;
     } catch (error) {
       console.error("Failed to save corrections:", error);
       const errorMsg = error instanceof Error ? error.message : "unknown";
@@ -238,14 +257,61 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
       } else {
         message.error("Failed to save corrections");
       }
+      return false;
     } finally {
       setIsSaving(false);
     }
-  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, auditLeaseId, disableAI]);
+  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, auditLeaseId]);
+
+  // Save edits and leave editing
+  const handleSaveEdits = useCallback(async () => {
+    if (!(await saveCurrentLayer())) return;
+    stopTools();
+    editor.stopEditing();
+    editor.getOverlayLayer()?.getSource()?.clear();
+    setIsEditing(false);
+    setEditingLayerType(null);
+    setInitialFeatures([]);
+  }, [saveCurrentLayer, stopTools, editor]);
+
+  /**
+   * Switches the session to the other prediction layer: saves the active one first, then loads
+   * the other. `copy` polygons are merged into the new layer as one undo step.
+   */
+  const switchLayer = useCallback(async (target: LayerType, copy: Geometry[] = []) => {
+    if (!isEditing || isSaving || target === editingLayerType) return;
+    if (ai.isProcessing) {
+      message.info("Wait for the AI to finish before switching layers.");
+      return;
+    }
+    if (target === "deadwood" ? !hasDeadwood : !hasForestCover) {
+      message.info(`This dataset has no ${target === "deadwood" ? "deadwood" : "tree cover"} layer.`);
+      return;
+    }
+    if (!(await saveCurrentLayer({ quiet: true }))) return;
+    stopTools();
+    pendingCopyRef.current = copy;
+    hasLoadedFeatures.current = false;
+    // Start the new layer clean: no features, selection or undo steps from the old one.
+    editor.clearAll();
+    setInitialFeatures([]);
+    setFindPrompt("");
+    setEditingLayerType(target);
+  }, [isEditing, isSaving, editingLayerType, hasDeadwood, hasForestCover, ai.isProcessing, saveCurrentLayer, stopTools, editor]);
+
+  /** Copies the selected polygons into the other layer and switches to it. */
+  const copySelectionToOtherLayer = useCallback(() => {
+    const copies = editor.selection.map((f) => f.getGeometry()?.clone()).filter((g): g is Geometry => !!g);
+    if (copies.length === 0 || !editingLayerType) {
+      message.info("Select the polygons to copy first.");
+      return;
+    }
+    void switchLayer(editingLayerType === "deadwood" ? "forest_cover" : "deadwood", copies);
+  }, [editor.selection, editingLayerType, switchLayer]);
 
   // Load geometries into editor when editing starts
   useEffect(() => {
-    if (isEditing && loadedGeometries && editingLayerType && mapRef.current && !hasLoadedFeatures.current) {
+    if (isEditing && loadedGeometries && !isFetchingGeometries && editingLayerType && mapRef.current && !hasLoadedFeatures.current) {
       emitDebugEvent("load-geometries:effect-enter", {
         layerType: editingLayerType,
         loadedCount: loadedGeometries.length,
@@ -270,6 +336,17 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         hasLoadedFeatures.current = true;
         overlaySource.clear();
         loadedGeometries.forEach((f) => overlaySource.addFeature(f));
+        const copies = pendingCopyRef.current;
+        pendingCopyRef.current = [];
+        if (copies.length > 0) {
+          editor.saveHistorySnapshot();
+          for (const geometry of copies) {
+            const edit = addArea(overlaySource.getFeatures() as Feature<Geometry>[], geometry);
+            edit.removed.forEach((f) => overlaySource.removeFeature(f));
+            overlaySource.addFeatures(edit.added);
+          }
+          message.success(`Copied ${copies.length} polygons. Save to keep them.`);
+        }
         emitDebugEvent("load-geometries:overlay-populated", {
           loadedCount: loadedGeometries.length,
           overlayCount: overlaySource.getFeatures().length,
@@ -285,7 +362,9 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
       hasLoadedFeatures.current = false;
       emitDebugEvent("load-geometries:editing-stopped");
     }
-  }, [isEditing, loadedGeometries, editingLayerType, editor, emitDebugEvent]);
+  }, [isEditing, loadedGeometries, isFetchingGeometries, editingLayerType, editor, emitDebugEvent]);
+
+  const findPromptText = findPrompt || (editingLayerType === "deadwood" ? "dead tree" : "tree");
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -311,6 +390,32 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key.toLowerCase()) {
+        case "1":
+          e.preventDefault();
+          void switchLayer("deadwood");
+          break;
+        case "2":
+          e.preventDefault();
+          void switchLayer("forest_cover");
+          break;
+        case "q":
+          e.preventDefault();
+          areaTools.start("add");
+          break;
+        case "e":
+          e.preventDefault();
+          areaTools.start("remove");
+          break;
+        case "f":
+          e.preventDefault();
+          areaTools.start("find", findPromptText);
+          break;
+        case "t":
+          if (editor.selection?.length > 0) {
+            e.preventDefault();
+            copySelectionToOtherLayer();
+          }
+          break;
         case "s":
           e.preventDefault();
           ai.isActive ? ai.disable() : ai.enable();
@@ -348,7 +453,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isEditing, editor, ai, handleSaveEdits, handleCancelEditing]);
+  }, [isEditing, editor, ai, areaTools, findPromptText, switchLayer, copySelectionToOtherLayer, handleSaveEdits, handleCancelEditing]);
 
   return {
     // State
@@ -364,6 +469,9 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     // Editor instances
     editor,
     ai,
+    areaTools,
+    findPrompt: findPromptText,
+    setFindPrompt,
 
     // Callbacks
     handleMapReady,
@@ -371,5 +479,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
     handleStartEditing,
     handleCancelEditing,
     handleSaveEdits,
+    switchLayer,
+    copySelectionToOtherLayer,
   };
 }

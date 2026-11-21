@@ -790,7 +790,6 @@ export default function ReferencePatchEditorView({
             onMerge={editor.mergeSelected}
             onClip={editor.clipSelected}
             onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
-            onFindTrees={() => void ai.findConcept("tree")}
             onDeleteSelected={editor.deleteSelected}
             onUndo={editor.undo}
             canUndo={editor.canUndo}

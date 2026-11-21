@@ -8,8 +8,8 @@ import {
   RobotOutlined,
   DeleteOutlined,
   UndoOutlined,
-  SearchOutlined,
 } from "@ant-design/icons";
+import AreaToolsPanel, { type AreaToolsPanelProps } from "./AreaToolsPanel";
 
 interface Props {
   type: "deadwood" | "forest_cover";
@@ -23,8 +23,8 @@ interface Props {
   onMerge: () => void;
   onClip: () => void;
   onToggleAI: () => void;
-  /** Tree cover only: outline every tree in the current view with the AI. */
-  onFindTrees?: () => void;
+  /** Layer switch, area tools and copy between layers; editors without them leave this out. */
+  areaTools?: AreaToolsPanelProps;
   onDeleteSelected: () => void;
   onUndo: () => void;
   canUndo: boolean;
@@ -47,7 +47,7 @@ export default function EditorToolbar({
   onMerge,
   onClip,
   onToggleAI,
-  onFindTrees,
+  areaTools,
   onDeleteSelected,
   onUndo,
   canUndo,
@@ -64,7 +64,7 @@ export default function EditorToolbar({
       <Card
         title={displayTitle}
         className="shadow-lg"
-        style={{ width: 180 }}
+        style={{ width: areaTools ? 200 : 180 }}
         size="small"
       >
         <Space direction="vertical" size="small" className="w-full">
@@ -134,17 +134,12 @@ export default function EditorToolbar({
             {isAIActive ? "Finish AI (S)" : "AI (S)"}
           </Button>
 
-          {type === "forest_cover" && onFindTrees && (
-            <Button
-              icon={<SearchOutlined />}
-              onClick={onFindTrees}
-              disabled={isAIActive || isAIProcessing}
-              block
-              title="Find trees - Outline every tree in the current view with AI"
-              htmlType="button"
-            >
-              Find trees
-            </Button>
+          {areaTools && (
+            <>
+              <Divider style={{ margin: "4px 0" }} />
+              <AreaToolsPanel {...areaTools} />
+              <Divider style={{ margin: "4px 0" }} />
+            </>
           )}
 
           {/* Delete */}
