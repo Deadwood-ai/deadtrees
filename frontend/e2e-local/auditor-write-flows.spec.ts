@@ -523,6 +523,66 @@ test.describe("auditor local write flows", () => {
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
+  test("a double click on Save stores the drawn polygon once", async ({ page }) => {
+    await seedDeadwoodPrediction();
+    const { data: label, error: labelError } = await adminClient
+      .from("v2_labels")
+      .select("id")
+      .eq("dataset_id", datasetId)
+      .eq("label_data", "deadwood")
+      .single();
+    expect(labelError).toBeNull();
+    const countAdds = async () => {
+      const { count, error } = await adminClient
+        .from("v2_geometry_corrections")
+        .select("id", { count: "exact", head: true })
+        .eq("label_id", label!.id)
+        .eq("operation", "add");
+      expect(error).toBeNull();
+      return count ?? 0;
+    };
+    const addsBefore = await countAdds();
+
+    // A slow save leaves time for the second click, as on a slow connection.
+    await page.route("**/rest/v1/rpc/save_prediction_corrections", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      await route.continue();
+    });
+    await installAuditorSession(page);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    await expect(page.getByRole("status", { name: "Securing the audit lock" })).toBeHidden({
+      timeout: 20_000,
+    });
+    const continueHere = page.getByRole("button", { name: "Continue here" });
+    const editDeadwood = page.getByRole("button", { name: "Edit deadwood cover" });
+    await expect(editDeadwood.or(continueHere).first()).toBeVisible({ timeout: 20_000 });
+    if (await continueHere.isVisible()) await continueHere.click();
+    await editDeadwood.click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
+
+    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    const at = (fx: number, fy: number) => ({ x: bounds.x + bounds.width * fx, y: bounds.y + bounds.height * fy });
+    await page.getByRole("button", { name: /Draw \(A\)/ }).click();
+    for (const point of [at(0.5, 0.3), at(0.6, 0.3), at(0.55, 0.4), at(0.5, 0.3)]) {
+      await page.mouse.click(point.x, point.y);
+      await page.waitForTimeout(700);
+    }
+    await expect(page.getByRole("button", { name: /Draw \(A\)/ })).toBeVisible();
+
+    await page.getByRole("button", { name: /Save \(⌘S\)/ }).dblclick();
+    await expect(page.getByText("Corrections saved successfully!").first()).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(1500);
+    expect(await countAdds()).toBe(addsBefore + 1);
+
+    // The saved corrections would block deleting the seeded label after the suite.
+    const { error: cleanupError } = await adminClient
+      .from("v2_geometry_corrections")
+      .delete()
+      .eq("label_id", label!.id);
+    expect(cleanupError).toBeNull();
+  });
+
   test("a freehand stroke keeps the polygon open unless it ends on the first vertex", async ({ page }) => {
     await installAuditorSession(page);
     await page.goto(`/dataset-audit/${datasetId}`);
