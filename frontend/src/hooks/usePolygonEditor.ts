@@ -3,7 +3,7 @@ import Map from "ol/Map";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Draw, Modify, Select } from "ol/interaction";
-import { click, shiftKeyOnly } from "ol/events/condition";
+import { click } from "ol/events/condition";
 import Feature from "ol/Feature";
 import Geometry from "ol/geom/Geometry";
 import Polygon from "ol/geom/Polygon";
@@ -15,7 +15,7 @@ import GeoJSON from "ol/format/GeoJSON";
 import { union as geomUnion, difference as geomDifference } from "../utils/geometry";
 import { message } from "antd";
 import { palette } from "../theme/palette";
-import { createPolygonFinishGuard } from "../components/PolygonEditor/polygonFinishGuard";
+import { EditorPolygonDraw } from "../components/PolygonEditor/polygonFinishGuard";
 
 export interface UsePolygonEditorParams {
   mapRef: React.RefObject<Map | null>;
@@ -519,16 +519,11 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
           stroke: new Stroke({ color: palette.state.selected, width: 4 }), // Orange, thick stroke
         });
 
-        const finishGuard = createPolygonFinishGuard();
-        const draw = new Draw({
+        // Click to place vertices, or hold Shift for freehand.
+        const draw = new EditorPolygonDraw({
           source: (source as unknown as VectorSource)!,
-          type: "Polygon",
-          freehand: false, // Standard click-to-draw by defaulta
-          freehandCondition: shiftKeyOnly, // Enable freehand when Shift is held
           style: sketchStyle, // Apply bright style to sketch
-          ...finishGuard.options,
         });
-        finishGuard.attach(draw);
         mapRef.current.addInteraction(draw);
         drawRef.current = draw;
         setIsDrawing(true);
@@ -748,16 +743,11 @@ export default function usePolygonEditor({ mapRef }: UsePolygonEditorParams): Us
       stroke: new Stroke({ color: palette.state.selected, width: 4 }), // Orange, thick stroke
     });
 
-    const finishGuard = createPolygonFinishGuard();
-    const draw = new Draw({
+    // Click to place vertices, or hold Shift for freehand.
+    const draw = new EditorPolygonDraw({
       source: tempSource as unknown as VectorSource,
-      type: "Polygon",
-      freehand: false, // Standard click-to-draw by default
-      freehandCondition: shiftKeyOnly, // Enable freehand when Shift is held
       style: sketchStyle, // Apply bright style to sketch
-      ...finishGuard.options,
     });
-    finishGuard.attach(draw);
     mapRef.current.addInteraction(draw);
     drawRef.current = draw;
     setIsDrawing(true);

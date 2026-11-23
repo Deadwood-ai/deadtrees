@@ -522,6 +522,63 @@ test.describe("auditor local write flows", () => {
 
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   });
+
+  test("a freehand stroke keeps the polygon open unless it ends on the first vertex", async ({ page }) => {
+    await installAuditorSession(page);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    await expect(page.getByRole("status", { name: "Securing the audit lock" })).toBeHidden({
+      timeout: 20_000,
+    });
+    const continueHere = page.getByRole("button", { name: "Continue here" });
+    const editDeadwood = page.getByRole("button", { name: "Edit deadwood cover" });
+    await expect(editDeadwood.or(continueHere).first()).toBeVisible({ timeout: 20_000 });
+    if (await continueHere.isVisible()) await continueHere.click();
+    await editDeadwood.click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
+    await expect(page.locator(".ant-message-notice")).toHaveCount(0, { timeout: 10_000 });
+
+    // The editing sidebar covers the left third of the map and the toolbar its right edge.
+    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    const at = (fx: number, fy: number) => ({ x: bounds.x + bounds.width * fx, y: bounds.y + bounds.height * fy });
+    const stroke = async (points: { x: number; y: number }[]) => {
+      await page.keyboard.down("Shift");
+      await page.mouse.move(points[0].x, points[0].y);
+      await page.mouse.down();
+      for (const point of points.slice(1)) await page.mouse.move(point.x, point.y, { steps: 8 });
+      await page.mouse.up();
+      await page.keyboard.up("Shift");
+      await page.waitForTimeout(700);
+    };
+    const drawButton = page.getByRole("button", { name: /Draw \(A\)/ });
+    const stopButton = page.getByRole("button", { name: /Stop \(A\)/ });
+
+    await drawButton.click();
+    const start = at(0.45, 0.3);
+    await stroke([start, at(0.55, 0.28), at(0.6, 0.35)]);
+    // Releasing the stroke away from its start used to finish the polygon.
+    await expect(stopButton).toBeVisible();
+    // A Shift-click without a drag used to throw the outline away.
+    await page.keyboard.down("Shift");
+    await page.mouse.click(at(0.6, 0.45).x, at(0.6, 0.45).y);
+    await page.keyboard.up("Shift");
+    await page.waitForTimeout(700);
+    await expect(stopButton).toBeVisible();
+    // Clicks and further strokes extend the same outline.
+    await page.mouse.click(at(0.6, 0.5).x, at(0.6, 0.5).y);
+    await page.waitForTimeout(700);
+    await expect(stopButton).toBeVisible();
+    // A stroke that ends on the first vertex closes it.
+    await stroke([at(0.6, 0.5), at(0.5, 0.52), at(0.45, 0.45), start]);
+    await expect(drawButton).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath("freehand-polygon.png"),
+      clip: { x: bounds.x + bounds.width * 0.4, y: bounds.y + bounds.height * 0.2, width: bounds.width * 0.25, height: bounds.height * 0.4 },
+    });
+    await expect(page.getByRole("button", { name: /Undo/ })).toBeEnabled();
+
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
 });
 
 async function expectLocalService(url: string, name: string) {

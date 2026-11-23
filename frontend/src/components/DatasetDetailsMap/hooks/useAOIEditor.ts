@@ -6,12 +6,12 @@ import type Geometry from "ol/geom/Geometry";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Draw, Modify, Select } from "ol/interaction";
-import { click, shiftKeyOnly } from "ol/events/condition";
+import { click } from "ol/events/condition";
 import { Circle as CircleStyle, Fill, Stroke, Style } from "ol/style";
 
 import { mapColors } from "../../../theme/mapColors";
 import { palette } from "../../../theme/palette";
-import { createPolygonFinishGuard } from "../../PolygonEditor/polygonFinishGuard";
+import { EditorPolygonDraw } from "../../PolygonEditor/polygonFinishGuard";
 import {
 	clipAOIGeometries,
 	cutAOIGeometry,
@@ -181,12 +181,8 @@ export function useAOIEditor({
 		clearInteractions();
 		setEditableLayerVisibility(true);
 
-		const finishGuard = createPolygonFinishGuard();
-		const draw = new Draw({
+		const draw = new EditorPolygonDraw({
 			source,
-			type: "Polygon",
-			freehandCondition: shiftKeyOnly,
-			...finishGuard.options,
 			style: new Style({
 				stroke: new Stroke({
 					color: mapColors.aoi.stroke,
@@ -197,7 +193,6 @@ export function useAOIEditor({
 			}),
 		});
 
-		finishGuard.attach(draw);
 		draw.once("drawstart", snapshot);
 		draw.once("drawend", (event) => {
 			const drawnFeature = event.feature;
@@ -425,19 +420,14 @@ export function useAOIEditor({
 		select.setActive(false);
 		modifyInteractionRef.current?.setActive(false);
 
-		const finishGuard = createPolygonFinishGuard();
-		const draw = new Draw({
+		const draw = new EditorPolygonDraw({
 			source: new VectorSource<Feature<Geometry>>(),
-			type: "Polygon",
-			freehandCondition: shiftKeyOnly,
-			...finishGuard.options,
 			style: new Style({
 				stroke: new Stroke({ color: palette.state.selected, width: 3 }),
 				fill: new Fill({ color: "rgba(255, 200, 0, 0.35)" }),
 			}),
 		});
 
-		finishGuard.attach(draw);
 		draw.once("drawend", (event) => {
 			const cutter = event.feature.getGeometry();
 			const cutParts = cutter ? cutAOIGeometry(targetGeometry, cutter) : null;
