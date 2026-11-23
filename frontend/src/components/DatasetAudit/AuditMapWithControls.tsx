@@ -366,6 +366,7 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 						onUndo={editor.undo}
 						canUndo={editor.canUndo}
 						onSave={editing.handleSaveEdits}
+						isSaving={editing.isSaving}
 						onCancel={editing.handleCancelEditing}
 						position="top-right"
 							title={`Editing ${editingLayerType === "deadwood" ? "deadwood cover" : "tree cover"}`}

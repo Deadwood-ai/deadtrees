@@ -29,6 +29,8 @@ interface Props {
   onUndo: () => void;
   canUndo: boolean;
   onSave: () => void;
+  /** A save is running: the Save button shows it and takes no second click. */
+  isSaving?: boolean;
   onCancel: () => void;
   position?: "top-right" | "top-left";
   title?: string; // Allow custom title
@@ -52,6 +54,7 @@ export default function EditorToolbar({
   onUndo,
   canUndo,
   onSave,
+  isSaving = false,
   onCancel,
   position = "top-right",
   title,
@@ -177,6 +180,7 @@ export default function EditorToolbar({
             type="primary"
             icon={<SaveOutlined />}
             onClick={onSave}
+            loading={isSaving}
             block
             htmlType="button"
             title="Save changes (Ctrl/Cmd+S)"
