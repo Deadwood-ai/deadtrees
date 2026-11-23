@@ -470,6 +470,58 @@ test.describe("auditor local write flows", () => {
 
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   });
+
+  test("manual drawing keeps the polygon open on a click near the previous vertex", async ({ page }) => {
+    await installAuditorSession(page);
+    await page.goto(`/dataset-audit/${datasetId}`);
+    await dismissCookieBanner(page);
+    await expect(page.getByRole("status", { name: "Securing the audit lock" })).toBeHidden({
+      timeout: 20_000,
+    });
+    const continueHere = page.getByRole("button", { name: "Continue here" });
+    const editDeadwood = page.getByRole("button", { name: "Edit deadwood cover" });
+    await expect(editDeadwood.or(continueHere).first()).toBeVisible({ timeout: 20_000 });
+    if (await continueHere.isVisible()) await continueHere.click();
+    await editDeadwood.click();
+    await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
+    await expect(page.locator(".ant-message-notice")).toHaveCount(0, { timeout: 10_000 });
+
+    // The editing sidebar covers the left third of the map and the toolbar its right edge.
+    const bounds = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    const at = (fx: number, fy: number) => ({ x: bounds.x + bounds.width * fx, y: bounds.y + bounds.height * fy });
+    // Labelers place vertices one by one, slower than a double-click.
+    const clickSlowly = async (point: { x: number; y: number }) => {
+      await page.mouse.click(point.x, point.y);
+      await page.waitForTimeout(700);
+    };
+    const drawButton = page.getByRole("button", { name: /Draw \(A\)/ });
+    const stopButton = page.getByRole("button", { name: /Stop \(A\)/ });
+
+    await drawButton.click();
+    await expect(stopButton).toBeVisible();
+    const first = at(0.45, 0.3);
+    const third = at(0.6, 0.5);
+    await clickSlowly(first);
+    await clickSlowly(at(0.6, 0.3));
+    await clickSlowly(third);
+    // A vertex 6 px from the previous one used to close the polygon.
+    await clickSlowly({ x: third.x - 6, y: third.y + 3 });
+    await expect(stopButton).toBeVisible();
+    await clickSlowly(at(0.45, 0.5));
+    await expect(stopButton).toBeVisible();
+    // A click on the first vertex closes it.
+    await clickSlowly(first);
+    await expect(drawButton).toBeVisible();
+
+    // A double-click still finishes a polygon.
+    await drawButton.click();
+    await clickSlowly(at(0.5, 0.6));
+    await clickSlowly(at(0.6, 0.6));
+    await page.mouse.dblclick(at(0.6, 0.75).x, at(0.6, 0.75).y);
+    await expect(drawButton).toBeVisible();
+
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
 });
 
 async function expectLocalService(url: string, name: string) {
