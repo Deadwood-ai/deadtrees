@@ -1,6 +1,7 @@
 <!-- Agents write this body with the show-work skill (jstack), from the final diff.
      Keep the six sections in this order; write "none" rather than dropping one.
-     In Projects threads the two attribution lines stay first. -->
+     In Projects threads only the hidden attribution comment stays first, without
+     the visible "Requested by" line. -->
 
 ## Briefing
 

@@ -91,7 +91,14 @@ install_supabase_cli() {
 install_python_env() {
   # Needs ssh-keygen for the local test SSH keys, so it runs after apt.
   bash "$REPO_ROOT/scripts/setup-worktree.sh" \
-    --skip-assets --skip-frontend-install --skip-git-fetch --allow-stale-base
+    --skip-assets --skip-frontend-install --skip-git-fetch --allow-stale-base &&
+    cp "$REPO_ROOT/deadtrees-cli/setup.py" "$REPO_ROOT/venv/installed-setup.py"
+}
+
+python_env_current() {
+  # The environment cache can hold a venv from before a dependency was added.
+  [[ -x "$REPO_ROOT/venv/bin/deadtrees" ]] &&
+    cmp -s "$REPO_ROOT/deadtrees-cli/setup.py" "$REPO_ROOT/venv/installed-setup.py"
 }
 
 install_frontend() {
@@ -250,7 +257,7 @@ session() {
   command -v gdal_translate >/dev/null 2>&1 && command -v ssh-keygen >/dev/null 2>&1 \
     || run_step apt install_apt_packages || true
   command -v supabase >/dev/null 2>&1 || run_step supabase install_supabase_cli || true
-  [[ -x "$REPO_ROOT/venv/bin/deadtrees" ]] || run_step python install_python_env || true
+  python_env_current || run_step python install_python_env || true
   if [[ -d "$REPO_ROOT/frontend/node_modules" ]]; then
     # A no-op when the pinned Chromium is present; retries a failed download.
     run_step playwright install_playwright_browser || true

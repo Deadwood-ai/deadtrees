@@ -22,6 +22,51 @@ def make_repo(tmp_path: Path) -> Path:
 	return repo
 
 
+def run_session(repo: Path, tmp_path: Path) -> list[str]:
+	"""Run `session` with every tool stubbed; return the setup-worktree.sh calls."""
+	stubs = tmp_path / "stubs"
+	stubs.mkdir(exist_ok=True)
+	for name in ("docker", "gdal_translate", "ssh-keygen", "supabase", "sudo", "pkill", "npm"):
+		stub = stubs / name
+		stub.write_text("#!/bin/sh\nexit 0\n")
+		stub.chmod(0o755)
+	# Never root, so the script's root steps go through the stubbed sudo.
+	(stubs / "id").write_text("#!/bin/sh\necho 1000\n")
+	(stubs / "id").chmod(0o755)
+	calls = tmp_path / "calls"
+	calls.write_text("")
+	(repo / "scripts" / "setup-worktree.sh").write_text(
+		f'mkdir -p "{repo}/venv/bin"\necho install >>"{calls}"\n'
+		f'touch "{repo}/venv/bin/deadtrees"\nchmod +x "{repo}/venv/bin/deadtrees"\n'
+	)
+	subprocess.run(
+		["bash", "scripts/setup-cloud.sh", "session"],
+		cwd=repo,
+		check=True,
+		capture_output=True,
+		env={
+			**os.environ,
+			"PATH": f"{stubs}:{os.environ['PATH']}",
+			"DEADTREES_CLOUD_LOG_DIR": str(tmp_path / "logs"),
+		},
+	)
+	return calls.read_text().split()
+
+
+def test_session_reinstalls_the_venv_only_when_the_cli_dependencies_change(tmp_path: Path) -> None:
+	repo = make_repo(tmp_path)
+	setup_py = repo / "deadtrees-cli" / "setup.py"
+	setup_py.parent.mkdir()
+	setup_py.write_text("install_requires=['fire']\n")
+
+	assert run_session(repo, tmp_path) == ["install"]
+	assert run_session(repo, tmp_path) == []
+
+	setup_py.write_text("install_requires=['fire', 'pillow']\n")
+	assert run_session(repo, tmp_path) == ["install"]
+	assert run_session(repo, tmp_path) == []
+
+
 def compose_override(repo: Path, ca_bundle: Path) -> subprocess.CompletedProcess[str]:
 	return subprocess.run(
 		["bash", "scripts/setup-cloud.sh", "compose-override"],
