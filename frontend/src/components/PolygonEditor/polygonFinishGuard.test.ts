@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { CLOSE_TOLERANCE_PX, DOUBLE_CLICK_MS, shouldFinishPolygon } from "./polygonFinishGuard";
+import {
+  CLOSE_TOLERANCE_PX,
+  DOUBLE_CLICK_MS,
+  shouldFinishFreehandStroke,
+  shouldFinishPolygon,
+} from "./polygonFinishGuard";
 
 describe("shouldFinishPolygon", () => {
   const firstVertex: [number, number] = [100, 100];
@@ -27,5 +32,15 @@ describe("shouldFinishPolygon", () => {
 
   it("does not finish without a sketch to measure against", () => {
     expect(shouldFinishPolygon([100, 100], null, 900)).toBe(false);
+  });
+});
+
+describe("shouldFinishFreehandStroke", () => {
+  it("keeps the outline open when a stroke ends away from the first vertex", () => {
+    expect(shouldFinishFreehandStroke([300, 300], [100, 100])).toBe(false);
+  });
+
+  it("finishes when a stroke ends on the first vertex", () => {
+    expect(shouldFinishFreehandStroke([105, 104], [100, 100])).toBe(true);
   });
 });
