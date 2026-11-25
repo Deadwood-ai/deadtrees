@@ -3,12 +3,12 @@
 torch==2.7.1
 torchvision==0.22.1
 transformers==5.18.0
-fastapi==0.163.0
+fastapi==0.165.0
 uvicorn[standard]==0.54.0
-python-multipart==0.0.33
-opencv-python-headless==5.0.0.93
+python-multipart==0.0.34
+opencv-python-headless==5.1.0.95
 pillow==13.0.0
-numpy==2.5.4
+numpy==2.5.5
 # tests
 pytest
 httpx==0.28.1
