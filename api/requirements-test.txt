@@ -2,4 +2,4 @@ pytest
 debugpy
 psycopg[binary]
 # Starlette 1.x TestClient backend; production outbound calls still use httpx.
-httpx2>=2.16.0,<3
+httpx2>=2.16.2,<3
