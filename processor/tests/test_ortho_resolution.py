@@ -7,6 +7,8 @@ from processor.src.utils.ortho_resolution import (
 	budgeted_resolution_cm,
 	mission_extent,
 	reduced_resolution_note,
+	source_gigapixels,
+	too_large_to_texture,
 )
 
 pytestmark = pytest.mark.unit
@@ -89,3 +91,30 @@ def test_large_missions_get_the_finest_resolution_that_fits():
 def test_note_states_native_and_processed_resolution():
 	note = reduced_resolution_note(2.6, MissionExtent(1682.3, 3211.8, 1.5))
 	assert note == 'Orthophoto generated at 2.6 cm instead of the native ~1.5 cm because of its size (1.7 x 3.2 km).'
+
+
+def test_source_gigapixels_counts_every_reconstructed_image():
+	shots = [_shot(0, 0, 60), _shot(10, 0, 60)]
+	partials = [_reconstruction(shots, [(0, 0, 0)], size=4000), _reconstruction(shots[:1], [(0, 0, 0)], size=2000)]
+
+	assert source_gigapixels(partials) == pytest.approx((2 * 4000 * 3000 + 2000 * 1500) / 1e9)
+
+
+@pytest.mark.parametrize(
+	'width_m, height_m, gsd_cm, resolution_cm, source_gpx, expected',
+	[
+		(3029, 2607, 2.5, 3.1, 25.8, True),  # 8463 ran out of memory
+		(1803, 3473, 2.5, 2.8, 43.6, True),  # 8935
+		(1741, 3410, 2.9, 2.7, 44.3, True),  # 8936
+		(2095, 2085, 2.4, 2.3, 39.3, True),  # 9212
+		(2168, 2129, 2.6, 2.4, 36.9, True),  # 9251
+		(6000, 6000, 3.3, 6.5, 25.3, False),  # 8937 succeeded: large, but with fewer source pixels
+		(1630, 1252, 3.0, 1.6, 65.1, False),  # 11544 succeeded: many source pixels on a small area
+		(9000, 9000, 2.0, 6.0, 44.0, False),  # textures are halved at 3 times the GSD
+		(9000, 9000, 2.0, 5.9, 44.0, True),  # just below that they stay at full size
+	],
+)
+def test_too_large_to_texture(width_m, height_m, gsd_cm, resolution_cm, source_gpx, expected):
+	extent = MissionExtent(width_m=width_m, height_m=height_m, gsd_cm=gsd_cm)
+
+	assert too_large_to_texture(extent, source_gpx, resolution_cm, 4.3, 25.5) is expected
