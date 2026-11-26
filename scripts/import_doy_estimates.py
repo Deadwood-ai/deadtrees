@@ -9,27 +9,26 @@ outside the queue, with the cross-validation fold model that never saw them
 that run's rows the way the processor's stage writes its own
 (process_doy_estimation._store / _clear):
 
-- v2_acquisition_date_estimates: upsert on dataset_id. The AFTER trigger
-  supersede_contradicted_date_decision fires per row as for a processor run.
-- dataset_audit_suggestions: upsert on (dataset_id, field); the stage's fields
-  that a row no longer suggests are deleted, for any doy_estimation_* source.
+- v2_acquisition_date_estimates: upsert on dataset_id.
 - v2_statuses.is_doy_estimation_done = true.
-- clears.jsonl (no year / ortho not sampleable): the estimate and the stage's
-  suggestions are deleted.
+- clears.jsonl (no year / ortho not sampleable): the estimate is deleted.
+
+The Audit Review reads the estimate (audit.acquisition_date_output_v1); a date
+review given on the other advice (replace / keep) turns stale, as after a
+processor rerun. The dry run counts those.
 
 A row is written only while it still describes the dataset: not archived, the
 recorded date unchanged since the run, and no estimate newer than the row (a
 processor run after the import's run wins). Re-running the same bundle writes
 nothing new.
 
-Input: a bundle directory with estimates.jsonl and suggestions.jsonl (rows as
-process_doy_estimation.estimate_row / suggestion_rows build them) and,
-optionally, clears.jsonl ({"dataset_id", "recorded_year", "recorded_month",
+Input: a bundle directory with estimates.jsonl (rows as
+process_doy_estimation.estimate_row builds them) and, optionally, clears.jsonl ({"dataset_id", "recorded_year", "recorded_month",
 "recorded_day"}).
 
 By default this is a dry run: with the analyst login it loads the bundle into
 temporary tables and reports what would be written and
-which active date decisions the trigger would reopen. --rehearse runs the
+which date reviews would turn stale. --rehearse runs the
 writes with --db-url-env and rolls back; --execute commits, one transaction per
 --batch datasets. Writing to production needs explicit approval for that run
 (docs/playbooks/approved-production-writes.md).
@@ -50,9 +49,6 @@ from collections import Counter
 from pathlib import Path
 
 ANALYST_ENV = 'DEADTREES_ANALYST_DATABASE_URL'
-SOURCE_PREFIX = 'doy_estimation'
-# processor/src/process_doy_estimation.SUGGESTED_FIELDS
-SUGGESTED_FIELDS = ('has_valid_acquisition_date', 'acquisition_date_notes', 'accept_suggested_acquisition_date')
 # keys of process_doy_estimation.estimate_row, in table column order
 ESTIMATE_COLUMNS = (
 	'dataset_id',
@@ -78,11 +74,9 @@ ESTIMATE_COLUMNS = (
 	'metadata',
 	'updated_at',
 )
-SUGGESTION_COLUMNS = ('dataset_id', 'field', 'value', 'source', 'reason', 'details', 'updated_at')
 
 STAGE_SQL = """
 CREATE TEMP TABLE doy_est_in (dataset_id bigint PRIMARY KEY, row jsonb NOT NULL) ON COMMIT DROP;
-CREATE TEMP TABLE doy_sug_in (dataset_id bigint, field text, row jsonb NOT NULL, PRIMARY KEY (dataset_id, field)) ON COMMIT DROP;
 CREATE TEMP TABLE doy_clr_in (dataset_id bigint PRIMARY KEY, row jsonb NOT NULL) ON COMMIT DROP;
 """
 
@@ -106,18 +100,19 @@ WHERE NOT coalesce(d.archived, false)
 		((c.row->>'recorded_year')::smallint, (c.row->>'recorded_month')::smallint, (c.row->>'recorded_day')::smallint);
 """
 
-# supersede_contradicted_date_decision, evaluated against the incoming rows (dry run)
-PREDICTED_SUPERSEDE_SQL = """
+# date reviews (newest per dataset) given on another advice than the incoming estimate's
+# (internal.audit_evidence_key: 'replace' or 'keep')
+STALE_REVIEWS_SQL = """
 SELECT count(*)
 FROM doy_ok o
 JOIN doy_est_in i USING (dataset_id)
-JOIN public.acquisition_date_decisions a ON a.dataset_id = o.dataset_id AND a.superseded_at IS NULL
-CROSS JOIN LATERAL (SELECT a.date_valid OR coalesce(a.suggestion_decision = 'accepted', false) AS fine,
-	(i.row->>'is_mismatch')::boolean AS mismatch, i.row->>'suggestion_reason' AS reason) x
-WHERE ((i.row->>'recorded_year')::smallint, (i.row->>'recorded_month')::smallint, (i.row->>'recorded_day')::smallint)
-		IS NOT DISTINCT FROM (a.resulting_year, a.resulting_month, a.resulting_day)
-	AND ((x.fine AND x.mismatch) OR (NOT x.fine AND NOT x.mismatch AND x.reason IS NULL)
-		OR (x.reason = 'missing_month' AND a.suggestion_decision IS NULL))
+JOIN LATERAL (SELECT r.evidence_key FROM audit.dataset_human_reviews r
+	WHERE r.dataset_id = o.dataset_id AND r.check_key = 'acquisition_date'
+	ORDER BY r.created_at DESC, r.id DESC LIMIT 1) r ON true
+CROSS JOIN LATERAL (SELECT CASE WHEN (audit.acquisition_date_output_v1(
+	jsonb_populate_record(NULL::public.v2_acquisition_date_estimates, i.row)) ->> 'replace')::boolean
+	THEN 'replace' ELSE 'keep' END AS advice) n
+WHERE r.evidence_key IS DISTINCT FROM n.advice
 """
 
 UPSERT_ESTIMATES_SQL = f"""
@@ -130,26 +125,6 @@ ON CONFLICT (dataset_id) DO UPDATE SET
 	{', '.join(f'{c} = excluded.{c}' for c in ESTIMATE_COLUMNS if c != 'dataset_id')}
 """
 
-DELETE_STALE_SUGGESTIONS_SQL = """
-DELETE FROM public.dataset_audit_suggestions s
-USING doy_ok o
-WHERE s.dataset_id = o.dataset_id
-	AND s.source LIKE %(prefix)s
-	AND s.field = ANY(%(fields)s)
-	AND NOT EXISTS (SELECT 1 FROM doy_sug_in n WHERE n.dataset_id = s.dataset_id AND n.field = s.field)
-"""
-
-UPSERT_SUGGESTIONS_SQL = f"""
-INSERT INTO public.dataset_audit_suggestions ({', '.join(SUGGESTION_COLUMNS)})
-SELECT n.dataset_id, n.field, n.row->'value', n.row->>'source', n.row->>'reason', n.row->'details',
-	(n.row->>'updated_at')::timestamptz
-FROM doy_sug_in n
-JOIN doy_ok o USING (dataset_id)
-ON CONFLICT (dataset_id, field) DO UPDATE SET
-	value = excluded.value, source = excluded.source, reason = excluded.reason,
-	details = excluded.details, updated_at = excluded.updated_at
-"""
-
 MARK_DONE_SQL = """
 UPDATE public.v2_statuses s SET is_doy_estimation_done = true
 FROM (SELECT dataset_id FROM doy_ok UNION SELECT dataset_id FROM doy_clr_ok) o
@@ -157,22 +132,8 @@ WHERE s.dataset_id = o.dataset_id AND NOT coalesce(s.is_doy_estimation_done, fal
 """
 
 CLEAR_SQL = """
-WITH sug AS (
-	DELETE FROM public.dataset_audit_suggestions s USING doy_clr_ok c
-	WHERE s.dataset_id = c.dataset_id AND s.source LIKE %(prefix)s AND s.field = ANY(%(fields)s)
-	RETURNING 1
-), est AS (
-	DELETE FROM public.v2_acquisition_date_estimates e USING doy_clr_ok c
-	WHERE e.dataset_id = c.dataset_id
-	RETURNING 1
-)
-SELECT (SELECT count(*) FROM sug), (SELECT count(*) FROM est)
-"""
-
-# decisions the trigger deactivated in this transaction
-SUPERSEDED_SQL = """
-SELECT count(*) FROM public.acquisition_date_decisions
-WHERE superseded_at = now() AND superseded_reason = 'estimate_contradicts'
+DELETE FROM public.v2_acquisition_date_estimates e USING doy_clr_ok c
+WHERE e.dataset_id = c.dataset_id
 """
 
 
@@ -183,17 +144,14 @@ def read_jsonl(path: Path) -> list[dict]:
 		return [json.loads(line) for line in f if line.strip()]
 
 
-def load_bundle(root: Path) -> tuple[dict[int, dict], dict[int, list[dict]], dict[int, dict]]:
+def load_bundle(root: Path) -> tuple[dict[int, dict], dict[int, dict]]:
 	estimates = {r['dataset_id']: r for r in read_jsonl(root / 'estimates.jsonl')}
-	suggestions: dict[int, list[dict]] = {}
-	for r in read_jsonl(root / 'suggestions.jsonl'):
-		suggestions.setdefault(r['dataset_id'], []).append(r)
 	clears = {r['dataset_id']: r for r in read_jsonl(root / 'clears.jsonl')}
-	check_bundle(estimates, suggestions, clears)
-	return estimates, suggestions, clears
+	check_bundle(estimates, clears)
+	return estimates, clears
 
 
-def check_bundle(estimates: dict[int, dict], suggestions: dict[int, list[dict]], clears: dict[int, dict]) -> None:
+def check_bundle(estimates: dict[int, dict], clears: dict[int, dict]) -> None:
 	"""Refuse a bundle the stage could not have written."""
 	if not estimates and not clears:
 		raise SystemExit('bundle holds no estimates and no clears')
@@ -203,14 +161,6 @@ def check_bundle(estimates: dict[int, dict], suggestions: dict[int, list[dict]],
 			raise SystemExit(f'estimate {k} lacks {sorted(missing)}')
 		if len(r['probabilities']) != 365:
 			raise SystemExit(f'estimate {k} has {len(r["probabilities"])} probabilities, not 365')
-	for k, rows in suggestions.items():
-		if k not in estimates:
-			raise SystemExit(f'suggestions for {k} without an estimate')
-		fields = [r['field'] for r in rows]
-		if len(fields) != len(set(fields)) or not set(fields) <= set(SUGGESTED_FIELDS):
-			raise SystemExit(f'suggestions for {k}: unexpected fields {fields}')
-		if any(not r['source'].startswith(SOURCE_PREFIX) for r in rows):
-			raise SystemExit(f'suggestions for {k}: source outside {SOURCE_PREFIX}*')
 	both = set(estimates) & set(clears)
 	if both:
 		raise SystemExit(f'{len(both)} datasets are both estimated and cleared, e.g. {sorted(both)[:5]}')
@@ -230,17 +180,13 @@ def connect(env_name: str):
 	return conn
 
 
-def stage(conn, ids: list[int], estimates, suggestions, clears) -> None:
+def stage(conn, ids: list[int], estimates, clears) -> None:
 	conn.execute(STAGE_SQL)
 	with conn.cursor() as cur:
 		with cur.copy('COPY doy_est_in (dataset_id, row) FROM STDIN') as copy:
 			for k in ids:
 				if k in estimates:
 					copy.write_row((k, json.dumps(estimates[k])))
-		with cur.copy('COPY doy_sug_in (dataset_id, field, row) FROM STDIN') as copy:
-			for k in ids:
-				for r in suggestions.get(k, []):
-					copy.write_row((k, r['field'], json.dumps(r)))
 		with cur.copy('COPY doy_clr_in (dataset_id, row) FROM STDIN') as copy:
 			for k in ids:
 				if k in clears:
@@ -258,21 +204,15 @@ def plan(conn) -> Counter:
 	c['skip (archived, date changed or newer estimate)'] = c['rows'] - c['write']
 	c['clears'] = conn.execute('SELECT count(*) FROM doy_clr_in').fetchone()[0]
 	c['clear'] = conn.execute('SELECT count(*) FROM doy_clr_ok').fetchone()[0]
-	c['decisions the trigger would reopen'] = conn.execute(PREDICTED_SUPERSEDE_SQL).fetchone()[0]
+	c['date reviews turning stale'] = conn.execute(STALE_REVIEWS_SQL).fetchone()[0]
 	return c
 
 
 def write(conn) -> Counter:
 	c = Counter()
-	params = {'prefix': f'{SOURCE_PREFIX}%', 'fields': list(SUGGESTED_FIELDS)}
 	c['estimates upserted'] = conn.execute(UPSERT_ESTIMATES_SQL).rowcount
-	c['stale suggestions deleted'] = conn.execute(DELETE_STALE_SUGGESTIONS_SQL, params).rowcount
-	c['suggestions upserted'] = conn.execute(UPSERT_SUGGESTIONS_SQL).rowcount
-	sug, est = conn.execute(CLEAR_SQL, params).fetchone()
-	c['cleared suggestions'] += sug
-	c['cleared estimates'] += est
+	c['cleared estimates'] = conn.execute(CLEAR_SQL).rowcount
 	c['statuses marked done'] = conn.execute(MARK_DONE_SQL).rowcount
-	c['decisions reopened'] = conn.execute(SUPERSEDED_SQL).fetchone()[0]
 	return c
 
 
@@ -285,20 +225,18 @@ def main() -> int:
 	ap.add_argument('--db-url-env', help='env var with the writer connection (needed for --rehearse/--execute)')
 	ap.add_argument('--batch', type=int, default=500, help='datasets per transaction')
 	a = ap.parse_args()
-	estimates, suggestions, clears = load_bundle(a.bundle)
+	estimates, clears = load_bundle(a.bundle)
 	ids = sorted(set(estimates) | set(clears))
 	writes = a.rehearse or a.execute
 	if writes and not a.db_url_env:
 		raise SystemExit('--rehearse/--execute need --db-url-env')
-	print(
-		f'bundle: {len(estimates)} estimates, {sum(map(len, suggestions.values()))} suggestions, {len(clears)} clears'
-	)
+	print(f'bundle: {len(estimates)} estimates, {len(clears)} clears')
 
 	total = Counter()
 	batches = [ids[i : i + a.batch] for i in range(0, len(ids), a.batch)] if writes else [ids]
 	for n, chunk in enumerate(batches, 1):
 		with connect(a.db_url_env if writes else ANALYST_ENV) as conn:
-			stage(conn, chunk, estimates, suggestions, clears)
+			stage(conn, chunk, estimates, clears)
 			c = plan(conn)
 			if writes:
 				c.update(write(conn))

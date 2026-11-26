@@ -166,11 +166,11 @@ deployed model). The fold models were used for this run only; new datasets and
 every later rerun use the deployed model.
 
 `scripts/import_doy_estimates.py <bundle>` writes such a run the way the stage
-writes its own rows (estimate upsert with the supersede trigger, suggestions,
-status flag, clears), only for rows that still describe their dataset (not
-archived, same recorded date, no newer estimate). The default is a dry run with
-the analyst login that reports the counts and the decisions the trigger would
-reopen; `--rehearse` writes and rolls back, `--execute` commits in batches. It
+writes its own rows (estimate upsert, status flag, clears), only for rows that
+still describe their dataset (not archived, same recorded date, no newer
+estimate). The default is a dry run with the analyst login that reports the
+counts and the date reviews whose advice would flip (stale, as after a rerun);
+`--rehearse` writes and rolls back, `--execute` commits in batches. It
 is a production write: run it only with approval, as
 [approved-production-writes.md](playbooks/approved-production-writes.md)
 describes.
