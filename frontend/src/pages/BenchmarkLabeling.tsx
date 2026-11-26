@@ -131,6 +131,10 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 				<div className="p-8 text-sm text-gray-600">Adding to a benchmark is for operators: only they label new random {noun}.</div>
 			) : mode === "new" && candidate.isFetching ? (
 				<Spin className="m-12" />
+			) : mode === "new" && candidate.isError ? (
+				<div className="p-8 text-sm text-red-600" data-testid="benchmark-draw-error">
+					Could not draw a random {noun}: {(candidate.error as { message?: string }).message ?? String(candidate.error)}
+				</div>
 			) : !current ? (
 				<div className="p-8 text-sm text-gray-600">{mode === "new" ? `No ${noun} left that are not in the benchmark yet.` : `The benchmark has no labeled ${noun} yet.`}</div>
 			) : layer ? (

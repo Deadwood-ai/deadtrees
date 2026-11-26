@@ -157,6 +157,21 @@ function interpolateColor(color1: string, color2: string, ratio: number): string
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
+/** An acquisition date as the datasets store it: year, and month and day where known. */
+export interface AcquisitionDateParts {
+  aquisition_year?: number | string | null;
+  aquisition_month?: number | string | null;
+  aquisition_day?: number | string | null;
+}
+
+/** The date the phenology is read at: the audit's new date (ISO) where it replaces the reported
+ * one, else the reported date. */
+export function phenologyDate(reported: AcquisitionDateParts, newDate: string | null | undefined): AcquisitionDateParts {
+  if (!newDate) return reported;
+  const [aquisition_year, aquisition_month, aquisition_day] = newDate.slice(0, 10).split("-").map(Number);
+  return { aquisition_year, aquisition_month, aquisition_day };
+}
+
 /**
  * The probability to be in the maximum greenness period at the acquisition date, from the
  * phenology curve (365 values 0 to 255), as the server's phenology_probability_at works it out:

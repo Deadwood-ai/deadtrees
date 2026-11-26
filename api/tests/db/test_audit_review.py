@@ -1,6 +1,7 @@
 """Audit Review results, worked out on read: tile calls, the evaluation decision, the reviews that
 count, dataset_outcomes with review_required, the public surface and the dataset page's summary."""
 
+import json
 from datetime import date
 
 import psycopg
@@ -289,6 +290,24 @@ def test_a_date_review_holds_while_the_advice_is_the_same_and_reopens_when_it_fl
 	assert db.execute(
 		'SELECT aquisition_year, aquisition_month, aquisition_day FROM public.v2_datasets WHERE id=%s', (dataset,)
 	).fetchone() == (2022, 3, 11)
+
+
+def test_the_phenology_follows_the_date_the_audit_gives(db):
+	auditor, dataset = create_user(db, can_audit=True), create_dataset(db, create_user(db))
+	# leafless until late May, green after: the reported 11 March reads 51, 19 July reads 230
+	curve = [51] * 150 + [230] * 215
+	as_admin(db)
+	db.execute(
+		'INSERT INTO public.v2_metadata(dataset_id,metadata,version) VALUES (%s,%s,1)',
+		(dataset, json.dumps({'phenology': {'phenology_curve': curve}})),
+	)
+	phenology = 'round(phenology_probability::numeric, 2)::float'
+	assert outcome(db, dataset, phenology) == (round(51 / 255, 2),)
+	upsert_estimate(db, dataset)  # the advice is to replace the date with 19 July 2022
+	assert outcome(db, dataset, 'date_new', phenology) == (date(2022, 7, 19), round(230 / 255, 2))
+	# a reviewer keeps the reported date: the phenology goes back to it
+	review(db, auditor, dataset, 'acquisition_date', date_replace=False, note='the recorded date is the flight date')
+	assert outcome(db, dataset, phenology) == (round(51 / 255, 2),)
 
 
 # ---------------------------------------------------------------------------

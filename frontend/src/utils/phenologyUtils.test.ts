@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deadwoodPhenologyWarning, phenologyProbabilityAt } from "./phenologyUtils";
+import { deadwoodPhenologyWarning, phenologyDate, phenologyProbabilityAt } from "./phenologyUtils";
 
 // day n of the year has the value n - 1, so the picked day can be read off the result
 const curve = Array.from({ length: 365 }, (_, i) => Math.min(i, 255));
@@ -19,6 +19,18 @@ describe("phenologyProbabilityAt", () => {
   it("is null without a curve or a year", () => {
     expect(phenologyProbabilityAt(null, 2023, 2, 10)).toBeNull();
     expect(phenologyProbabilityAt(curve, null, 2, 10)).toBeNull();
+  });
+});
+
+describe("phenologyDate", () => {
+  const reported = { aquisition_year: "2021", aquisition_month: "3", aquisition_day: null };
+
+  it("reads the phenology at the reported date while the audit keeps it", () => {
+    expect(phenologyDate(reported, null)).toBe(reported);
+  });
+
+  it("reads it at the audit's new date where it replaces the reported one", () => {
+    expect(phenologyDate(reported, "2021-07-14")).toEqual({ aquisition_year: 2021, aquisition_month: 7, aquisition_day: 14 });
   });
 });
 
