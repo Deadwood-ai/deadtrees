@@ -224,12 +224,13 @@ def test_authorization_visibility_and_aoi(replacement):
 	assert ranked(r) and ranked(r, r['auditor']) and ranked(r, r['user'])
 	# Audit-excluded datasets leave the public surface; the owner still sees them.
 	r['db'].execute(
-		"INSERT INTO public.dataset_audit(dataset_id,final_assessment) VALUES(%s,'exclude_completely')", (r['dataset'],)
+		"INSERT INTO audit.assessments(check_key,dataset_id,layer,assessor_kind,verdict,imported_from) VALUES ('dataset_evaluation',%s,'image','person','major','legacy_audit')",
+		(r['dataset'],),
 	)
 	assert search_anonymous(r) == [] and search(r) == []
 	assert not ranked(r) and not ranked(r, r['auditor'])
 	assert len(search(r, r['user'])) == 1 and ranked(r, r['user'])
-	r['db'].execute('DELETE FROM public.dataset_audit WHERE dataset_id=%s', (r['dataset'],))
+	r['db'].execute("DELETE FROM audit.assessments WHERE dataset_id=%s AND imported_from='legacy_audit'", (r['dataset'],))
 	assert ranked(r)
 	r['db'].execute("UPDATE public.v2_datasets SET data_access='private' WHERE id=%s", (r['dataset'],))
 	assert search(r) == [] and not ranked(r, r['auditor'])

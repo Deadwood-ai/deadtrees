@@ -156,3 +156,43 @@ function interpolateColor(color1: string, color2: string, ratio: number): string
 
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
+
+/**
+ * The probability to be in the maximum greenness period at the acquisition date, from the
+ * phenology curve (365 values 0 to 255), as the server's phenology_probability_at works it out:
+ * the exact day when the date is complete, the middle of the month without a day, the middle of
+ * the year with only a year. Null without a curve or a year.
+ */
+export function phenologyProbabilityAt(
+  curve: number[] | null | undefined,
+  year: string | number | null | undefined,
+  month?: string | number | null,
+  day?: string | number | null,
+): number | null {
+  const y = Number(year);
+  if (!curve?.length || !Number.isInteger(y) || y < 1 || y > 9999) return null;
+  const m = Number(month);
+  const d = Number(day);
+  const startOfYear = Date.UTC(y, 0, 1);
+  let centerDay = 183;
+  if (m >= 1 && m <= 12) {
+    const firstOfMonth = Math.round((Date.UTC(y, m - 1, 1) - startOfYear) / 86_400_000) + 1;
+    const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    centerDay = d >= 1 && d <= 31 ? firstOfMonth + Math.min(d, daysInMonth) - 1 : Math.floor((2 * firstOfMonth + daysInMonth - 1) / 2);
+  }
+  const value = curve[Math.min(Math.max(centerDay - 1, 0), curve.length - 1)];
+  return typeof value === "number" ? Math.max(0, Math.min(1, value / 255)) : null;
+}
+
+/** Below this probability of peak greenness the dataset page starts with the deadwood layer hidden. */
+export const DEADWOOD_DEFAULT_OFF_BELOW = 0.5;
+
+/**
+ * The warning on the deadwood layer when the image was likely taken outside the maximum greenness
+ * period, where leafless live trees can look dead to the model (the layer then starts hidden), or
+ * null when it was likely taken within it.
+ */
+export function deadwoodPhenologyWarning(probability: number | null | undefined): string | null {
+  if (probability == null || probability >= DEADWOOD_DEFAULT_OFF_BELOW) return null;
+  return `The probability that this image was taken within the maximum greenness period is ${Math.round(probability * 100)}%. It is possible that trees labeled as standing deadwood do not correspond to mortality.`;
+}

@@ -92,7 +92,7 @@ test.describe("auditor local write flows", () => {
     fs.rmSync(path.join(localDataRoot, "cogs", cogPath), { force: true });
   });
 
-  test("auditor acknowledges a user flag, draws AOI, and persists audit side effects", async ({
+  test("auditor acknowledges a user flag, draws AOI, and Save stores the answer as a person row", async ({
     page,
   }) => {
     await installAuditorSession(page);
@@ -100,9 +100,9 @@ test.describe("auditor local write flows", () => {
     await dismissCookieBanner(page);
 
     await expect(
-      page.getByRole("heading", { name: new RegExp(`Audit: ${datasetId}`) }),
+      page.getByRole("heading", { name: new RegExp(`Audit Review: ${datasetId}`) }),
     ).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("status", { name: "Securing the audit lock" })).toBeHidden({
+    await expect(page.getByRole("status", { name: "Securing the review lock" })).toBeHidden({
       timeout: 20_000,
     });
     await expectAuditLeaseHolder(auditorUser.id);
@@ -112,45 +112,10 @@ test.describe("auditor local write flows", () => {
     await page.getByRole("button", { name: "Acknowledge" }).click();
     await expectFlagStatus("acknowledged");
 
-    await (await section(page, "Georeferencing"))
-      .getByText(/Good/)
-      .click();
-    await (await section(page, "Acquisition date"))
-      .getByText(/Valid/)
-      .click();
-
-    const phenologyCard = await section(page, "Phenology");
-    await phenologyCard.getByText(/In Season/).click();
-    await phenologyCard.getByRole("button", { name: "Add a phenology note" }).click();
-    await phenologyCard
-      .getByPlaceholder("Seasonal observations...")
-      .fill("Local write suite confirms phenology.");
-
-    // the prediction check is two steps, one layer each
-    const deadwoodCard = await section(page, "Deadwood prediction");
-    await deadwoodCard.getByText(/Great/).click();
-    await deadwoodCard.getByRole("button", { name: "Add a deadwood note" }).click();
-    await deadwoodCard
-      .getByPlaceholder("Deadwood notes...")
-      .fill("Deadwood prediction is fit for audit.");
-    const treeCoverCard = await section(page, "Tree cover prediction");
-    await treeCoverCard.getByText(/OK/).click();
-    await treeCoverCard.getByRole("button", { name: "Add a tree cover note" }).click();
-    await treeCoverCard
-      .getByPlaceholder("Tree cover notes...")
-      .fill("Tree cover is usable.");
-
-    const cogCard = (await section(page, "Dataset evaluation")).getByTestId("audit-cog");
-    await cogCard.getByText(/Good/).click();
-    await cogCard
-      .getByPlaceholder(/COG issue details/)
-      .fill("COG loads from local nginx.");
-
-    const thumbnailCard = (await section(page, "Dataset evaluation")).getByTestId("audit-thumbnail");
-    await thumbnailCard.getByText(/Good/).click();
-    await thumbnailCard
-      .getByPlaceholder(/Thumbnail issue details/)
-      .fill("Thumbnail state accepted.");
+    // the dataset evaluation is the only verdict; the other checks report values
+    const evaluation = await section(page, "Dataset evaluation");
+    await evaluation.getByTestId("audit-evaluation-decision").getByText("OK", { exact: true }).click();
+    await evaluation.getByLabel("Note on the decision").fill("Auditor local write integration completed.");
 
     await drawAuditAoi(page);
     await expect(page.getByText(/AOI defined/)).toBeVisible();
@@ -199,48 +164,35 @@ test.describe("auditor local write flows", () => {
       notes: "Auditor metadata to preserve",
     });
 
-    const finalAssessmentCard = page.getByTestId("audit-decision");
-    // every section is answered, so the derived decision is Ready; confirm it
-    await expect(finalAssessmentCard.getByText("Ready", { exact: true }).first()).toBeVisible();
-    await finalAssessmentCard.getByRole("button", { name: "Confirm" }).click();
-    await finalAssessmentCard.getByRole("button", { name: "Add a note" }).click();
-    await finalAssessmentCard
-      .getByPlaceholder("Notes on the decision...")
-      .fill("Auditor local write integration completed.");
-
     await page.getByRole("button", { name: /^save Save$/i }).click();
-    await expect(page).toHaveURL(/\/dataset-audit(?:\?tab=pending)?$/, {
+    await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/, {
       timeout: 20_000,
     });
 
     await expectAuditSideEffects();
   });
 
-  test("marking a saved audit reviewed releases the audit lease", async ({ page }) => {
-    await ensureSavedAudit();
+  test("saving the review releases the audit lease", async ({ page }) => {
+    await setFlagStatus("acknowledged");
+    const answersBefore = await countPersonAnswers();
     await installAuditorSession(page);
     await openAuditDetail(page);
     await expectAuditLeaseHolder(auditorUser.id);
 
-    await page.getByRole("button", { name: /Mark Reviewed/ }).click();
+    // nothing changed on the page: Save stores nothing and returns to the list
+    await page.getByRole("button", { name: /^save Save$/i }).click();
     await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/, { timeout: 20_000 });
 
     await expectAuditLeaseHolder(null);
-    expect(await readSavedAudit()).toMatchObject({
-      notes: "Auditor local write integration completed.",
-      audited_by: auditorUser.id,
-      reviewed_by: auditorUser.id,
-    });
-    expect((await readSavedAudit()).reviewed_at).not.toBeNull();
+    expect(await countPersonAnswers()).toBe(answersBefore);
   });
 
   test("a live lease is respected, an abandoned one is reclaimed, and page exit releases it", async ({
     page,
   }) => {
-    await ensureSavedAudit();
     // The first scenario acknowledges the flag; this one checks it stays locked.
-    await reopenFlag();
-    const savedAudit = await readSavedAudit();
+    await setFlagStatus("open");
+    const answersBefore = await countPersonAnswers();
     await installAuditorSession(page);
 
     // Another auditor is actively auditing: this auditor is sent back to the queue.
@@ -268,8 +220,8 @@ test.describe("auditor local write flows", () => {
     // Prediction edits are not offered from a page that lost the lease.
     await expect(page.getByRole("button", { name: "Edit deadwood cover" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Acknowledge" })).toBeDisabled();
-    await page.getByRole("button", { name: "Back to queue" }).click();
-    await page.getByRole("button", { name: "Leave Audit" }).click();
+    // nothing changed on the page: it leaves without asking
+    await page.getByRole("button", { name: "Back to the Audit Review" }).click();
     await expect(page).toHaveURL(/\/dataset-audit(?:\?.*)?$/, { timeout: 10_000 });
     // Leaving must not clear the new holder's lease.
     await expectAuditLeaseHolder(reporterUser.id);
@@ -282,20 +234,14 @@ test.describe("auditor local write flows", () => {
     await page.goto("about:blank");
     await expectAuditLeaseHolder(null);
 
-    expect(await readSavedAudit()).toEqual(savedAudit);
+    expect(await countPersonAnswers()).toBe(answersBefore);
   });
 
   test("a second tab of the same auditor cannot displace the lease page until they continue there", async ({
     context,
     page,
   }) => {
-    await ensureSavedAudit();
-    const { error: resetError } = await adminClient
-      .from("dataset_audit")
-      .update({ reviewed_at: null, reviewed_by: null })
-      .eq("dataset_id", datasetId);
-    expect(resetError).toBeNull();
-    await reopenFlag();
+    await setFlagStatus("open");
     await installAuditorSession(page);
     await openAuditDetail(page);
     await expectAuditLeaseHolder(auditorUser.id);
@@ -313,7 +259,7 @@ test.describe("auditor local write flows", () => {
 
     await secondTab.getByRole("button", { name: "Continue here" }).click();
     await expect(
-      secondTab.getByRole("heading", { name: new RegExp(`Audit: ${datasetId}`) }),
+      secondTab.getByRole("heading", { name: new RegExp(`Audit Review: ${datasetId}`) }),
     ).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await readAuditLease())?.lease_id).not.toBe(firstLease);
 
@@ -327,13 +273,16 @@ test.describe("auditor local write flows", () => {
     expect(rejected.status()).toBeGreaterThanOrEqual(400);
     expect(rejected.request().headers()["x-audit-lease"]).toBe(firstLease);
     await expectFlagStatus("open");
-    await expect(page.getByText("You continued this audit in another tab or window.")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Mark Reviewed/ })).toHaveCount(0);
+    await expect(page.getByText("You continued this review in another tab or window.")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^save Save$/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Save AOI/ })).toBeDisabled();
 
-    await secondTab.getByRole("button", { name: /Mark Reviewed/ }).click();
+    // the page that holds the lease acknowledges the report and saves
+    await secondTab.getByRole("button", { name: "Acknowledge" }).click();
+    await expectFlagStatus("acknowledged");
+    await secondTab.getByRole("button", { name: /^save Save$/i }).click();
     await expect(secondTab).toHaveURL(/\/dataset-audit(?:\?.*)?$/, { timeout: 20_000 });
-    expect(await readSavedAudit()).toMatchObject({ reviewed_by: auditorUser.id });
+    await expectAuditLeaseHolder(null);
     await secondTab.close();
   });
 
@@ -976,7 +925,7 @@ async function openAuditDetail(page: Page) {
   await page.goto(`/dataset-audit/${datasetId}`);
   await dismissCookieBanner(page);
   await expect(
-    page.getByRole("heading", { name: new RegExp(`Audit: ${datasetId}`) }),
+    page.getByRole("heading", { name: new RegExp(`Audit Review: ${datasetId}`) }),
   ).toBeVisible({ timeout: 20_000 });
 }
 
@@ -1006,37 +955,28 @@ async function seedDeadwoodPrediction() {
   expect(error).toBeNull();
 }
 
-async function reopenFlag() {
+async function setFlagStatus(status: "open" | "acknowledged") {
   const { error } = await adminClient
     .from("dataset_flags")
-    .update({ status: "open" })
+    .update({ status })
     .eq("id", flagId);
   expect(error).toBeNull();
 }
 
-// Lease scenarios need a saved audit even when run on their own.
-async function ensureSavedAudit() {
-  const { error } = await adminClient.from("dataset_audit").upsert(
-    {
-      dataset_id: datasetId,
-      audited_by: auditorUser.id,
-      final_assessment: "no_issues",
-      notes: "Auditor local write integration completed.",
-    },
-    { onConflict: "dataset_id", ignoreDuplicates: true },
-  );
+/** The person rows of audit.assessments on the test dataset. */
+async function readPersonAnswers() {
+  const { data, error } = await adminClient
+    .schema("audit")
+    .from("assessments")
+    .select("check_key,layer,verdict,output,reason_text,assessor_user_id,imported_from")
+    .eq("dataset_id", datasetId)
+    .eq("assessor_kind", "person")
+    .order("id");
   expect(error).toBeNull();
+  return data ?? [];
 }
 
-async function readSavedAudit() {
-  const { data, error } = await adminClient
-    .from("dataset_audit")
-    .select("notes,audited_by,reviewed_at,reviewed_by")
-    .eq("dataset_id", datasetId)
-    .single();
-  expect(error).toBeNull();
-  return data;
-}
+const countPersonAnswers = async () => (await readPersonAnswers()).length;
 
 async function expectFlagStatus(status: string) {
   await expect
@@ -1053,32 +993,24 @@ async function expectFlagStatus(status: string) {
 }
 
 async function expectAuditSideEffects() {
-  const { data: audit, error: auditError } = await adminClient
+  // Save stores the reviewer's answer as a person row; nothing writes the legacy audit
+  expect(await readPersonAnswers()).toEqual([
+    {
+      check_key: "dataset_evaluation",
+      layer: "image",
+      verdict: "ok",
+      output: { cog_issue: false, thumbnail_issue: false },
+      reason_text: "Auditor local write integration completed.",
+      assessor_user_id: auditorUser.id,
+      imported_from: null,
+    },
+  ]);
+  const { count: legacyAudits, error: legacyError } = await adminClient
     .from("dataset_audit")
-    .select(
-      "dataset_id,is_georeferenced,has_valid_acquisition_date,has_valid_phenology,deadwood_quality,deadwood_notes,forest_cover_quality,forest_cover_notes,aoi_done,has_cog_issue,cog_issue_notes,has_thumbnail_issue,thumbnail_issue_notes,audited_by,notes,final_assessment",
-    )
-    .eq("dataset_id", datasetId)
-    .single();
-  expect(auditError).toBeNull();
-  expect(audit).toMatchObject({
-    dataset_id: datasetId,
-    is_georeferenced: true,
-    has_valid_acquisition_date: true,
-    has_valid_phenology: true,
-    deadwood_quality: "great",
-    deadwood_notes: "Deadwood prediction is fit for audit.",
-    forest_cover_quality: "sentinel_ok",
-    forest_cover_notes: "Tree cover is usable.",
-    aoi_done: true,
-    has_cog_issue: false,
-    cog_issue_notes: "COG loads from local nginx.",
-    has_thumbnail_issue: false,
-    thumbnail_issue_notes: "Thumbnail state accepted.",
-    audited_by: auditorUser.id,
-    notes: "Auditor local write integration completed.",
-    final_assessment: "no_issues",
-  });
+    .select("dataset_id", { count: "exact", head: true })
+    .eq("dataset_id", datasetId);
+  expect(legacyError).toBeNull();
+  expect(legacyAudits).toBe(0);
 
   const { data: aois, error: aoiError } = await adminClient
     .from("v2_aois")
@@ -1144,7 +1076,8 @@ async function cleanupDataset() {
   }
   await deleteRows("dataset_flags", "dataset_id", datasetId);
   await deleteRows("dataset_audit_locks", "dataset_id", datasetId);
-  await deleteRows("dataset_audit", "dataset_id", datasetId);
+  const { error: answersError } = await adminClient.schema("audit").from("assessments").delete().eq("dataset_id", datasetId);
+  if (answersError) throw new Error(`Failed to clean audit.assessments of dataset ${datasetId}: ${answersError.message}`);
   await deleteRows("v2_aois", "dataset_id", datasetId);
   await deleteRows("v2_labels", "dataset_id", datasetId);
   await deleteRows("v2_cogs", "dataset_id", datasetId);

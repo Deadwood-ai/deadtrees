@@ -3,7 +3,8 @@
 Inputs are fetched by the caller (worker handler or benchmark): the COG path or URL, the
 dataset's CLIP tiles, the AOI and the prediction polygons (WGS84 shapely geometries), and the
 judges. The check picks the two crop sets, renders each crop once, asks every judge in parallel,
-and returns every answer plus the per-layer verdicts of the current rule. Nothing is written here.
+and returns every answer plus the per-layer summary of the rule (for the benchmark runner; the
+worker stores the crop answers only). Nothing is written here.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ class CropResult:
 	crop: Crop | None = None
 	answers: list = field(default_factory=list)  # judge.Answer
 	failures: dict = field(default_factory=dict)  # judge -> error text
-	combined: dict = field(default_factory=dict)  # layer -> judge.combined(...)
+	combined: dict = field(default_factory=dict)  # layer -> judge.deciding(...): the deciding judge's call
 
 
 @dataclass
@@ -41,7 +42,7 @@ class CheckResult:
 	dataset_id: int
 	epsg: int
 	crops: list  # CropResult
-	verdicts: dict  # layer -> rule.dataset_verdict(...)
+	verdicts: dict  # layer -> rule.dataset_verdict(...): the benchmark runner's summary, not stored
 	tiles_total: int
 	seconds: float
 	cost: dict = field(default_factory=dict)  # judge -> {'seconds', 'calls', 'cost_usd'}
@@ -121,12 +122,12 @@ def run_prediction_quality(
 				answered[name] += 1
 			else:
 				r.failures[name] = error
-	# The cuts are calibrated on the judges' mean, so a verdict never rests on fewer judges.
+	# Every judge answers: the deciding one counts, the others are shown next to it.
 	silent = [name for name, count in answered.items() if results and not count]
 	if silent:
 		raise RuntimeError(f'{", ".join(silent)} answered no crop: {results[0].failures[silent[0]]}')
 	for r in results:
-		r.combined = {layer: judge_mod.combined(r.answers, layer) for layer in judge_mod.LAYERS}
+		r.combined = {layer: judge_mod.deciding(r.answers, layer, rule_config.get('decider', 'haiku')) for layer in judge_mod.LAYERS}
 
 	verdicts = {}
 	for layer in judge_mod.LAYERS:

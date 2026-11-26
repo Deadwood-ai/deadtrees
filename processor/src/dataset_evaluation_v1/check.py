@@ -1,5 +1,6 @@
 """One dataset evaluation run: the images the models see, the model calls, the rules
-and the result as the payload of audit.store_dataset_evaluation.
+and the result as the payload of audit.store_dataset_evaluation; and the rule alone
+over a run's stored answers, for a rule-only run.
 
 The judges are the audit worker's backends (audit_worker.models): a function
 (prompt, images) -> answer text per model name, images inline, no tools. Their login
@@ -18,19 +19,7 @@ from shapely.geometry import mapping
 
 from .inputs import CROP_COUNT, CROP_MPP, CROP_PICKER, CROP_PX, GRID_PICKER, MIN_VALID_SHARE, OVERVIEW_PX, Inputs
 from .prompt import PROMPT_VERSION, AnswerError, build_prompt, parse_answer
-from .rules import (
-	BAND_RULE,
-	DATASET_RULE,
-	DUPLICATE_RULE,
-	EMPTY_COG_RULE,
-	PHASH_METHOD,
-	RULE_CONFIG,
-	Call,
-	band_check,
-	dataset_rule,
-	duplicate_check,
-	empty_cog,
-)
+from .rules import BAND_RULE, DATASET_RULE, EMPTY_COG_RULE, RULE_CONFIG, Call, band_check, dataset_rule, empty_cog
 from .vocabulary import CHECK_KEY
 
 JPEG_QUALITY = 90
@@ -38,8 +27,8 @@ JPEG_QUALITY = 90
 # A judge: (prompt, PIL images) -> answer text (audit_worker.models.Backend).
 Judge = Callable[[str, Sequence], str]
 
-# audit.check_versions.config of v1: everything that changes the result. `models` is
-# the worker's judge spec: Haiku through claude -p, Luna through the Codex login.
+# audit.check_versions.config: everything that changes the result. `models` is the
+# worker's judge spec: Haiku through claude -p, Luna through the Codex login.
 CONFIG = {
 	'models': {
 		'luna-medium': {'transport': 'codex', 'model': 'gpt-6-luna', 'effort': 'medium'},
@@ -48,15 +37,11 @@ CONFIG = {
 	'prompt_version': PROMPT_VERSION,
 	'rules': {
 		'band': '/'.join(BAND_RULE),
-		'duplicates': '/'.join(DUPLICATE_RULE),
 		'dataset': '/'.join(DATASET_RULE),
 		'empty_cog': '/'.join(EMPTY_COG_RULE),
 	},
 	'rule_config': RULE_CONFIG,
-	# audit.duplicate_candidates: overview hashes within this many bits, footprints overlapping this much
-	'duplicates': {'max_hamming': 10, 'min_overlap': 0.5},
 	'min_valid_share': MIN_VALID_SHARE,
-	'phash': PHASH_METHOD,
 	'inputs': {
 		'overview_px': OVERVIEW_PX,
 		'crop_count': CROP_COUNT,
@@ -93,8 +78,7 @@ class ImageFile:
 class Evaluation:
 	images: list[ImageFile]
 	calls: list[Call]  # the stored assessments: the models, then the dataset verdict as the one rule row
-	phash: int | None  # None when there was no image to hash
-	evidence: dict  # includes `rules`: the band check and the duplicates the verdict folds in
+	evidence: dict  # includes `rules`: the band check the verdict folds in
 	cost: dict = field(default_factory=dict)
 
 	@property
@@ -162,15 +146,12 @@ def evaluate(
 	judges: dict[str, Judge],
 	*,
 	source_profile: dict | None,
-	image_hash: int | None,
-	duplicate_candidates: list[dict],
 	thumbnail: bytes | None = None,
 	rule_config: dict = RULE_CONFIG,
 ) -> Evaluation:
-	"""Run the rules and the models on one dataset's inputs. `image_hash` is the
-	overview's phash, which the caller needs first to look up duplicate candidates.
-	`rule_config` is the version's (`CONFIG['rule_config']`), so a registered version
-	runs with the thresholds it was registered with."""
+	"""Run the rules and the models on one dataset's inputs. `rule_config` is the version's
+	(`CONFIG['rule_config']`), so a registered version runs with the thresholds it was
+	registered with."""
 	images = model_images(inputs, thumbnail)
 	evidence = {
 		'settings': inputs.settings,
@@ -183,7 +164,7 @@ def evaluate(
 	}
 	if inputs.empty:
 		# Nothing to look at: the rule decides, no model is asked.
-		return Evaluation(images=images, calls=[empty_cog(inputs.valid_share)], phash=None, evidence=evidence)
+		return Evaluation(images=images, calls=[empty_cog(inputs.valid_share)], evidence=evidence)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
 	prompt = build_prompt(inputs.overview_mpp, crop_mpp, thumbnail is not None, crop_count=len(inputs.crops))
 	# Decoded here: the judges run in threads and must not share lazily loading files.
@@ -192,20 +173,44 @@ def evaluate(
 	with ThreadPoolExecutor(max_workers=len(judges)) as pool:
 		answers = list(pool.map(lambda item: ask(*item, prompt, pictures), judges.items()))
 	band = band_check(source_profile, inputs.bands, inputs.valid)
-	duplicates = duplicate_check(duplicate_candidates)
-	verdict = dataset_rule(answers, band, duplicates, rule_config)
 	return Evaluation(
 		images=images,
-		calls=[*answers, verdict],
-		phash=image_hash,
-		evidence={
-			**evidence,
-			'rules': rule_evidence([band, duplicates]),
-			'phash': {'method': PHASH_METHOD, 'value': str(image_hash)},
-		},
+		calls=[*answers, dataset_rule(answers, band, rule_config)],
+		evidence={**evidence, 'rules': rule_evidence([band])},
 		# Subscription calls report no tokens or dollars; time and calls are what is known.
 		cost={a.model: {'seconds': a.raw['seconds'], 'calls': a.raw['attempt'], 'cost_usd': None} for a in answers},
 	)
+
+
+def rule_only_verdict(rows: list[dict], evidence: dict, rule_config: dict = RULE_CONFIG) -> Call:
+	"""This version's dataset verdict from a run's stored answers, without a model call.
+
+	`rows` are the run's dataset-level model and rule rows (audit.assessments, oldest first),
+	`evidence` its audit.runs.evidence, which holds the band check. A run without model
+	answers judged an empty COG, which stays excluded by rule."""
+	# One answer per model: a store that was retried leaves a later row of the model, which wins.
+	models = {
+		r['model']: Call(
+			assessor_kind='model',
+			model=r['model'],
+			prompt_version=r['prompt_version'],
+			verdict=r['verdict'],
+			major_likelihood=r['major_likelihood'],
+			modes=r['modes'] or {},
+			details=r['details'] or {},
+		)
+		for r in rows
+		if r['assessor_kind'] == 'model'
+	}
+	if models:
+		band = evidence['rules'][BAND_RULE[0]]
+		stored_band = Call(
+			'rule', BAND_RULE[0], band['version'], band['verdict'], band['likelihood'], details=band['details']
+		)
+		return dataset_rule(list(models.values()), stored_band, rule_config)
+	if any(r['model'] == EMPTY_COG_RULE[0] for r in rows):
+		return empty_cog(evidence['valid_share'])
+	raise ValueError('the source run holds no model answers to recompute from')
 
 
 def storage_folder(dataset_id: int, ortho_sha256: str) -> str:
@@ -252,5 +257,4 @@ def store_payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, ortho
 			for f in evaluation.images
 		],
 		'assessments': [c.row() for c in evaluation.calls],
-		**({'phash': {'method': PHASH_METHOD, 'value': evaluation.phash}} if evaluation.phash is not None else {}),
 	}

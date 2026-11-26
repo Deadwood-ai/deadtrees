@@ -151,8 +151,14 @@ with input as (
   ) g
 ), trust as (
   select jsonb_build_object(
-    'audits_reviewed_7d', (select count(*) from dataset_audit where reviewed_at >= now() - interval '7 days'),
-    'audits_with_major_issue', (select count(*) from dataset_audit where has_major_issue),
+    -- Audit Review: datasets a reviewer gave an evaluation decision in 7 days, and the excluded ones
+    'audits_reviewed_7d', (
+      select count(distinct dataset_id)
+      from audit.assessments
+      where check_key = 'dataset_evaluation' and crop_id is null and assessor_kind = 'person'
+        and imported_from is null and created_at >= now() - interval '7 days'
+    ),
+    'datasets_excluded', (select count(*) from audit.excluded_dataset_ids()),
     'open_flags', (select count(*) from dataset_flags where status is distinct from 'resolved'),
     'flags_created_7d', (select count(*) from dataset_flags where created_at >= now() - interval '7 days'),
     'reference_patches_total', (select count(*) from reference_patches),
@@ -337,7 +343,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
 			'',
 			'## Trust',
 			f"- audits reviewed 7d: `{trust['audits_reviewed_7d']}`",
-			f"- audits with major issue: `{trust['audits_with_major_issue']}`",
+			f"- datasets excluded by the audit: `{trust['datasets_excluded']}`",
 			f"- open flags: `{trust['open_flags']}`; flags created 7d `{trust['flags_created_7d']}`",
 			f"- reference patches: `{trust['reference_patches_validated_both']}` validated both / `{trust['reference_patches_total']}` total",
 			f"- reference patches created 7d: `{trust['reference_patches_created_7d']}`",

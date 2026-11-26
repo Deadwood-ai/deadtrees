@@ -30,11 +30,6 @@ export interface UseVectorLayersOptions {
 	getForestCoverVisible?: () => boolean;
 	/** Layer opacity */
 	opacity?: number;
-	/** Quality flags for conditional rendering */
-	deadwoodQuality?: boolean | string | null;
-	forestCoverQuality?: boolean | string | null;
-	/** Allow rendering layers even when quality is marked as bad */
-	allowBadQualityLayers?: boolean;
 }
 
 export interface UseVectorLayersReturn {
@@ -77,32 +72,12 @@ export function useVectorLayers({
 	getDeadwoodVisible,
 	getForestCoverVisible,
 	opacity = 1,
-	deadwoodQuality,
-	forestCoverQuality,
-	allowBadQualityLayers = false,
 }: UseVectorLayersOptions): UseVectorLayersReturn {
 	const deadwoodLayerRef = useRef<VectorTileLayer | null>(null);
 	const forestCoverLayerRef = useRef<VectorTileLayer | null>(null);
 	const selectionLayerRef = useRef<VectorTileLayer | null>(null);
 	const hoveredLabelIdRef = useRef<number | null>(null);
 	const isInitializedRef = useRef(false);
-
-	// Check quality flags
-	const allowDeadwood = (() => {
-		if (allowBadQualityLayers) return true;
-		if (deadwoodQuality === undefined || deadwoodQuality === null) return true;
-		if (typeof deadwoodQuality === "boolean") return deadwoodQuality;
-		if (typeof deadwoodQuality === "string") return deadwoodQuality !== "bad";
-		return true;
-	})();
-
-	const allowForestCover = (() => {
-		if (allowBadQualityLayers) return true;
-		if (forestCoverQuality === undefined || forestCoverQuality === null) return true;
-		if (typeof forestCoverQuality === "boolean") return forestCoverQuality;
-		if (typeof forestCoverQuality === "string") return forestCoverQuality !== "bad";
-		return true;
-	})();
 
 	// Set hovered label ID (triggers style update when it changes)
 	const setHoveredLabelId = useCallback((id: number | null) => {
@@ -119,7 +94,7 @@ export function useVectorLayers({
 		if (!map || isInitializedRef.current) return;
 
 		// Create deadwood layer
-		if (deadwoodLabelId && allowDeadwood) {
+		if (deadwoodLabelId) {
 			const deadwoodLayer = createDeadwoodVectorLayer(deadwoodLabelId, { 
 				showCorrectionStyling,
 				filterCorrectionStatus,
@@ -148,7 +123,7 @@ export function useVectorLayers({
 		}
 
 		// Create forest cover layer
-		if (forestCoverLabelId && isForestCoverDone && allowForestCover) {
+		if (forestCoverLabelId && isForestCoverDone) {
 			const forestCoverLayer = createForestCoverVectorLayer(forestCoverLabelId, { 
 				showCorrectionStyling,
 				filterCorrectionStatus,
@@ -193,7 +168,7 @@ export function useVectorLayers({
 	// Note: getDeadwoodVisible/getForestCoverVisible intentionally excluded from deps
 	// They're only used for initial visibility - updates handled by separate effects below
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [map, deadwoodLabelId, forestCoverLabelId, isForestCoverDone, showCorrectionStyling, filterCorrectionStatus, allowDeadwood, allowForestCover]);
+	}, [map, deadwoodLabelId, forestCoverLabelId, isForestCoverDone, showCorrectionStyling, filterCorrectionStatus]);
 
 	// Visibility controls
 	const setDeadwoodVisible = useCallback((visible: boolean) => {

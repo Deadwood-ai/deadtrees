@@ -1,23 +1,24 @@
-"""The deterministic parts of the dataset evaluation: band check, duplicate check and
-the dataset rule that combines them with the model answers.
+"""The deterministic parts of the dataset evaluation: the band check and the dataset rule
+that combines it with the model answers.
 
 Each rule returns one dataset-level `rule` assessment (model = rule name,
-prompt_version = rule version). The band and duplicate rules only flag: their worst
-call is `unsure` (a person looks), except a band layout that cannot be an RGB photo.
+prompt_version = rule version). The band check only flags: its worst call is `unsure`
+(a person looks), except a band layout that cannot be an RGB photo.
 """
 
 from dataclasses import dataclass, field
 
 import numpy as np
-from PIL import Image
 
-from .vocabulary import EXCLUDE_FLAGS, FIX_FLAGS, FLAGS
+from .vocabulary import EXCLUDE_FLAGS, FLAGS
 
 BAND_RULE = ('band_check', 'v1')
-DUPLICATE_RULE = ('duplicates', 'v1')
-DATASET_RULE = ('dataset-evaluation-rule', 'v2')
+# v3: the deciding model's answer (Haiku), no duplicate check and no "keep, fix": the verdict is ok,
+# major or unsure, and the COG and thumbnail issues are the row's output whatever the verdict
+DATASET_RULE = ('dataset-evaluation-rule', 'v3')
 EMPTY_COG_RULE = ('empty_cog', 'v1')
-PHASH_METHOD = 'phash-dct64-v1'
+# The issues a rule row reports as its output (audit.assessments.output), not as a verdict.
+OUTPUT_FLAGS = ('cog_issue', 'thumbnail_issue')
 
 
 @dataclass
@@ -32,6 +33,7 @@ class Call:
 	modes: dict = field(default_factory=dict)
 	details: dict = field(default_factory=dict)
 	raw: dict | None = None
+	output: dict | None = None  # a rule row's values besides its verdict: {"cog_issue": bool, ...}
 
 	def row(self) -> dict:
 		return {k: getattr(self, k) for k in self.__dataclass_fields__}
@@ -132,70 +134,13 @@ def band_check(source_profile: dict | None, bands: np.ndarray, valid: np.ndarray
 
 
 # ---------------------------------------------------------------------------
-# Duplicates
-# ---------------------------------------------------------------------------
-
-# How strongly each kind of match says "the same data uploaded again".
-DUPLICATE_KINDS = {
-	'same_file': 95,  # identical ortho sha256
-	'same_image': 85,  # near-identical overview (perceptual hash) on overlapping footprints
-	'same_flight_day': 70,  # same uploader, same date, overlapping footprints (a re-export or second flight)
-}
-
-
-def _dct_matrix(n: int) -> np.ndarray:
-	k = np.arange(n)
-	m = np.cos(np.pi * (2 * k[None, :] + 1) * k[:, None] / (2 * n)) * np.sqrt(2 / n)
-	m[0] /= np.sqrt(2)
-	return m
-
-
-def phash(rgb: np.ndarray, valid: np.ndarray) -> int:
-	"""64-bit perceptual hash of the overview (DCT of a 32 x 32 gray image), as a signed bigint."""
-	gray = rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)
-	gray[~valid] = gray[valid].mean() if valid.any() else 0
-	small = np.asarray(Image.fromarray(gray).resize((32, 32), Image.BILINEAR), np.float64)
-	d = _dct_matrix(32)
-	low = (d @ small @ d.T)[:8, :8].flatten()
-	bits = low > np.median(low[1:])
-	value = int(''.join('1' if bit else '0' for bit in bits), 2)
-	return value - (1 << 64) if value >= 1 << 63 else value
-
-
-def hamming(a: int, b: int) -> int:
-	return bin((a ^ b) & ((1 << 64) - 1)).count('1')
-
-
-def duplicate_check(candidates: list[dict]) -> Call:
-	"""Flag datasets that look like another upload of the same data; never excludes.
-
-	`candidates` come from audit.duplicate_candidates: other datasets with the same
-	file, a near-identical overview, or the same uploader and day, each with its
-	footprint overlap.
-	"""
-	scored = sorted(
-		({**c, 'likelihood': DUPLICATE_KINDS[c['kind']]} for c in candidates if c['kind'] in DUPLICATE_KINDS),
-		key=lambda c: (-c['likelihood'], c['dataset_id']),
-	)
-	likelihood = float(scored[0]['likelihood']) if scored else 0.0
-	return Call(
-		assessor_kind='rule',
-		model=DUPLICATE_RULE[0],
-		prompt_version=DUPLICATE_RULE[1],
-		verdict='unsure' if scored else 'ok',
-		major_likelihood=likelihood,
-		modes={'duplicate': {'likelihood': likelihood}},
-		details={'candidates': scored[:20]},
-	)
-
-
-# ---------------------------------------------------------------------------
 # Empty COG
 # ---------------------------------------------------------------------------
 
 
 def empty_cog(valid_share: float) -> Call:
-	"""A COG without a usable image is a broken ortho: excluded by rule, no model asked."""
+	"""A COG without a usable image is a broken ortho: excluded by rule, no model asked, so
+	no model raised a fix flag either."""
 	return Call(
 		assessor_kind='rule',
 		model=EMPTY_COG_RULE[0],
@@ -204,6 +149,7 @@ def empty_cog(valid_share: float) -> Call:
 		major_likelihood=100.0,
 		modes={'broken_ortho': {'likelihood': 100.0}},
 		details={'reason': 'broken_ortho', 'valid_share': round(valid_share, 5), 'why': ['no_valid_pixels']},
+		output=dict.fromkeys(OUTPUT_FLAGS, False),
 	)
 
 
@@ -212,101 +158,63 @@ def empty_cog(valid_share: float) -> Call:
 # ---------------------------------------------------------------------------
 
 RULE_CONFIG = {
-	'major_at': 60,  # mean model exclude likelihood that excludes
-	'disagree_at': 50,  # spread between the models that sends the dataset to a person
-	'fix_at': 50,  # fix-flag likelihood every model must reach to make a kept dataset "keep, fix"
+	'decider': 'haiku',  # the model whose answer decides (by name prefix); the others are shown only
+	'fix_at': 50,  # COG or thumbnail issue likelihood of the deciding model that raises the flag
 }
 
 
-def verdict_summary(why: list[str], models: list[Call], band: Call, duplicates: Call, mean: float) -> str:
-	"""One sentence a reviewer reads next to the verdict: the cause in words, else what the surer model saw."""
-	surest = max(models, key=lambda m: m.major_likelihood)
-	said = str(surest.details.get('summary') or '').strip()
-	votes = ', '.join(f'{m.model} {m.major_likelihood:.0f}' for m in models)
+def decider_of(models: list[Call], config: dict) -> Call | None:
+	return next((m for m in models if m.model.startswith(config['decider'])), None)
+
+
+def verdict_summary(why: list[str], decider: Call | None, band: Call) -> str:
+	"""One sentence a reviewer reads next to the verdict: the cause in words, else what the deciding model saw."""
+	said = str(decider.details.get('summary') or '').strip() if decider else ''
 	parts = []
 	for cause in why:
 		if cause == 'band_check':
 			finding = max(band.details.get('findings') or [{}], key=lambda f: f.get('likelihood', 0))
 			parts.append(f'Not a true colour photo by the band check: {finding.get("why", "wrong bands")}')
-		elif cause == 'models_disagree':
-			parts.append(f'The models disagree on excluding it ({votes})')
-		elif cause == 'model_unsure':
-			parts.append('A model could not tell from the images')
-		elif cause == 'model_excludes_below_threshold':
-			parts.append(f'A model votes to exclude, but the average likelihood is only {mean:.0f} ({votes})')
-		elif cause == 'duplicates':
-			first = (duplicates.details.get('candidates') or [{}])[0]
-			parts.append(
-				f'Possible duplicate of dataset {first.get("dataset_id")} ({str(first.get("kind")).replace("_", " ")})'
-			)
+		elif cause == 'no_decider':
+			parts.append('The deciding model gave no answer')
 	if not parts:
 		return said
 	return '. '.join(parts) + ('. ' + said if said else '.')
 
 
-def dataset_rule(models: list[Call], band: Call, duplicates: Call, config: dict = RULE_CONFIG) -> Call:
-	"""The dataset verdict: the models averaged, overruled by a clear band failure,
-	sent to a person when the models disagree or a rule flags."""
-	likelihoods = [m.major_likelihood for m in models]
-	mean = float(np.mean(likelihoods))
-	spread = float(max(likelihoods) - min(likelihoods))
-	modes = {
-		k: {'likelihood': round(float(np.mean([m.modes.get(k, {}).get('likelihood', 0) for m in models])), 1)}
-		for k in FLAGS
-	}
+def dataset_rule(models: list[Call], band: Call, config: dict = RULE_CONFIG) -> Call:
+	"""The dataset verdict, ok, major or unsure: what the deciding model (Haiku) says, overruled only by
+	a band layout that cannot be an RGB photo; unsure (a person looks) when it gave no answer. The other
+	models are stored and shown, not counted. A model's "fix" counts as keep. The COG and thumbnail
+	issues are the deciding model's, the row's output whatever the verdict."""
+	decider = decider_of(models, config)
+	modes = {k: {'likelihood': (decider.modes.get(k, {}).get('likelihood', 0) if decider else 0)} for k in FLAGS}
 	modes['not_rgb']['likelihood'] = max(modes['not_rgb']['likelihood'], band.major_likelihood)
-	modes['duplicate'] = {'likelihood': duplicates.major_likelihood}
-	# A fix both models name: one model alone asking for a fix proved to be noise (DT-1538).
-	fix_flags = [
-		k for k in FIX_FLAGS if min(m.modes.get(k, {}).get('likelihood', 0) for m in models) >= config['fix_at']
-	]
 	why = []
 	if band.verdict == 'major':
 		verdict = 'major'
 		why.append('band_check')
-	elif any(m.verdict == 'unsure' for m in models) or spread >= config['disagree_at']:
+	elif decider is None:
 		verdict = 'unsure'
-		why.append('models_disagree' if spread >= config['disagree_at'] else 'model_unsure')
-	elif mean >= config['major_at']:
-		verdict = 'major'
-		why.append('models_exclude')
-	elif any(m.verdict == 'major' for m in models):
-		# a model voted to exclude although the mean stays under the threshold: a person looks
-		verdict = 'unsure'
-		why.append('model_excludes_below_threshold')
-	elif band.verdict == 'unsure' or duplicates.verdict == 'unsure':
-		verdict = 'unsure'
-		why += [c.model for c in (band, duplicates) if c.verdict == 'unsure']
-	elif fix_flags:
-		verdict = 'minor'
-		why.append('fix_flagged')
+		why.append('no_decider')
 	else:
-		verdict = 'ok'
-	# The reason of the model that is surest the dataset should go, unless a rule is the cause.
-	surest = max(models, key=lambda m: m.major_likelihood)
-	if 'band_check' in why:
-		reason = 'not_rgb'
-	elif why == ['duplicates']:
-		reason = 'duplicate'
-	else:
-		reason = surest.details.get('reason')
+		verdict = 'ok' if decider.verdict == 'minor' else decider.verdict  # "fix" keeps the dataset
+	reason = 'not_rgb' if 'band_check' in why else (decider.details.get('reason') if decider else None)
 	return Call(
 		assessor_kind='rule',
 		model=DATASET_RULE[0],
 		prompt_version=DATASET_RULE[1],
 		verdict=verdict,
-		major_likelihood=round(max(mean, band.major_likelihood if band.verdict == 'major' else 0), 1),
+		major_likelihood=round(max(decider.major_likelihood if decider else 0, band.major_likelihood if band.verdict == 'major' else 0), 1),
 		modes=modes,
 		details={
 			'reason': reason if verdict in ('major', 'unsure') else None,
 			'why': why,
-			'summary': verdict_summary(why, models, band, duplicates, mean),
-			'model_mean': round(mean, 1),
-			'model_spread': round(spread, 1),
+			'summary': verdict_summary(why, decider, band),
+			'decider': decider.model if decider else None,
 			'models': {m.model: m.verdict for m in models},
 			'exclude_flags': {k: modes[k]['likelihood'] for k in EXCLUDE_FLAGS},
-			# what should be fixed, for the review page to name
-			'fix_flags': fix_flags if verdict == 'minor' else [],
 			'config': config,
 		},
+		output={k: modes[k]['likelihood'] >= config['fix_at'] for k in OUTPUT_FLAGS},
 	)

@@ -70,17 +70,7 @@ const completeDataset = {
   has_deadwood_prediction: true,
   freidata_doi: null,
   has_ml_tiles: false,
-  final_assessment: null,
-  deadwood_quality: null,
-  forest_cover_quality: null,
-  has_major_issue: null,
-  audit_date: null,
-  has_valid_acquisition_date: null,
-  has_valid_phenology: null,
-  audited_by: null,
-  audited_by_email: null,
-  show_deadwood_predictions: true,
-  show_forest_cover_predictions: true,
+  audit_decision: null,
 };
 
 const auditedDataset = {
@@ -88,13 +78,7 @@ const auditedDataset = {
   id: 3002,
   file_name: "audit-completed-local.tif",
   is_audited: true,
-  final_assessment: "fixable_issues",
-  deadwood_quality: "sentinel_ok",
-  forest_cover_quality: "great",
-  has_valid_acquisition_date: true,
-  has_valid_phenology: false,
-  audited_by: auditor.id,
-  audited_by_email: auditor.email,
+  audit_decision: "ok",
 };
 
 const incompleteDataset = {
@@ -111,6 +95,69 @@ const incompleteDataset = {
 };
 
 const datasets = [completeDataset, auditedDataset, incompleteDataset];
+
+/** A row of audit.dataset_results: nothing run, nothing to review, unless overridden. */
+const datasetResult = (dataset_id: number, over: Record<string, unknown> = {}) => ({
+  dataset_id,
+  current_status: "idle",
+  is_processing_done: true,
+  evaluation_decision: null,
+  evaluation_source: null,
+  cog_issue: false,
+  thumbnail_issue: false,
+  aoi_exists: false,
+  aoi_created_at: null,
+  aoi_source: null,
+  aoi_model_version: null,
+  georef_status: null,
+  georef_offset_m: null,
+  georef_source: null,
+  date_replace: null,
+  date_new: null,
+  date_predicted: null,
+  date_hdi80_days: null,
+  date_model_version: null,
+  date_estimated_at: null,
+  date_source: null,
+  phenology_probability: 0.8,
+  deadwood_total: null,
+  deadwood_major: null,
+  deadwood_minor: null,
+  deadwood_ok: null,
+  forest_cover_total: null,
+  forest_cover_major: null,
+  forest_cover_minor: null,
+  forest_cover_ok: null,
+  review_required: [],
+  last_reviewed_at: null,
+  in_benchmark: false,
+  checks_run: [],
+  ...over,
+});
+
+// The dataset to review: the evaluation could not decide, there is no AOI, and no reference
+// decides the georeferencing.
+const datasetResults = [
+  datasetResult(completeDataset.id, {
+    georef_status: "needs_review",
+    georef_offset_m: 22.6,
+    georef_source: "check",
+    deadwood_total: 20,
+    deadwood_major: 4,
+    deadwood_minor: 2,
+    deadwood_ok: 14,
+    review_required: ["evaluation", "aoi", "georef"],
+  }),
+  datasetResult(auditedDataset.id, {
+    evaluation_decision: "ok",
+    evaluation_source: "legacy",
+    aoi_exists: true,
+    georef_status: "estimated",
+    georef_offset_m: 4.1,
+    georef_source: "check",
+  }),
+  datasetResult(incompleteDataset.id, { is_processing_done: false, current_status: "cog" }),
+];
 
 const audits = [
   {
@@ -186,7 +233,8 @@ const georefCheck = {
   updated_at: "2026-10-02T06:00:00Z",
 };
 
-let savedAuditPayloads: Array<Record<string, unknown>> = [];
+let savedAnswerPayloads: Array<Record<string, unknown>> = [];
+let legacyAuditWrites = 0;
 let auditLeaseCalls: Array<{ rpc: string; body: Record<string, unknown> }> = [];
 let auditWriteLeaseHeaders: Array<string | undefined> = [];
 let savedAoiPayloads: Array<Record<string, unknown>> = [];
@@ -197,8 +245,6 @@ const installAuthenticatedUser = async (
     canAudit: boolean;
     canOperate?: boolean;
     auditDatasetRequestFails?: boolean;
-    /** a saved Good audit that the georeferencing check now disagrees with */
-    reReview?: boolean;
   },
 ) => {
   await installLocalSession(page, {
@@ -254,8 +300,6 @@ const fulfillSupabaseRequest = async (
     canAudit: boolean;
     canOperate?: boolean;
     auditDatasetRequestFails?: boolean;
-    /** a saved Good audit that the georeferencing check now disagrees with */
-    reReview?: boolean;
   },
 ) => {
   const request = route.request();
@@ -265,11 +309,6 @@ const fulfillSupabaseRequest = async (
   const method = request.method();
   const wantsObject =
     request.headers()["accept"]?.includes("vnd.pgrst.object") ?? false;
-
-  if (segments.at(-2) === "rpc" && resource === "get_dataset_audit_with_emails" && options.reReview) {
-    await fulfillJson(route, [{ dataset_id: completeDataset.id, is_georeferenced: true, audit_date: "2026-03-01T10:00:00Z" }]);
-    return;
-  }
 
   if (segments.at(-2) === "rpc") {
     await fulfillRpc(route, resource);
@@ -305,7 +344,7 @@ const fulfillSupabaseRequest = async (
     const selectedColumns = url.searchParams.get("select");
     if (
       options.auditDatasetRequestFails &&
-      (selectedColumns === "*" || selectedColumns?.split(",").includes("is_audited"))
+      selectedColumns?.split(",").includes("file_name")
     ) {
       await route.fulfill({
         status: 500,
@@ -371,18 +410,21 @@ const fulfillSupabaseRequest = async (
     return;
   }
 
-  if (resource === "dataset_audit_suggestions") {
-    await fulfillJson(route, [
-      {
-        dataset_id: completeDataset.id,
-        field: "is_georeferenced",
-        value: false,
-        source: "georef_check_v1",
-        reason: "strong",
-        details: { p90_m: 22.6, evidence_groups: 2, references: ["esri", "de-bw-dop20"] },
-        updated_at: "2026-10-02T06:00:00Z",
-      },
-    ]);
+  if (resource === "dataset_results") {
+    const idFilter = url.searchParams.get("dataset_id");
+    const row = datasetResults.find((r) => idFilter === `eq.${r.dataset_id}`);
+    await fulfillJson(route, idFilter ? (wantsObject ? (row ?? null) : row ? [row] : []) : datasetResults);
+    return;
+  }
+
+  // the Audit Review stores answers as person rows of audit.assessments
+  if (resource === "assessments" && method === "POST") {
+    const rows = request.postDataJSON() as Array<Record<string, unknown>>;
+    savedAnswerPayloads.push(...rows);
+    await fulfillJson(
+      route,
+      rows.map((row, i) => ({ id: 900 + savedAnswerPayloads.length + i, crop_id: null, label_id: null, assessor: auditor.id, details: {}, ...row })),
+    );
     return;
   }
 
@@ -393,6 +435,7 @@ const fulfillSupabaseRequest = async (
 
   if (resource === "v2_aois" || resource === "v2_orthos") {
     if (resource === "v2_aois" && method === "POST") {
+      auditWriteLeaseHeaders.push(request.headers()["x-audit-lease"]);
       const payload = request.postDataJSON();
       const rows = Array.isArray(payload) ? payload : [payload];
       savedAoiPayloads.push(...(rows as Array<Record<string, unknown>>));
@@ -410,42 +453,9 @@ const fulfillSupabaseRequest = async (
     return;
   }
 
-  if (resource === "dataset_audit") {
-    if (method === "HEAD") {
-      await route.fulfill({
-        status: 200,
-        headers: { "content-range": "0-0/1" },
-      });
-      return;
-    }
-
-    if (method === "POST" || method === "PATCH") {
-      const payload = request.postDataJSON() ?? {};
-      const rows = Array.isArray(payload) ? payload : [payload];
-      savedAuditPayloads.push(...(rows as Array<Record<string, unknown>>));
-      auditWriteLeaseHeaders.push(request.headers()["x-audit-lease"]);
-      await fulfillJson(
-        route,
-        rows.map((row) => ({ ...row, id: 1 })),
-      );
-      return;
-    }
-
-    await fulfillJson(route, []);
-    return;
-  }
-
-  if (resource === "audit_review_queue" && options.reReview) {
-    await fulfillJson(route, [
-      {
-        dataset_id: completeDataset.id,
-        item: "is_georeferenced",
-        fields: ["is_georeferenced"],
-        reason: "suggestion_changed:georef_check_v1",
-        since: "2026-10-02T06:00:00Z",
-      },
-    ]);
-    return;
+  // the legacy audit is read-only history: nothing may write it
+  if (resource === "dataset_audit" && method !== "GET" && method !== "HEAD") {
+    legacyAuditWrites += 1;
   }
 
   await fulfillJson(route, wantsObject ? null : []);
@@ -538,7 +548,8 @@ const fulfillJson = async (route: Route, json: unknown) => {
 
 test.describe("auditor local e2e", () => {
   test.beforeEach(() => {
-    savedAuditPayloads = [];
+    savedAnswerPayloads = [];
+    legacyAuditWrites = 0;
     savedAoiPayloads = [];
     auditLeaseCalls = [];
     auditWriteLeaseHeaders = [];
@@ -572,7 +583,7 @@ test.describe("auditor local e2e", () => {
     });
   }
 
-  test("auditor can triage audit queues without a processing segment", async ({
+  test("auditor moves through the Audit Review tabs, each the same table with a fixed chip", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
@@ -580,48 +591,52 @@ test.describe("auditor local e2e", () => {
     await page.goto("/dataset-audit");
     await dismissCookieBanner(page);
 
-    await expect(
-      page.getByRole("heading", { name: "Dataset Audits" }),
-    ).toBeVisible();
-    await expect(page.getByText("Local Forest")).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Start Audit" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Audit Review", exact: true })).toBeVisible();
+    const table = page.getByTestId("audit-review-table");
+    await expect(table.getByText("Local Forest").first()).toBeVisible();
+    await expect(page.getByTestId("audit-list-count")).toHaveText("3 of 3 datasets");
+    const count = page.getByTestId("audit-list-count");
 
-    await page.getByText("Completed").click();
-    await expect(page.getByText("Fixable")).toBeVisible();
-    await expect(page.getByText(auditor.email)).toBeVisible();
-    await page.getByPlaceholder("Filter by ID").fill(String(auditedDataset.id));
-    await expect(
-      page.locator("tr").filter({ hasText: String(auditedDataset.id) }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Clear all filters" }).click();
+    await page.getByText("Pending audit reviews").click();
+    // a subset tab: n of N, with its chip fixed
+    await expect(count.locator(".ant-tag")).toHaveText("Review required");
+    await expect(count).toContainText("1 of 3 datasets");
+    await expect(table.getByText("Needs review (best reference 23 m)")).toBeVisible();
+    await expect(table.locator(".ant-tag").filter({ hasText: "Georeferencing" })).toBeVisible();
 
-    await page.getByText("Edits & Flags").click();
-    await expect(page.getByText("Pending Edits").first()).toBeVisible();
-    await expect(page.getByText("Flags").first()).toBeVisible();
+    await page.getByText("All audits").click();
+    await page.getByText("Filters").click();
+    await page.getByPlaceholder("ID").fill(String(auditedDataset.id));
+    await expect(count).toHaveText("1 of 3 datasets");
+    await expect(table.locator(".ant-tag").filter({ hasText: /^OK$/ })).toBeVisible();
+    await page.getByRole("button", { name: "Clear filters" }).click();
 
-    await page.getByText("Reference").click();
-    await expect(
-      page.getByRole("button", { name: "Generate Patches" }),
-    ).toBeVisible();
+    await page.getByText("Edits & flags").click();
+    await expect(count.locator(".ant-tag")).toHaveText("Edits or user reports");
+    await expect(count).toContainText("1 of 3 datasets");
+
+    // the lists apart from the audit, under Other
+    const other = page.getByTestId("audit-list-group-1");
+    await expect(other.getByRole("heading", { name: "Other" })).toBeVisible();
+    await other.getByText("Segmentation Benchmark").click();
+    await expect(page.getByRole("button", { name: "Generate patches" })).toBeVisible();
+
+    await other.getByText("Legacy Manual Audits").click();
+    await expect(page).toHaveURL(/view=legacy/);
+    await expect(page.getByTestId("legacy-audit-list").getByText("Fixable issues")).toBeVisible();
+    await expect(page.getByTestId("legacy-audit-list").getByText(auditor.email)).toBeVisible();
 
     await expect(page.getByText("⚙️ Processing")).toHaveCount(0);
   });
 
-  test("audit queue uses an explicit lightweight dataset projection", async ({
+  test("the list uses an explicit lightweight dataset projection", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
 
     const datasetRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
-      const selectedColumns = url.searchParams.get("select");
-      return (
-        url.pathname.endsWith("/v2_full_dataset_view") &&
-        (selectedColumns === "*" ||
-          selectedColumns?.split(",").includes("is_audited") === true)
-      );
+      return url.pathname.endsWith("/v2_full_dataset_view") && !url.searchParams.has("id") && !url.searchParams.has("pending_corrections_count");
     });
 
     await page.goto("/dataset-audit");
@@ -633,19 +648,11 @@ test.describe("auditor local e2e", () => {
 
     expect(selectedColumns).toBeDefined();
     expect(selectedColumns).not.toContain("*");
-    expect(selectedColumns).toEqual(
-      expect.arrayContaining([
-        "id",
-        "file_name",
-        "is_audited",
-        "is_metadata_done",
-        "phenology_probability",
-      ]),
-    );
-    await expect(page.getByText("Local Forest")).toBeVisible();
+    expect(selectedColumns).toEqual(expect.arrayContaining(["id", "file_name", "admin_level_1", "has_ml_tiles"]));
+    await expect(page.getByText("Local Forest").first()).toBeVisible();
   });
 
-  test("audit queue reports dataset load failures instead of showing zero", async ({
+  test("the list reports dataset load failures instead of showing zero", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, {
@@ -657,13 +664,13 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     await expect(
-      page.getByText("The audit queue couldn’t load", { exact: true }),
+      page.getByText("The Audit Review list couldn’t load", { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByText("DeadTrees didn’t respond. Check your connection and try again in a moment."),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
-    await expect(page.getByText("📋 Pending")).toHaveCount(0);
+    await expect(page.getByText("All audits")).toHaveCount(0);
   });
 
   test("old processing deep link redirects operators to the Factory workspace", async ({
@@ -687,33 +694,31 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     await expect(page.getByTestId("audit-processing-moved")).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Dataset Audits" }),
-    ).toBeVisible();
-    await expect(page.getByText("Local Forest")).toBeVisible();
-    await expect(page).toHaveURL(/tab=pending/);
+    await expect(page.getByRole("heading", { name: "Audit Review", exact: true })).toBeVisible();
+    await expect(page.getByText("Local Forest").first()).toBeVisible();
+    await expect(page).toHaveURL(/tab=all/);
     await expect(page.getByRole("menuitem", { name: "Factory" })).toHaveCount(0);
   });
 
-  test("auditor start action opens detail and claims the audit lease", async ({
+  test("auditor opens a dataset from the list and claims the review lease", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
 
-    // a filtered list: leaving the audit returns to it
+    // a filtered list: leaving the review returns to it
     await page.goto(`/dataset-audit?tab=pending&id=${completeDataset.id}`);
     await dismissCookieBanner(page);
-    await page.getByRole("button", { name: "Start Audit" }).click();
+    await page.getByRole("button", { name: "Open" }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`/dataset-audit/${completeDataset.id}(?:\\?.*)?$`),
     );
     await expect(
       page.getByRole("heading", {
-        name: new RegExp(`Audit: ${completeDataset.id}`),
+        name: new RegExp(`Audit Review: ${completeDataset.id}`),
       }),
     ).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(reporter.email)).toBeVisible();
+    await expect(page.getByText(reporter.email, { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /^3\. Georeferencing/ })).toBeVisible();
     await expect(
       page.getByRole("button", { name: /^save Save$/i }),
@@ -723,10 +728,10 @@ test.describe("auditor local e2e", () => {
       body: { p_dataset_id: completeDataset.id },
     });
 
-    // Leaving through the queue link releases the same page lease.
+    // Leaving through Cancel releases the same page lease; nothing changed, so it does not ask.
     const leaseId = auditLeaseCalls[0].body.p_lease_id;
     await page.getByRole("button", { name: "Cancel" }).click();
-    await page.getByRole("button", { name: "Leave Audit" }).click();
+    await expect(page.getByRole("button", { name: "Leave Audit" })).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/dataset-audit\\?tab=pending&id=${completeDataset.id}$`));
     await expect
       .poll(() =>
@@ -739,7 +744,7 @@ test.describe("auditor local e2e", () => {
       .toBe(true);
   });
 
-  test("auditor sees the measured georeferencing offset, its prefill and the matching viewer", async ({
+  test("auditor sees the georeferencing output, its references and the matching viewer", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
@@ -750,11 +755,8 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     const georef = await section(page, "Georeferencing");
-    await expect(georef.getByText("Poor, 22.6 m off")).toBeVisible({ timeout: 20_000 });
-    await expect(georef.getByText("Strong evidence: 22.6 m off on 90% of the area (Esri World Imagery (current) and DOP Baden-Württemberg (DE)).")).toBeVisible();
-    // the unsaved audit is prefilled with the suggestion and marked as such
-    await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
-    await expect(georef.getByText("suggested")).toBeVisible();
+    await expect(georef.getByText("Strong evidence: 22.6 m off on 90% of the area (Esri World Imagery (current) and DOP Baden-Württemberg (DE)).")).toBeVisible({ timeout: 20_000 });
+    await expect(georef.getByText("Passed (≤ 15 m)")).toBeVisible();
 
     // opening the section puts the map into georeferencing mode: reference picker, match lines, opacity
     const panel = page.getByText("Map mode: Georeferencing").locator("..");
@@ -767,46 +769,35 @@ test.describe("auditor local e2e", () => {
     await expect(page.getByText(/no confident matches \(uniform canopy, season or blank imagery\)/).first()).toBeVisible();
   });
 
-  test("a saved audit the georeferencing check disagrees with is marked for re-review", async ({ page }) => {
-    await installAuthenticatedUser(page, { canAudit: true, reReview: true });
-    await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com|lgl-bw\.de/, (route) => route.fulfill({ status: 204 }));
-
-    await page.goto(`/dataset-audit/${completeDataset.id}`);
-    await dismissCookieBanner(page);
-
-    await expect(page.getByText("Re-review Georeferencing:")).toBeVisible({ timeout: 20_000 });
-    const georef = await section(page, "Georeferencing");
-    await expect(georef.getByText("re-review")).toBeVisible();
-    await expect(georef.getByText(/Saved audit: Good\. Now suggested: Poor/)).toBeVisible();
-    await expect(georef.getByRole("radio", { name: /Poor/ })).toBeChecked();
-  });
-
-  test("saving with a missing answer opens the section that holds it", async ({ page }) => {
+  test("the review line follows the answers on the page", async ({ page }) => {
     await installAuthenticatedUser(page, { canAudit: true });
     await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com|lgl-bw\.de/, (route) => route.fulfill({ status: 204 }));
 
     await page.goto(`/dataset-audit/${completeDataset.id}`);
     await dismissCookieBanner(page);
-    await expect(page.getByTestId("audit-decision")).toBeVisible({ timeout: 20_000 });
 
-    // "Ready" can only be saved with an AOI
-    await expect(page.locator('[data-testid="dataset-audit-map"] .ol-viewport')).toBeVisible({ timeout: 20_000 });
-    await drawAuditAoi(page);
-    await page.getByRole("button", { name: /^save Save AOI$/i }).click();
-    await expect(page.getByText("Unsaved AOI edits")).toBeHidden();
-
-    // the AOI section is open and the others closed; "Ready" needs the COG answer inside the first one
-    const evaluation = page.getByRole("button", { name: /^1\. Dataset evaluation/ });
-    await expect(evaluation).toHaveAttribute("aria-expanded", "false");
-    await page.getByTestId("audit-decision").locator("label").filter({ hasText: "Ready" }).click();
-    await page.getByRole("button", { name: /^save Save$/i }).click();
-
-    await expect(evaluation).toHaveAttribute("aria-expanded", "true");
-    await expect(page.getByTestId("audit-cog").getByText("Please assess COG quality")).toBeVisible();
-    expect(savedAuditPayloads).toHaveLength(0);
+    const line = page.getByTestId("audit-review-required");
+    await expect(line).toHaveText("Review required for Dataset evaluation, Area of interest, Georeferencing", { timeout: 20_000 });
+    await (await section(page, "Georeferencing")).getByText("Passed (≤ 15 m)").click();
+    await expect(line).toHaveText("Review required for Dataset evaluation, Area of interest");
+    await expect(page.getByRole("button", { name: /^3\. Georeferencing/ })).not.toContainText("Review required");
   });
 
-  test("direct audit detail links retain queue navigation context", async ({
+  test("an exclusion is not saved without its reason", async ({ page }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+    await page.route(/arcgisonline\.com|wayback\.maptiles\.arcgis\.com|lgl-bw\.de/, (route) => route.fulfill({ status: 204 }));
+
+    await page.goto(`/dataset-audit/${completeDataset.id}`);
+    await dismissCookieBanner(page);
+
+    const evaluation = await section(page, "Dataset evaluation");
+    await evaluation.getByTestId("audit-evaluation-decision").getByText("Exclude", { exact: true }).click();
+    await page.getByRole("button", { name: /^save Save$/i }).click();
+    await expect(page.getByText("Pick why the dataset is excluded.")).toBeVisible();
+    expect(savedAnswerPayloads).toHaveLength(0);
+  });
+
+  test("direct review links retain the list's navigation context", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
@@ -816,7 +807,7 @@ test.describe("auditor local e2e", () => {
 
     await expect(
       page.getByRole("heading", {
-        name: new RegExp(`Audit: ${completeDataset.id}`),
+        name: new RegExp(`Audit Review: ${completeDataset.id}`),
       }),
     ).toBeVisible({ timeout: 20_000 });
     await expect(
@@ -824,116 +815,64 @@ test.describe("auditor local e2e", () => {
     ).toBeVisible();
   });
 
-  test("auditor can complete the audit form with AOI and save the review", async ({
+  test("auditor answers the review, draws the AOI, and Save stores only person rows", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
 
-    await page.goto("/dataset-audit");
+    await page.goto("/dataset-audit?tab=pending");
     await dismissCookieBanner(page);
-    await page.getByRole("button", { name: "Start Audit" }).click();
+    await page.getByRole("button", { name: "Open" }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`/dataset-audit/${completeDataset.id}(?:\\?.*)?$`),
     );
-    await expect(page.getByTestId("dataset-audit-map")).toBeVisible({
-      timeout: 20_000,
-    });
     await expect(
       page.locator('[data-testid="dataset-audit-map"] .ol-viewport'),
     ).toBeVisible({ timeout: 20_000 });
 
-    await (await section(page, "Georeferencing")).getByText(/Good/).click();
-    await (await section(page, "Acquisition date")).getByText(/Valid/).click();
-
-    const phenologyCard = await section(page, "Phenology");
-    await phenologyCard.getByText(/In Season/).click();
-    // notes stay behind "Add a … note" links until they are needed
-    await phenologyCard.getByRole("button", { name: "Add a phenology note" }).click();
-    await phenologyCard
-      .getByPlaceholder("Seasonal observations...")
-      .fill("Leaf-on season confirmed in local workflow smoke.");
-
-    // the prediction check is two steps, one layer each
-    const deadwoodCard = await section(page, "Deadwood prediction");
-    await deadwoodCard.getByText("🟡 OK").click();
-    await deadwoodCard.getByRole("button", { name: "Add a deadwood note" }).click();
-    await deadwoodCard
-      .getByPlaceholder("Deadwood notes...")
-      .fill("Deadwood cover is usable with minor noise.");
-    const treeCoverCard = await section(page, "Tree cover prediction");
-    await treeCoverCard.getByText("🟢 Great").click();
-    await treeCoverCard.getByRole("button", { name: "Add a tree cover note" }).click();
-    await treeCoverCard
-      .getByPlaceholder("Tree cover notes...")
-      .fill("Tree cover looks consistent.");
-
-    const cogCard = (await section(page, "Dataset evaluation")).getByTestId("audit-cog");
-    await cogCard.getByText(/Good/).click();
-    await cogCard
-      .getByPlaceholder(/COG issue details/)
-      .fill("COG renders correctly in the audit map.");
-
-    const thumbnailCard = (await section(page, "Dataset evaluation")).getByTestId("audit-thumbnail");
-    await thumbnailCard.getByText(/Good/).click();
-    await thumbnailCard
-      .getByPlaceholder(/Thumbnail issue details/)
-      .fill("Thumbnail represents the dataset.");
+    const evaluation = await section(page, "Dataset evaluation");
+    await evaluation.getByTestId("audit-evaluation-decision").getByText("OK", { exact: true }).click();
+    await evaluation.getByLabel("Note on the decision").fill("Sharp orthophoto, usable.");
+    await (await section(page, "Georeferencing")).getByText("Passed (≤ 15 m)").click();
 
     await drawAuditAoi(page);
     await expect(page.getByText(/AOI defined/)).toBeVisible();
     await page.getByRole("button", { name: /^save Save AOI$/i }).click();
-    await expect
-      .poll(() => savedAoiPayloads.length, { timeout: 10_000 })
-      .toBe(1);
+    await expect.poll(() => savedAoiPayloads.length, { timeout: 10_000 }).toBe(1);
     await expect(page.getByText("Unsaved AOI edits")).toBeHidden();
-
-    const finalAssessmentCard = page.getByTestId("audit-decision");
-    // every section is answered, so the derived decision is Ready; confirm it
-    await expect(finalAssessmentCard.getByText("Ready", { exact: true }).first()).toBeVisible();
-    await finalAssessmentCard.getByRole("button", { name: "Confirm" }).click();
-    await finalAssessmentCard.getByRole("button", { name: "Add a note" }).click();
-    await finalAssessmentCard
-      .getByPlaceholder("Notes on the decision...")
-      .fill("Audit workflow local smoke completed.");
+    await expect(page.getByTestId("audit-review-required")).toHaveText("No review required");
 
     await page.getByRole("button", { name: /^save Save$/i }).click();
+    await expect.poll(() => savedAnswerPayloads.length, { timeout: 10_000 }).toBe(2);
+    await expect(page).toHaveURL(/\/dataset-audit\?tab=pending/);
 
-    await expect
-      .poll(() => savedAuditPayloads.length, { timeout: 10_000 })
-      .toBe(1);
-
-    expect(savedAoiPayloads[0]).toMatchObject({
-      dataset_id: completeDataset.id,
-      user_id: auditor.id,
-      is_whole_image: false,
-    });
-    expect(savedAoiPayloads[0].geometry).toMatchObject({
-      type: "MultiPolygon",
-    });
-
-    // The save is bound to the lease this page claimed.
+    expect(savedAoiPayloads[0]).toMatchObject({ dataset_id: completeDataset.id, user_id: auditor.id, is_whole_image: false });
+    // the AOI save is bound to the lease this page claimed
     const claimedLease = auditLeaseCalls.find((call) => call.rpc === "claim_dataset_audit_lock")?.body.p_lease_id;
     expect(claimedLease).toBeTruthy();
     expect(auditWriteLeaseHeaders[0]).toBe(claimedLease);
-    expect(savedAuditPayloads[0]).toMatchObject({
-      dataset_id: completeDataset.id,
-      is_georeferenced: true,
-      has_valid_acquisition_date: true,
-      has_valid_phenology: true,
-      deadwood_quality: "sentinel_ok",
-      deadwood_notes: "Deadwood cover is usable with minor noise.",
-      forest_cover_quality: "great",
-      forest_cover_notes: "Tree cover looks consistent.",
-      has_cog_issue: false,
-      cog_issue_notes: "COG renders correctly in the audit map.",
-      has_thumbnail_issue: false,
-      thumbnail_issue_notes: "Thumbnail represents the dataset.",
-      final_assessment: "no_issues",
-      notes: "Audit workflow local smoke completed.",
-      aoi_done: true,
-      audited_by: auditor.id,
-    });
+    expect(savedAnswerPayloads).toEqual([
+      expect.objectContaining({
+        check_key: "dataset_evaluation",
+        dataset_id: completeDataset.id,
+        layer: "image",
+        verdict: "ok",
+        reason_text: "Sharp orthophoto, usable.",
+        output: { cog_issue: false, thumbnail_issue: false },
+        assessor_kind: "person",
+        assessor_user_id: auditor.id,
+      }),
+      expect.objectContaining({
+        check_key: "georef",
+        dataset_id: completeDataset.id,
+        layer: "georef",
+        verdict: null,
+        output: { status: "passed" },
+        assessor_kind: "person",
+      }),
+    ]);
+    expect(legacyAuditWrites).toBe(0);
   });
 });
 

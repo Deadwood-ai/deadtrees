@@ -18,14 +18,14 @@ SUGGESTED_FIELD = 'is_georeferenced'
 
 
 def process_georef_check(task: QueueTask, token: str, temp_dir: Path):
-	"""Measure the georeferencing offset and prefill the georeferencing audit item.
+	"""Measure the georeferencing offset for the audit's georeferencing check.
 
 	Matches the dataset's COG (inside its AOI) against Esri World Imagery, its
 	dated Wayback captures and any keyed provider, and stores the per-reference
-	evidence and the Good/Poor/uncertain call in v2_georef_checks. A Good or Poor
-	call becomes the is_georeferenced audit suggestion; when it disagrees with a
-	saved audit, the dataset appears in audit_review_queue (the Re-review tab).
-	An uncertain call leaves no suggestion. Saved audits are never modified.
+	evidence and the Good/Poor/uncertain call in v2_georef_checks, with its audit
+	run. The audit reads its georeferencing output from that row. The Good/Poor
+	call is still sent as p_suggestion, which store_georef_check no longer writes
+	(the Audit Review revision keeps the parameter for compatibility).
 	"""
 	import torch
 
@@ -148,8 +148,8 @@ def suggestion_row(dataset_id: int, check) -> dict | None:
 
 
 def _store(token: str, task: QueueTask, check) -> None:
-	"""Check row, audit run with its model assessment, and audit suggestion in one
-	transaction (store_georef_check)."""
+	"""Check row and audit run with its model assessment in one transaction
+	(store_georef_check, which ignores p_suggestion since the Audit Review revision)."""
 	with use_client(token) as client:
 		client.rpc(
 			'store_georef_check',

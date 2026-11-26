@@ -1,22 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { IAuditAssessment, IAuditCheckEvidence, IAuditChecks, IAuditQueueRow } from "../types/auditChecks";
-import type { IGeorefCheck } from "../types/georefCheck";
+import type { IAuditAssessment } from "../types/auditChecks";
 import {
-  answeredFormValues,
-  auditSection,
-  automatedVerdict,
-  deriveDecision,
+  AUDIT_SECTIONS,
   evaluationAnswerText,
   evaluationFlags,
-  formValuesForVerdict,
-  legacySectionStatus,
   mergeAnswers,
-  myAnswer,
+  reviewAnswer,
   orderedCrops,
-  othersAnswers,
   runEvidence,
-  sectionOfField,
-  sectionStatus,
+  sectionOfCheck,
   stepCrop,
 } from "./auditChecks";
 
@@ -43,38 +35,6 @@ const row = (overrides: Partial<IAuditAssessment>): IAuditAssessment => ({
 const person = (userId: string, overrides: Partial<IAuditAssessment> = {}) =>
   row({ assessor_kind: "person", assessor_user_id: userId, assessor: userId, model: null, prompt_version: null, ...overrides });
 
-const queue = (overrides: Partial<IAuditQueueRow>): IAuditQueueRow => ({
-  dataset_id: 7,
-  check_key: "georef",
-  layer: "georef",
-  run_id: 10,
-  verdict: "major",
-  reason: "review_all",
-  ...overrides,
-});
-
-const evidence = (overrides: Partial<IAuditCheckEvidence> = {}): IAuditCheckEvidence => ({
-  run: { id: 10, check_key: "georef", inputs: {}, evidence: {} },
-  automated: [row({})],
-  queue: [queue({})],
-  crops: [],
-  images: [],
-  ...overrides,
-});
-
-describe("automatedVerdict", () => {
-  it("is the review queue's verdict for the layer", () => {
-    const both = evidence({ queue: [queue({ layer: "deadwood", verdict: "unsure" }), queue({ layer: "forest_cover", verdict: "ok" })] });
-    expect(automatedVerdict(both, "deadwood")).toBe("unsure");
-    expect(automatedVerdict(both, "forest_cover")).toBe("ok");
-  });
-
-  it("is null without a run or a call on the layer", () => {
-    expect(automatedVerdict(undefined, "georef")).toBeNull();
-    expect(automatedVerdict(evidence({ queue: [] }), "georef")).toBeNull();
-  });
-});
-
 describe("answers", () => {
   const people = [
     person("me", { verdict: "ok", run_id: 10 }),
@@ -83,96 +43,19 @@ describe("answers", () => {
   ];
   const target = { checkKey: "georef" as const, layer: "georef" as const };
 
-  it("finds my answer on the current run only", () => {
-    expect(myAnswer(people, "me", 10, target)?.verdict).toBe("ok");
-    expect(myAnswer(people, "me", 11, target)).toBeNull();
+  it("takes the review's latest answer on the current run, whoever gave it", () => {
+    const later = person("clemens", { id: 2, verdict: "major", run_id: 10 });
+    expect(reviewAnswer([...people.slice(0, 1), later], 10, target)?.verdict).toBe("major");
+    expect(reviewAnswer(people, 11, target)).toBeNull();
   });
 
-  it("lists others' answers on the same target and run", () => {
-    expect(othersAnswers(people, "me", 10, target).map((a) => a.assessor_user_id)).toEqual(["clemens"]);
-  });
-
-  it("replaces my earlier answer on a target and keeps everyone else's", () => {
+  it("replaces a person's earlier answer on a target", () => {
     const changed = person("me", { id: 9, verdict: "major", run_id: 10 });
     const merged = mergeAnswers(people, [changed]);
     expect(merged).toHaveLength(3);
-    expect(myAnswer(merged, "me", 10, target)?.id).toBe(9);
-    expect(othersAnswers(merged, "me", 10, target)).toHaveLength(1);
+    expect(reviewAnswer(merged, 10, target)?.id).toBe(9);
     // an answer on another crop is a new target
     expect(mergeAnswers(people, [person("teja", { crop_id: 5, layer: "deadwood" })])).toHaveLength(4);
-  });
-});
-
-describe("sectionStatus", () => {
-  const georef = auditSection("georef");
-
-  it("needs you until you answer", () => {
-    expect(sectionStatus(georef, evidence(), false)).toEqual({ label: "Needs you", tone: "bad", needsYou: true });
-    expect(sectionStatus(georef, evidence(), true)).toEqual({ label: "Answered", tone: "ok", needsYou: false });
-  });
-
-  it("shows the call when the result is applied without review", () => {
-    const settled = evidence({ queue: [queue({ reason: null, verdict: "ok" })] });
-    expect(sectionStatus(georef, settled, false)).toEqual({ label: "Good", tone: "ok", needsYou: false });
-  });
-});
-
-describe("legacySectionStatus", () => {
-  const inputs = { hasAOI: false, phenology: undefined, georefCheck: null, dateEstimate: null, reviewItems: [] };
-  const georefCheck = { decision: "poor", evidence_level: "gross", reason: "gross_offset", p90_m: 40, reference_evidence: [] } as unknown as IGeorefCheck;
-
-  it("says not run yet for a check without any result, and manual for a date without an estimate", () => {
-    for (const id of ["evaluation", "georef", "deadwood", "forest"] as const) {
-      expect(legacySectionStatus(id, inputs)).toEqual({ label: "Not run yet", tone: "todo", needsYou: false });
-    }
-    expect(legacySectionStatus("date", inputs)).toEqual({ label: "Manual", tone: "todo", needsYou: false });
-  });
-
-  it("reads the AOI and the manual phenology answer", () => {
-    expect(legacySectionStatus("aoi", inputs).label).toBe("Missing");
-    expect(legacySectionStatus("aoi", { ...inputs, hasAOI: true }).label).toBe("Set");
-    expect(legacySectionStatus("phenology", inputs).label).toBe("Manual");
-    expect(legacySectionStatus("phenology", { ...inputs, phenology: false })).toEqual({ label: "Out of season", tone: "warn", needsYou: false });
-  });
-
-  it("shows the older georeferencing check, and asks for you when it is under re-review", () => {
-    expect(legacySectionStatus("georef", { ...inputs, georefCheck })).toEqual({ label: "Poor", tone: "bad", needsYou: false });
-    const reviewItems = [{ item: "is_georeferenced" }] as never[];
-    expect(legacySectionStatus("georef", { ...inputs, georefCheck, reviewItems }).needsYou).toBe(true);
-  });
-});
-
-describe("verdicts and the saved audit", () => {
-
-  it("maps an answer onto the saved-audit field it decides", () => {
-    expect(formValuesForVerdict("georef", "georef", "major")).toEqual({ is_georeferenced: false });
-    expect(formValuesForVerdict("acquisition_date", "acquisition_date", "ok")).toEqual({ has_valid_acquisition_date: true });
-    expect(formValuesForVerdict("prediction_quality", "deadwood", "minor")).toEqual({ deadwood_quality: "sentinel_ok" });
-    expect(formValuesForVerdict("prediction_quality", "forest_cover", "major")).toEqual({ forest_cover_quality: "bad" });
-    expect(formValuesForVerdict("georef", "georef", "unsure")).toEqual({});
-  });
-
-  it("leaves the COG and thumbnail fields to the reviewer", () => {
-    expect(formValuesForVerdict("dataset_evaluation", "image", "minor")).toEqual({});
-  });
-
-  it("collects the fields my answers on the current runs decide", () => {
-    const checks = {
-      available: true,
-      checks: {
-        georef: evidence(),
-        prediction_quality: evidence({ run: { id: 20, check_key: "prediction_quality", inputs: {}, evidence: {} } }),
-      },
-      people: [
-        person("me", { verdict: "ok" }),
-        person("me", { check_key: "prediction_quality", layer: "deadwood", run_id: 20, verdict: "major" }),
-        // an answer on an earlier run and someone else's answer decide nothing
-        person("me", { check_key: "prediction_quality", layer: "forest_cover", run_id: 19, verdict: "major" }),
-        person("clemens", { check_key: "prediction_quality", layer: "forest_cover", run_id: 20, verdict: "major" }),
-      ],
-    };
-    expect(answeredFormValues(checks, "me")).toEqual({ is_georeferenced: true, deadwood_quality: "bad" });
-    expect(answeredFormValues(undefined, "me")).toEqual({});
   });
 });
 
@@ -180,11 +63,11 @@ describe("the dataset evaluation answer", () => {
   const answer = (overrides: Partial<IAuditAssessment>) => person("me", { check_key: "dataset_evaluation", layer: "image", run_id: 30, ...overrides });
 
   it("says what a row decided in a few words", () => {
-    expect(evaluationAnswerText(answer({ verdict: "ok" }))).toBe("Keep");
-    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["cog_issue", "thumbnail_issue"] } }))).toBe("Keep (COG issue, thumbnail issue)");
-    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } }))).toBe("Keep (needs reprocessing)");
-    // an answer from before the flags existed
-    expect(evaluationAnswerText(answer({ verdict: "minor" }))).toBe("Keep (something to fix)");
+    expect(evaluationAnswerText(answer({ verdict: "ok" }))).toBe("OK");
+    expect(evaluationAnswerText(answer({ verdict: "ok", details: { fix_flags: ["cog_issue", "thumbnail_issue"] } }))).toBe("OK (COG issue, thumbnail issue)");
+    // an earlier "keep, fix" is OK
+    expect(evaluationAnswerText(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } }))).toBe("OK (needs reprocessing)");
+    expect(evaluationAnswerText(answer({ verdict: "minor" }))).toBe("OK");
     expect(evaluationAnswerText(answer({ verdict: "major", reason_code: "blurry" }))).toBe("Exclude (blurry)");
     // a rule row keeps its reason in the details
     expect(evaluationAnswerText(row({ assessor_kind: "rule", verdict: "major", details: { reason: "no_trees" } }))).toBe("Exclude (no trees)");
@@ -195,54 +78,6 @@ describe("the dataset evaluation answer", () => {
     expect(evaluationFlags(answer({ details: { fix_flags: ["reprocess", "blurry", "thumbnail_issue"] } }))).toEqual(["thumbnail_issue", "reprocess"]);
     expect(evaluationFlags(answer({ details: { fix_flags: "cog_issue" } }))).toEqual([]);
     expect(evaluationFlags(null)).toEqual([]);
-  });
-
-  it("sets the COG and thumbnail fields of the saved audit", () => {
-    const checks = (mine: IAuditAssessment): IAuditChecks => ({
-      available: true,
-      checks: { dataset_evaluation: evidence({ run: { id: 30, check_key: "dataset_evaluation", inputs: {}, evidence: {} } }) },
-      people: [mine],
-    });
-    // no flag means both are fine: nothing is left for the reviewer to click
-    expect(answeredFormValues(checks(answer({ verdict: "ok", details: { fix_flags: [] } })), "me")).toEqual({ has_cog_issue: false, has_thumbnail_issue: false });
-    expect(answeredFormValues(checks(answer({ verdict: "minor", details: { fix_flags: ["cog_issue"] } })), "me")).toEqual({ has_cog_issue: true, has_thumbnail_issue: false });
-    // reprocessing is no field of the saved audit; it keeps the answer at "keep, fix"
-    expect(answeredFormValues(checks(answer({ verdict: "minor", details: { fix_flags: ["reprocess"] } })), "me")).toEqual({ has_cog_issue: false, has_thumbnail_issue: false });
-    // an answer from before the flags existed leaves what the saved audit holds
-    expect(answeredFormValues(checks(answer({ verdict: "ok", details: {} })), "me")).toEqual({});
-  });
-});
-
-describe("deriveDecision", () => {
-  const complete = {
-    has_cog_issue: false,
-    has_thumbnail_issue: false,
-    is_georeferenced: true,
-    has_valid_acquisition_date: true,
-    has_valid_phenology: true,
-    deadwood_quality: "great" as const,
-  };
-
-  it("excludes on the dataset evaluation", () => {
-    expect(deriveDecision(complete, "major").disposition).toBe("exclude_completely");
-  });
-
-  it("makes any fixable finding a fix and names it", () => {
-    expect(deriveDecision({ ...complete, is_georeferenced: false }, "ok")).toEqual({
-      disposition: "fixable_issues",
-      because: ["georeferencing poor"],
-      open: [],
-    });
-  });
-
-  it("is ready only when every section is answered", () => {
-    expect(deriveDecision(complete, "ok").disposition).toBe("no_issues");
-    const open = deriveDecision({ ...complete, has_valid_phenology: undefined }, null);
-    expect(open).toEqual({ disposition: null, because: [], open: ["phenology"] });
-  });
-
-  it("does not let phenology decide", () => {
-    expect(deriveDecision({ ...complete, has_valid_phenology: false }, "ok").disposition).toBe("no_issues");
   });
 });
 
@@ -271,7 +106,6 @@ describe("crops", () => {
         row({ check_key: "prediction_quality", run_id: 20, crop_id: 1, layer: "deadwood", label_id: 52 }),
         row({ check_key: "georef", run_id: 10 }),
       ],
-      queue: [queue({ check_key: "prediction_quality", layer: "deadwood", run_id: 20 }), queue({})],
       // crop 1 is named by a row, crop 2 is in the check's set, crop 3 is another check's, crop 4 another ortho's
       crops: [crop(1, ["benchmark"]), crop(2, ["exclude"]), crop(3, ["evaluation"]), crop(4, ["exclude"], "b")],
       images: [
@@ -285,7 +119,6 @@ describe("crops", () => {
       ],
     });
     expect(judged.automated).toHaveLength(1);
-    expect(judged.queue).toHaveLength(1);
     expect(judged.crops.map((c) => c.id)).toEqual([1, 2]);
     expect(judged.images.map((i) => i.id)).toEqual([1, 2, 5]);
   });
@@ -297,7 +130,6 @@ describe("crops", () => {
     const run = { id: 21, check_key: "prediction_quality" as const, inputs: { ortho_sha256: "a" }, evidence: { judged: own } };
     const judged = runEvidence(run, {
       automated: [row({ check_key: "prediction_quality", run_id: 21, crop_id: 1, layer: "deadwood", label_id: 52 })],
-      queue: [],
       crops: [crop(1, ["exclude"]), crop(2, ["exclude"])],
       images: [image(1, 1, "raw"), image(2, 1, "deadwood_overlay", 52), image(3, 2, "raw")],
     });
@@ -312,7 +144,7 @@ describe("crops", () => {
     // an earlier version's overview is the stored row; this run judged another picture of the ortho
     const own = { crop_ids: [1], images: [{ kind: "overview", crop_index: null, storage_path: "audit/own-overview.jpg" }, { kind: "raw", crop_index: 1, storage_path: "audit/own-crop.jpg" }] };
     const run = { id: 22, check_key: "dataset_evaluation" as const, inputs: { ortho_sha256: "a" }, evidence: { judged: own } };
-    const judged = runEvidence(run, { automated: [], queue: [], crops: [crop(1, ["evaluation"])], images: [image(1, 1, "raw"), image(5, null, "overview")] });
+    const judged = runEvidence(run, { automated: [], crops: [crop(1, ["evaluation"])], images: [image(1, 1, "raw"), image(5, null, "overview")] });
     expect(judged.images.map((i) => [i.id, i.storage_path])).toEqual([
       [1, image(1, 1, "raw").storage_path],
       [5, "audit/own-overview.jpg"],
@@ -336,16 +168,13 @@ describe("crops", () => {
 });
 
 describe("section definitions", () => {
-  it("lets a reviewer pick any verdict where a check has three", () => {
-    expect(auditSection("evaluation").verdicts).toEqual(["ok", "minor", "major"]);
-    expect(auditSection("georef").verdicts).toEqual(["ok", "major"]);
+  it("goes through the seven steps in order, each review item answered by its own step", () => {
+    expect(AUDIT_SECTIONS.map((s) => s.id)).toEqual(["evaluation", "aoi", "georef", "date", "phenology", "forest", "deadwood"]);
+    expect(AUDIT_SECTIONS.map((s) => s.reviewItem).filter(Boolean)).toEqual(["evaluation", "aoi", "georef", "date"]);
   });
 
-  it("finds the section that holds a saved-audit field", () => {
-    expect(sectionOfField("has_cog_issue")).toBe("evaluation");
-    expect(sectionOfField("deadwood_quality")).toBe("deadwood");
-    expect(sectionOfField("forest_cover_quality")).toBe("forest");
-    expect(sectionOfField("has_valid_phenology")).toBe("phenology");
-    expect(sectionOfField("final_assessment")).toBeNull();
+  it("finds the step that shows a check", () => {
+    expect(sectionOfCheck("acquisition_date")).toBe("date");
+    expect(sectionOfCheck("prediction_quality")).toBe("forest");
   });
 });

@@ -23,7 +23,7 @@ def _answer(dw_major=10, fc_major=10, verdict='ok'):
 		{
 			'assessable': True,
 			'deadwood': {'errors': [], 'modes': modes('deadwood'), 'verdict': verdict, 'major_likelihood': dw_major},
-			'forest': {'errors': ['gaps'], 'modes': modes('forest'), 'verdict': verdict, 'major_likelihood': fc_major},
+			'forest': {'errors': ['gaps'], 'modes': modes('forest'), 'verdict': verdict, 'major_likelihood': fc_major, 'summary': 'Gaps are filled.'},
 		}
 	)
 
@@ -64,17 +64,24 @@ def test_ask_retries_a_malformed_answer_once():
 	assert a.layers['deadwood'].major_likelihood == 30
 
 
-def test_combined_averages_judges():
-	answers = [judge.parse('luna', _answer(dw_major=40)), judge.parse('haiku', _answer(dw_major=80))]
-	c = judge.combined(answers, 'deadwood')
-	assert c == {'major_likelihood': 60, 'area_pct': len(judge.MODES['deadwood']), 'judges': 2}
-	# a judge that could not assess the crop does not count
+def test_the_deciding_judge_counts_and_the_others_are_shown():
+	answers = [judge.parse('luna', _answer(dw_major=90)), judge.parse('haiku', _answer(dw_major=20))]
+	call = judge.deciding(answers, 'deadwood')
+	assert call['judge'] == 'haiku' and call['major_likelihood'] == 20
+	assert judge.deciding(answers, 'deadwood', 'luna')['major_likelihood'] == 90
+	# Haiku could not assess the crop: no call
 	blind = json.loads(_answer(dw_major=100))
 	for value in (False, 'false'):
 		blind['assessable'] = value
 		answers[1] = judge.parse('haiku', json.dumps(blind))
-		assert not answers[1].assessable and judge.combined(answers, 'deadwood')['major_likelihood'] == 40
-	assert judge.combined(answers[1:], 'deadwood')['major_likelihood'] is None
+		assert not answers[1].assessable and judge.deciding(answers, 'deadwood')['verdict'] is None
+
+
+def test_a_judge_may_call_a_layer_ambiguous():
+	reply = json.loads(_answer())
+	reply['forest']['verdict'] = 'ambiguous'
+	assert judge.parse('haiku', json.dumps(reply)).layers['forest'].verdict == 'ambiguous'
+	assert '"ambiguous"' in judge.PROMPT and judge.PROMPT_VERSION == 'pq-v7'
 
 
 def _tile(i, dw, fc):
@@ -109,21 +116,20 @@ def test_crop_count_follows_the_area():
 
 
 def test_dataset_rule_counts_major_crops_in_the_exclude_set():
-	major = {'major_likelihood': 90, 'area_pct': 30, 'judges': 2}
-	fine = {'major_likelihood': 5, 'area_pct': 0, 'judges': 2}
+	major = {'judge': 'haiku', 'verdict': 'major', 'major_likelihood': 90}
+	fine = {'judge': 'haiku', 'verdict': 'ok', 'major_likelihood': 5}
 	v = rule.dataset_verdict('forest', [{'combined': major}, {'combined': major}] + [{'combined': fine}] * 8)
-	assert v['verdict'] == 'bad' and v['major_crops'] == 2 and v['rule'] == rule.RULE_VERSION
+	assert v['verdict'] == 'bad' and v['major_crops'] == 2 and v['rule'] == rule.RULE_VERSION == 'pq-rule-v2'
 	v = rule.dataset_verdict(
 		'forest',
 		[{'combined': major}] + [{'combined': fine}] * 9,
 		[{'combined': major, 'weight': 0.25}, {'combined': fine, 'weight': 0.75}],
 	)
 	assert v['verdict'] == 'ok' and v['training_major_share'] == 0.25
-	assert rule.dataset_verdict('forest', [{'combined': {'major_likelihood': None}}])['verdict'] is None
-	# a version runs with the cuts it was registered with
-	strict = {'crop_major_cut': {'deadwood': 52.0, 'forest': 95.0}, 'min_major_crops': 1}
-	assert rule.dataset_verdict('forest', [{'combined': major}] * 3, config=strict)['verdict'] == 'ok'
-	assert rule.dataset_verdict('deadwood', [{'combined': major}], config=strict)['verdict'] == 'bad'
+	assert rule.dataset_verdict('forest', [{'combined': {'verdict': None}}])['verdict'] is None
+	# an ambiguous crop counts for no side
+	assert rule.dataset_verdict('forest', [{'combined': {'verdict': 'ambiguous'}}])['judged_crops'] == 0
+	assert rule.dataset_verdict('deadwood', [{'combined': major}], config={'decider': 'haiku', 'min_major_crops': 1})['verdict'] == 'bad'
 
 
 def _ortho(res=0.02, size=3000):
@@ -187,7 +193,7 @@ def test_store_rows_follow_the_audit_base_tables():
 	t = _tile(7, dw=0.1, fc=0.5)
 	t.sets, t.weight = ['exclude', 'training'], 0.2
 	answers = [judge.parse('luna-medium', _answer(dw_major=70, verdict='major'))]
-	r = CropResult(tile=t, crop=crop, answers=answers, combined={'deadwood': judge.combined(answers, 'deadwood')})
+	r = CropResult(tile=t, crop=crop, answers=answers, combined={'deadwood': judge.deciding(answers, 'deadwood')})
 	result = CheckResult(
 		dataset_id=42, epsg=EPSG, crops=[r], verdicts={'deadwood': {}, 'forest': {}}, tiles_total=9, seconds=1
 	)
@@ -209,6 +215,9 @@ def test_store_rows_follow_the_audit_base_tables():
 	]
 	assert rows[0]['modes'] == {'m0_not_assessable': {'likelihood': 0}}
 	assert rows[1]['modes']['m1_dead_missed'] == {'likelihood': 5.0, 'area_pct': 1.0}
+	# the layer's summary for data users is stored with its errors; an answer without one has none
+	assert rows[2]['details']['summary'] == 'Gaps are filled.'
+	assert rows[1]['details']['summary'] == ''
 	assert set(crop_row) == {
 		'dataset_id',
 		'ortho_sha256',
@@ -224,23 +233,6 @@ def test_store_rows_follow_the_audit_base_tables():
 	}, 'only columns audit.crops has'
 	out = store.summary(result)
 	assert out['coverage']['training_set'] == 1 and out['evidence']['failed_calls'] == 0
-
-
-def test_rule_rows_carry_the_dataset_verdict_per_layer():
-	from processor.src.prediction_quality_v1 import store
-	from processor.src.prediction_quality_v1.check import CheckResult
-
-	verdicts = {
-		'deadwood': rule.dataset_verdict('deadwood', []),
-		'forest': {'rule': rule.RULE_VERSION, 'verdict': 'bad'},
-	}
-	result = CheckResult(dataset_id=42, epsg=EPSG, crops=[], verdicts=verdicts, tiles_total=0, seconds=0)
-	rows = store.rule_rows(result, 5, {'deadwood': 11, 'forest': 12})
-	assert [(r['layer'], r['verdict'], r['assessor_kind'], r['crop_id'], r['run_id']) for r in rows] == [
-		('deadwood', 'unsure', 'rule', None, 5),
-		('forest_cover', 'major', 'rule', None, 5),
-	]
-	assert rows[1]['prompt_version'] == rule.RULE_VERSION and rows[1]['label_id'] == 12
 
 
 class _FakeTable:
@@ -350,13 +342,14 @@ def test_write_stores_crops_once_and_links_every_row():
 		put_image=lambda path, data, dataset_id: stored.__setitem__(path, data),
 	)
 	out = store.write(client, 5, result, **kw)
-	assert (out['crops'], out['assessments']) == (1, 5)  # gate + 2 layers + 2 rule rows
+	assert (out['crops'], out['assessments']) == (1, 3)  # gate + 2 layers; no dataset rule rows
 	assert out['judged'] == {'crop_ids': [1], 'exclude': [1], 'training': {}, 'images': []}
 	assert len(stored) == 3 and all(p.startswith(f'audit/prediction_quality/42/{sha[:16]}/crop-1/') for p in stored)
 	# a file is named by its content, so another image of the crop never replaces it
 	assert all(row['sha256'][:16] in row['storage_path'] for row in client.db['images'])
 	assert {r['run_id'] for r in client.db['assessments']} == {5}
-	assert {r['crop_id'] for r in client.db['assessments'] if r['assessor_kind'] == 'model'} == {1}
+	# crop rows only: the check stores no dataset verdict
+	assert {(r['assessor_kind'], r['crop_id']) for r in client.db['assessments']} == {('model', 1)}
 	# A second run on the same ortho reuses the crop and adds its new set.
 	t.sets = ['exclude', 'training']
 	t.weight = 0.5
@@ -530,10 +523,8 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 		'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major'),
 		'haiku-5.5': lambda prompt, images: _answer(dw_major=70, verdict='major'),
 	}
-	strict = {'crop_major_cut': {'deadwood': 52.0, 'forest': 5.0}, 'min_major_crops': 2}
 	ctx = SimpleNamespace(
 		run={'id': 5, 'dataset_id': 42},
-		version={'config': {'rule_config': strict}},
 		refresh=lambda: refreshed.append(not client.db.get('assessments')),
 		client=client,
 		judges=judges,
@@ -548,11 +539,11 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	assert len(client.db['crops']) == 4 and len(stored) == 12 and len(client.db['images']) == 12
 	assert all(dataset_id == 42 for dataset_id, _ in stored.values())
 	rows = client.db['assessments']
-	assert len(rows) == 4 * 2 * 3 + 2 and {r['run_id'] for r in rows} == {5}
-	rule_rows = {r['layer']: r for r in rows if r['assessor_kind'] == 'rule'}
-	assert rule_rows['deadwood']['verdict'] == 'major' and rule_rows['deadwood']['details']['major_crops'] == 4
-	# the registered version's cuts decide: a forest cut of 5 makes the judges' 10 major
-	assert rule_rows['forest_cover']['verdict'] == 'major' and rule_rows['forest_cover']['label_id'] == 12
+	assert len(rows) == 4 * 2 * 3 and {r['run_id'] for r in rows} == {5}
+	# crop answers only (gate, deadwood, forest per crop and judge): no dataset verdict, in rows or evidence
+	assert {r['assessor_kind'] for r in rows} == {'model'} and all(r['crop_id'] for r in rows)
+	assert {r['label_id'] for r in rows if r['layer'] == 'forest_cover'} == {12}
+	assert not {'rule', 'verdicts'} & set(out['evidence'])
 	assert out['evidence']['judged']['images'] == [] and len(out['evidence']['judged']['crop_ids']) == 4
 	assert refreshed == [True], 'the login is renewed before the writes'
 	# only the newest preferred prediction is drawn, without its deleted polygons

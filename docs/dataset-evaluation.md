@@ -1,7 +1,9 @@
 # Dataset evaluation check
 
-The first step of the automated audit (DT-1483, parent DT-1470). Per dataset it decides
-keep, keep but fix, exclude or unsure, and records the image facts the audit needs. It
+The first step of the automated audit (DT-1483, parent DT-1470) and the only check with
+a decision: per dataset ok (`ok`), exclude (`major`) or unsure (a person decides). There
+is no "keep, fix" any more. It also reports COG and
+thumbnail issues and records the image facts the audit needs. It
 plugs into the audit framework like every check ([audit-checks.md](audit-checks.md)):
 one `audit.runs` row per dataset, one dataset-level `audit.assessments` row per model and
 rule, layer `image`.
@@ -17,9 +19,10 @@ The orthophoto alone. The area of interest is a check of its own and the predict
 are judged by the prediction quality check, so neither plays a part here (version 2,
 DT-1538; version 1 judged inside the AOI and drew its edge on the overview).
 
-The code is the version: the handler refuses a run that was queued for version 1 (the
-run fails with that reason), so version 1's results never hold version 2's answers. An
-operator activates version 2 before the worker judges with it.
+The code is the version (now v3, the Audit Review rule): the handler refuses a run that
+was queued for an earlier version (the run fails with that reason), so an old version's
+results never hold the new version's answers. An operator activates a version before
+the worker judges with it.
 
 Read from the stored COG at run time (`utils/stored_inputs.local_cog`, so private
 datasets work):
@@ -48,21 +51,20 @@ holds that run's crops and overview too, so the run records what it judged:
 | Assessor | Kind | Verdict |
 |---|---|---|
 | `luna-medium/v1`, `haiku-5.5/v1` | model | the model's call: keep `ok`, fix `minor`, exclude `major`, unsure `unsure`; `major_likelihood` = its exclude likelihood |
-| `dataset-evaluation-rule/v1` | rule | the dataset verdict (below): the one rule row of a run |
-| `empty_cog/v1` | rule | instead of all rows above when under 0.5% of the overview is valid data: `major`, flag `broken_ortho`; no model is asked and no duplicate lookup runs |
+| `dataset-evaluation-rule/v3` | rule | the dataset verdict (below) and the output `{"cog_issue": bool, "thumbnail_issue": bool}`: the one rule row of a run |
+| `empty_cog/v1` | rule | instead of all rows above when under 0.5% of the overview is valid data: `major`, flag `broken_ortho`, no issues in the output; no model is asked |
 
-The dataset rule folds in two rules that are not assessment rows. `audit.review_queue`
-reads every dataset-level rule row as a verdict, so a second rule row would look like a
-disagreement. Their results are in the run's `evidence.rules` and in the verdict's `why`:
-
-| Rule | Result |
-|---|---|
-| `band_check/v1` | wrong bands from the upload's raster profile (`v2_orthos.ortho_info`) and the COG band statistics: one or two colour bands or identical bands `major`; red or purple dominance (near-infrared or mis-decoded multispectral) is a guess capped below `major`, so it is `unsure` |
-| `duplicates/v1` | `unsure` when another dataset has the same file, a near-identical overview (64-bit DCT hash within 10 bits) or the same uploader and day, each with 50%+ footprint overlap; never excludes |
+The dataset rule folds in the band check, which is not an assessment row: its result is
+in the run's `evidence.rules` and in the verdict's `why`. `band_check/v1` reads wrong
+bands from the upload's raster profile (`v2_orthos.ortho_info`) and the COG band
+statistics: one or two colour bands or identical bands `major`; red or purple dominance
+(near-infrared or mis-decoded multispectral) is a guess capped below `major`, so it is
+`unsure`. The duplicate rule of versions 1 and 2 is gone (duplicates cannot be
+uploaded); old rows keep it as history.
 
 Model `modes` carry a 0-100 likelihood for `blurry`, `not_rgb`, `no_trees`,
 `broken_ortho`, `too_dark`, `artifacts` (exclude reasons) and `cog_issue`,
-`thumbnail_issue`, `reprocess` (fix flags). `details` hold the reason, sharpness,
+`thumbnail_issue`, `reprocess` (issues of a kept dataset). `details` hold the reason, sharpness,
 lighting, leaf state (a hint only), image type, scene, land cover and a one-sentence
 summary, from the fixed lists in `vocabulary.py`; `raw` holds the reply, token usage and
 seconds. The run's `evidence` holds the resolution, valid share, footprint, crop
@@ -70,37 +72,38 @@ settings, the two folded-in rules and the overview hash; `inputs` the ortho sha2
 run judged, read again at run time. A new or changed AOI or prediction does not make a
 new run.
 
-The dataset rule averages the two models' exclude likelihoods:
+The dataset rule (v3) follows one model, the deciding model of the version's
+`rule_config.decider` (Haiku); Luna's answer is stored and shown next to it, not counted.
+Which model decides will follow from the benchmarks.
 
-1. a `major` band check excludes;
-2. a model `unsure`, or models 50+ points apart, goes to a person (`unsure`);
-3. a mean of 60+ excludes, with the reason of the surer model;
-4. a model that votes to exclude while the mean stays under 60 goes to a person;
-5. a band or duplicate flag goes to a person;
-6. a fix flag both models put at 50+ keeps the dataset but marks it `minor`; the flags
-   are in the rule row's `details.fix_flags`, which the review page names. One model
-   alone asking for a fix is not enough (rule v2: in the pilot that was lighting noise);
-7. otherwise `ok`.
+1. a `major` band check (not an RGB photo) excludes;
+2. otherwise Haiku's verdict: `ok`, `major` (with its reason) or `unsure` (a person
+   looks); its "fix" counts as keep, and a `reprocess` flag never changes the verdict;
+3. without a Haiku answer the dataset goes to a person (`unsure`).
 
-`audit.review_queue` reads the rule row. The version starts in `review_all`. Nothing
-is written to `dataset_audit` or `dataset_audit_suggestions` yet.
+The COG and thumbnail issues are the rule row's `output`, each set when Haiku puts it at
+50+, whatever the verdict (rule v2 named its flags in `details.fix_flags`, only for
+`minor`, which now reads as ok). A new rule version is recomputed from the stored model answers without
+model calls (`recompute`, a rule-only run).
 
-## Store and duplicates
+The evaluation decision (`audit.evaluation_decisions`, `docs/audit-checks.md`) is the
+latest native reviewer answer, else a legacy ok, else the current rule row when it
+decides, else a legacy exclusion; `unsure` is no decision and asks a person (`review_required` contains
+`evaluation`) until a reviewer answers on the current evidence. Exclude is the only
+reason a dataset leaves the public surface.
+
+## Store
 
 `handle(ctx)` uploads the judged images with the worker's `put_image`, named by their
 content inside the ortho's folder (a later run on the same ortho never overwrites a
 file an earlier run's rows point at), then calls
-`audit.store_dataset_evaluation(run_id, result)`, which writes the crops, images,
-assessments and overview hash (`audit.image_hashes`) in one transaction; a bad row rolls
-everything back. The worker then finishes the run with the returned evidence, coverage
+`audit.store_dataset_evaluation(run_id, result)`, which writes the crops, images and
+assessments (with their `output`) in one transaction; a bad row rolls everything back. The worker then finishes the run with the returned evidence, coverage
 and cost and points the dataset at it when the version is active. A run is ready once
 the COG, thumbnail and CLIP tiles exist (`ready`); its `inputs` are the ortho sha256.
-`audit.duplicate_candidates(dataset_id, hash)` lists possible duplicates for
-the duplicate rule; archived datasets are not candidates, because archiving the older
-copy is how a duplicate is resolved. Both functions run with the caller's rights, so
-only the audit worker writes. The rule thresholds and the duplicate thresholds are read
-from the version's `config` (`rule_config`, `duplicates`), so a registered version runs
-with the numbers it was registered with.
+The function runs with the caller's rights, so only the audit worker writes. The rule
+thresholds are read from the version's `config` (`rule_config`), so a registered version
+runs with the numbers it was registered with.
 
 ## Models
 
@@ -137,5 +140,6 @@ systemd-run --user --scope -p MemoryMax=6G venv/bin/python scripts/dataset_evalu
 venv/bin/python scripts/dataset_evaluation/label_server.py --root .local/dataset-evaluation
 ```
 
-The labels become person rows on the benchmark (`dataset-evaluation-gold` v1) once the
-review page exists; until then the SQLite file is the record.
+The picked datasets are the open `dataset-evaluation-gold` benchmark; labels are person
+rows given on its Benchmark tab. `gold_set.py` read the legacy audits (now read-only
+history) once, for the reasons in their notes.

@@ -1,4 +1,5 @@
-"""Open benchmark versions: operators add targets, auditors label them, truth carries over between versions."""
+"""Open benchmark versions: operators add targets, auditors label them, truth carries over between versions.
+Prediction quality has one benchmark per layer."""
 
 from pathlib import Path
 
@@ -8,7 +9,9 @@ import pytest
 from api.tests.db.test_acquisition_date_estimates import act_as, as_admin, create_dataset, create_user, db  # noqa: F401
 from api.tests.db.test_audit_checks import create_crop, create_off_grid_crop, create_operator, person_row
 
-MIGRATION = Path(__file__).parents[3] / 'supabase' / 'migrations' / '20261113150000_open_benchmark_versions.sql'
+MIGRATIONS = Path(__file__).parents[3] / 'supabase' / 'migrations'
+MIGRATION = MIGRATIONS / '20261113150000_open_benchmark_versions.sql'
+PER_LAYER = MIGRATIONS / '20261117140400_benchmarks_per_layer.sql'
 
 
 def other_side(db, dataset):
@@ -17,10 +20,11 @@ def other_side(db, dataset):
 	return 'dev' if hashed == 'holdout' else 'holdout'
 
 
-def benchmark(db, check='prediction_quality', name='pq-gold-dt1272', version='v1'):
+def benchmark(db, check='prediction_quality', name='pq-gold-dt1272', version='v1', layer='deadwood'):
 	as_admin(db)
 	return db.execute(
-		'INSERT INTO audit.benchmarks(check_key,name,version) VALUES (%s,%s,%s) RETURNING id', (check, name, version)
+		'INSERT INTO audit.benchmarks(check_key,layer,name,version) VALUES (%s,%s,%s,%s) RETURNING id',
+		(check, layer, name, version),
 	).fetchone()[0]
 
 
@@ -37,11 +41,16 @@ def member(db, benchmark_id, dataset, crop=None, split=None):
 	)
 
 
-def add(db, user, dataset, crop=None, check='prediction_quality'):
+def layer_of(check, layer):
+	"""A prediction quality call names its layer (deadwood unless given); the dataset evaluation none."""
+	return layer if layer != 'default' else ('deadwood' if check == 'prediction_quality' else None)
+
+
+def add(db, user, dataset, crop=None, check='prediction_quality', layer='default'):
 	act_as(db, user)
 	row = db.execute(
-		'SELECT benchmark_id, dataset_id, crop_id, split, id FROM audit.add_benchmark_target(%s,%s,%s)',
-		(check, dataset, crop),
+		'SELECT benchmark_id, dataset_id, crop_id, split, id FROM audit.add_benchmark_target(%s,%s,%s,%s)',
+		(check, dataset, crop, layer_of(check, layer)),
 	).fetchone()
 	as_admin(db)
 	return row
@@ -89,9 +98,16 @@ def test_only_operators_add_and_only_to_an_open_version_of_matching_targets(db):
 	# a crop belongs to its own dataset
 	with pytest.raises(psycopg.errors.ForeignKeyViolation), db.transaction():
 		add(db, operator, create_dataset(db, owner), crop)
-	# one open version per check: the next one waits until this one is frozen
+	# a prediction quality target names its layer
+	with pytest.raises(psycopg.errors.NoDataFound), db.transaction():
+		add(db, operator, dataset, crop, layer=None)
+	# one open version per check and layer: the next one waits until this one is frozen
 	with pytest.raises(psycopg.errors.UniqueViolation), db.transaction():
 		benchmark(db, version='v2')
+	benchmark(db, name='pq-forest-cover-gold', layer='forest_cover')
+	# the layer never changes
+	with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState), db.transaction():
+		db.execute("UPDATE audit.benchmarks SET layer='forest_cover' WHERE name='pq-gold-dt1272'")
 
 
 def test_datasets_join_the_open_dataset_evaluation_gold_set(db):
@@ -129,7 +145,7 @@ def test_v2_opens_with_v1s_crops_splits_and_truth(db):
 	auditor, owner = create_user(db, can_audit=True), create_user(db)
 	datasets = [create_dataset(db, owner) for _ in range(2)]
 	crops = [create_off_grid_crop(db, d) for d in datasets]
-	v1 = benchmark(db)
+	v1 = benchmark(db, layer=None)
 	for dataset, crop in zip(datasets, crops):
 		member(db, v1, dataset, crop, other_side(db, dataset))
 		person_row(db, auditor, dataset, crop, 'minor')
@@ -158,10 +174,11 @@ def test_v2_opens_with_v1s_crops_splits_and_truth(db):
 	assert len(members(v2)) == 2
 
 
-def remove(db, user, dataset, crop=None, check='prediction_quality'):
+def remove(db, user, dataset, crop=None, check='prediction_quality', layer='default'):
 	act_as(db, user)
 	rows = db.execute(
-		'SELECT dataset_id, crop_id, split FROM audit.remove_benchmark_target(%s,%s,%s) ORDER BY crop_id', (check, dataset, crop)
+		'SELECT dataset_id, crop_id, split FROM audit.remove_benchmark_target(%s,%s,%s,%s) ORDER BY crop_id',
+		(check, dataset, crop, layer_of(check, layer)),
 	).fetchall()
 	as_admin(db)
 	return rows
@@ -238,3 +255,68 @@ def test_only_operators_remove_and_only_from_an_open_version(db):
 	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
 		remove(db, auditor, dataset, crop)
 	assert member_targets(db, v1) == [(dataset, crop)]
+
+
+def split_block():
+	"""The per-layer migration's split, run again on a database with an open benchmark without a layer."""
+	text = PER_LAYER.read_text()
+	return text[text.index('with whole as') :]
+
+
+def test_the_open_version_without_a_layer_splits_into_one_per_layer_and_is_frozen(db):
+	auditor, owner = create_user(db, can_audit=True), create_user(db)
+	datasets = [create_dataset(db, owner) for _ in range(2)]
+	crops = [create_off_grid_crop(db, d) for d in datasets]
+	whole = benchmark(db, version='v2', layer=None)
+	for dataset, crop in zip(datasets, crops):
+		member(db, whole, dataset, crop, other_side(db, dataset))
+		person_row(db, auditor, dataset, crop, 'minor')
+		person_row(db, auditor, dataset, crop, 'ok', layer='forest_cover')
+	db.execute(split_block())
+
+	def members(b):
+		return db.execute(
+			'SELECT dataset_id, crop_id, split FROM audit.benchmark_members WHERE benchmark_id=%s ORDER BY crop_id', (b,)
+		).fetchall()
+
+	assert db.execute('SELECT frozen_at IS NOT NULL FROM audit.benchmarks WHERE id=%s', (whole,)).fetchone() == (True,)
+	opened = db.execute(
+		"SELECT id, layer, name, version FROM audit.benchmarks WHERE check_key='prediction_quality' AND frozen_at IS NULL "
+		'ORDER BY layer'
+	).fetchall()
+	assert [row[1:] for row in opened] == [
+		('deadwood', 'pq-deadwood-gold', 'v1'),
+		('forest_cover', 'pq-forest-cover-gold', 'v1'),
+	]
+	for benchmark_id, *_ in opened:
+		assert members(benchmark_id) == members(whole) and len(members(benchmark_id)) == 2
+	# each layer's truth is its own person rows on the same crops
+	assert db.execute(
+		'SELECT b.layer, a.verdict FROM audit.benchmarks b JOIN audit.benchmark_members m ON m.benchmark_id = b.id '
+		'JOIN audit.latest_assessments a ON a.crop_id = m.crop_id AND a.layer = b.layer '
+		"WHERE b.frozen_at IS NULL AND b.check_key='prediction_quality' AND a.assessor_kind='person' "
+		'GROUP BY 1, 2 ORDER BY 1'
+	).fetchall() == [('deadwood', 'minor'), ('forest_cover', 'ok')]
+	# a second run finds nothing to split
+	db.execute(split_block())
+	assert db.execute("SELECT count(*) FROM audit.benchmarks WHERE check_key='prediction_quality'").fetchone() == (3,)
+
+
+def test_a_crop_joins_and_leaves_one_layers_benchmark(db):
+	operator, owner = create_operator(db), create_user(db)
+	dataset = create_dataset(db, owner)
+	crop = create_crop(db, dataset)
+	deadwood = benchmark(db, name='pq-deadwood-gold')
+	tree_cover = benchmark(db, name='pq-forest-cover-gold', layer='forest_cover')
+
+	add(db, operator, dataset, crop)
+	assert member_targets(db, deadwood) == [(dataset, crop)]
+	assert member_targets(db, tree_cover) == []
+	# both layers put the dataset on one side
+	assert add(db, operator, dataset, crop, layer='forest_cover')[0] == tree_cover
+	assert db.execute(
+		'SELECT count(DISTINCT split) FROM audit.benchmark_members WHERE dataset_id=%s', (dataset,)
+	).fetchone() == (1,)
+	# removing from one layer leaves the other
+	assert [r[1] for r in remove(db, operator, dataset, crop, layer='forest_cover')] == [crop]
+	assert member_targets(db, deadwood) == [(dataset, crop)]

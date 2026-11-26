@@ -23,8 +23,6 @@ import { trackAppEvent } from "../utils/analytics";
 interface UseDatasetEditingOptions {
   datasetId: number | undefined;
   user: User | null;
-  /** Set on an audit page: corrections are saved under that page's audit lease. */
-  auditLeaseId?: string | null;
 }
 
 type EditDebugEvent = {
@@ -42,7 +40,7 @@ declare global {
   }
 }
 
-export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetEditingOptions) {
+export function useDatasetEditing({ datasetId, user }: UseDatasetEditingOptions) {
   const navigate = useNavigate();
   const geoJson = useMemo(() => new GeoJSON(), []);
 
@@ -203,7 +201,6 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         layerType: editingLayerType,
         deletions,
         additions,
-        auditLeaseId,
       });
       emitDebugEvent("save:rpc-result", {
         success: result.success,
@@ -247,7 +244,7 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
       saveInFlight.current = false;
       setIsSaving(false);
     }
-  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, auditLeaseId, disableAI]);
+  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, disableAI]);
 
   // Load geometries into editor when editing starts
   useEffect(() => {

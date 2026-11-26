@@ -11,7 +11,6 @@ import type {
   IAuditChecks,
   IAuditCrop,
   IAuditImage,
-  IAuditQueueRow,
   IAuditRun,
 } from "../types/auditChecks";
 
@@ -24,14 +23,31 @@ export const SCHEMA_NOT_EXPOSED = "PGRST106";
  * likelihood and the error modes come along so the page can mark the crops the check counted major
  * and say what each model saw in a crop (utils/cropCalls). */
 export const ASSESSMENT_COLUMNS =
-  "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, major_likelihood, modes, reason_code, reason_text, details";
-export const QUEUE_COLUMNS = "dataset_id, check_key, layer, run_id, verdict, reason";
+  "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, output, major_likelihood, modes, reason_code, reason_text, details, created_at";
+
+/** Every query on audit.dataset_results starts with this key, so an answer or a benchmark change refreshes them all. */
+export const AUDIT_RESULTS_KEY = ["audit-dataset-results"];
 
 export const auditChecksKey = (datasetId: number | undefined) => ["audit-checks", datasetId];
 
-function unwrap<T>(result: { data: T[] | null; error: { code?: string; message: string } | null }): T[] {
+export function unwrap<T>(result: { data: T[] | null; error: { code?: string; message: string } | null }): T[] {
   if (result.error) throw result.error;
   return result.data ?? [];
+}
+
+// the server answers at most this many rows per request (max_rows, supabase/config.toml)
+const PAGE = 1000;
+
+export type Rows<T> = PromiseLike<{ data: T[] | null; error: { code?: string; message: string } | null }>;
+
+/** Every row of a query, page after page; `page` orders the query and asks for rows from..to. */
+export async function allRows<T>(page: (from: number, to: number) => Rows<T>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const part = unwrap(await page(from, from + PAGE - 1));
+    rows.push(...part);
+    if (part.length < PAGE) return rows;
+  }
 }
 
 async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
@@ -40,10 +56,9 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
   const runIds = unwrap(current).map((c: { run_id: number }) => c.run_id);
   // most datasets have no check yet: one request tells
   if (!runIds.length) return { available: true, checks: {}, people: [] };
-  const [runs, automated, queue, people, crops, images] = await Promise.all([
+  const [runs, automated, people, crops, images] = await Promise.all([
     audit().from("runs").select("id, check_key, inputs, evidence, version:check_versions(config)").in("id", runIds),
     audit().from("current_assessments").select(ASSESSMENT_COLUMNS).eq("dataset_id", datasetId),
-    audit().from("review_queue").select(QUEUE_COLUMNS).eq("dataset_id", datasetId),
     audit()
       .from("latest_assessments")
       .select(ASSESSMENT_COLUMNS)
@@ -55,7 +70,6 @@ async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
   ]);
   const dataset = {
     automated: unwrap(automated) as IAuditAssessment[],
-    queue: unwrap(queue) as IAuditQueueRow[],
     crops: unwrap(crops) as IAuditCrop[],
     images: unwrap(images) as IAuditImage[],
   };
@@ -110,7 +124,8 @@ export function useSaveAuditAnswers() {
       // a reload that started before the insert would bring back the checks without the answer
       await queryClient.cancelQueries({ queryKey: key });
       queryClient.setQueryData<IAuditChecks>(key, (checks) => checks && { ...checks, people: mergeAnswers(checks.people, rows) });
-      queryClient.invalidateQueries({ queryKey: ["audit-check-queue"] });
+      // the answers change what the dataset still needs and what it reports
+      queryClient.invalidateQueries({ queryKey: AUDIT_RESULTS_KEY });
     },
   });
 }

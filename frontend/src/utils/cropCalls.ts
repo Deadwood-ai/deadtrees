@@ -1,53 +1,78 @@
-import type { PredictionQuality } from "../hooks/useDatasetAudit";
 import type { AuditLayer, AuditVerdict, IAuditCheckEvidence, IModeScore } from "../types/auditChecks";
-import { orderedCrops } from "./auditChecks";
 
-/** The rule config key of a layer (processor/src/prediction_quality_v1/rule.py, RULE_CONFIG). */
-const CUT_KEY: Partial<Record<AuditLayer, string>> = { deadwood: "deadwood", forest_cover: "forest" };
-
-/** The cut-off the run's version counts a crop major at, on one layer; null when it has none. */
-function majorCut(evidence: Pick<IAuditCheckEvidence, "run">, layer: AuditLayer): number | null {
-	const cuts = (evidence.run.version?.config?.rule_config as { crop_major_cut?: Record<string, number> } | undefined)?.crop_major_cut;
-	const cut = cuts?.[CUT_KEY[layer] ?? ""];
-	return typeof cut === "number" ? cut : null;
+/** The deciding model of the run's version (rule_config.decider, a model name prefix): Haiku unless
+ * the version names another. Its answer is the call; the other models are shown, not counted. */
+export function decider(evidence: Pick<IAuditCheckEvidence, "run">): string {
+	const named = (evidence.run.version?.config?.rule_config as { decider?: unknown } | undefined)?.decider;
+	return typeof named === "string" ? named : "haiku";
 }
 
-/** Whether the check counted a crop major on one layer, as its rule does: the mean major
- * likelihood of the models that could assess the crop reaches the version's cut-off. A model
- * that could not assess the crop says so on the crop's image row. Null when nothing decides. */
-export function cropMajor(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layer: AuditLayer): boolean | null {
-	const cut = majorCut(evidence, layer);
-	if (cut === null) return null;
-	const rows = evidence.automated.filter((a) => a.crop_id === cropId && a.assessor_kind === "model");
-	const unassessable = new Set(rows.filter((r) => r.layer === "image" && r.verdict === "major").map((r) => r.model));
-	const scores = rows
-		.filter((r) => r.layer === layer && !unassessable.has(r.model) && typeof r.major_likelihood === "number")
-		.map((r) => r.major_likelihood as number);
-	if (!scores.length) return null;
-	return scores.reduce((sum, s) => sum + s, 0) / scores.length >= cut;
+/** The check's call on one crop: its verdict over the asked layers (null when the deciding model
+ * could not assess the crop). */
+export interface ICropCall {
+  verdict: AuditVerdict | null;
 }
 
-/** The check's call on a crop over the given layers: major when the rule counted it major on
- * any of them, ok when on none, null when the run has no cut-offs or no judged answers. */
-export function cropCall(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layers: AuditLayer[]): AuditVerdict | null {
-	const calls = layers.map((layer) => cropMajor(evidence, cropId, layer)).filter((c): c is boolean => c !== null);
-	if (!calls.length) return null;
-	return calls.some(Boolean) ? "major" : "ok";
+/** The check's call on a crop and layer, as audit.dataset_results counts it: the deciding model's
+ * verdict where it could assess the crop. A model that could not assess the crop says so on the
+ * crop's image row. */
+function layerCall(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layer: AuditLayer): ICropCall {
+  const rows = evidence.automated.filter((a) => a.crop_id === cropId && a.assessor_kind === "model");
+  const unassessable = new Set(rows.filter((r) => r.layer === "image" && r.verdict === "major").map((r) => r.model));
+  const judged = rows.filter((r) => r.layer === layer && !unassessable.has(r.model) && r.verdict !== null);
+  const deciding = judged.find((r) => (r.model ?? "").startsWith(decider(evidence)));
+  return { verdict: deciding?.verdict ?? null };
 }
 
-/** The check's call on every crop, worked out once: the map's marks, the review order and the
- * flagged list all read it. */
-export function cropCalls(evidence: Pick<IAuditCheckEvidence, "run" | "automated" | "crops">, layers: AuditLayer[]): Map<number, AuditVerdict | null> {
-	const byCrop = new Map<number, IAuditCheckEvidence["automated"]>();
-	for (const row of evidence.automated) if (row.crop_id !== null) byCrop.set(row.crop_id, [...(byCrop.get(row.crop_id) ?? []), row]);
-	return new Map(evidence.crops.map((c) => [c.id, layers.length ? cropCall({ run: evidence.run, automated: byCrop.get(c.id) ?? [] }, c.id, layers) : null]));
+/** From least to most severe: the worst layer gives a crop over several layers its call. */
+const SEVERITY: AuditVerdict[] = ["ok", "ambiguous", "minor", "major"];
+
+/** The check's call on a crop over the given layers: the worst layer's verdict. */
+export function cropCall(evidence: Pick<IAuditCheckEvidence, "run" | "automated">, cropId: number, layers: AuditLayer[]): ICropCall {
+  const calls = layers.map((layer) => layerCall(evidence, cropId, layer));
+  const verdicts = calls.map((c) => c.verdict).filter((v): v is AuditVerdict => v !== null);
+  const verdict = verdicts.length ? SEVERITY[Math.max(...verdicts.map((v) => SEVERITY.indexOf(v)))] : null;
+  return { verdict };
 }
 
-/** The crops in review order: the ones the check counted major first, then the page's usual
- * order (the sort is stable). */
-export function cropsForReview(evidence: Pick<IAuditCheckEvidence, "crops">, calls: Map<number, AuditVerdict | null>): IAuditCheckEvidence["crops"] {
-	const major = (id: number) => (calls.get(id) === "major" ? 0 : 1);
-	return orderedCrops(evidence).sort((a, b) => major(a.id) - major(b.id));
+/** The check's call on every crop, worked out once: the map's marks and the crop review read it. */
+export function cropCalls(evidence: Pick<IAuditCheckEvidence, "run" | "automated" | "crops">, layers: AuditLayer[]): Map<number, ICropCall> {
+  const byCrop = new Map<number, IAuditCheckEvidence["automated"]>();
+  for (const row of evidence.automated) if (row.crop_id !== null) byCrop.set(row.crop_id, [...(byCrop.get(row.crop_id) ?? []), row]);
+  const none: ICropCall = { verdict: null };
+  return new Map(evidence.crops.map((c) => [c.id, layers.length ? cropCall({ run: evidence.run, automated: byCrop.get(c.id) ?? [] }, c.id, layers) : none]));
+}
+
+/** A prediction layer's crop counts: the check's calls, or with your crop answers in their place
+ * (ambiguous counts only your answers). */
+export interface ILayerCounts {
+  total: number;
+  major: number;
+  minor: number;
+  ok: number;
+  ambiguous?: number;
+}
+
+/** A prediction layer's crop counts as audit.dataset_results reports them ({total, major, minor,
+ * ok} over every crop the run judged), with your answer in place of the check's call on the crops
+ * you answered; your ambiguous answers count apart. */
+export function layerCounts(
+  evidence: Pick<IAuditCheckEvidence, "crops">,
+  calls: Map<number, ICropCall>,
+  mine: (cropId: number) => AuditVerdict | null,
+): Required<ILayerCounts> {
+  const counts = { total: 0, major: 0, minor: 0, ok: 0, ambiguous: 0 };
+  for (const crop of evidence.crops) {
+    const own = mine(crop.id);
+    const verdict = own && own !== "unsure" ? own : (calls.get(crop.id)?.verdict ?? null);
+    if (verdict === null || verdict === "unsure") continue;
+    if (verdict === "ambiguous") counts.ambiguous += 1;
+    else {
+      counts.total += 1;
+      counts[verdict] += 1;
+    }
+  }
+  return counts;
 }
 
 /** The prediction check's error types (processor/src/prediction_quality_v1 vocabulary) in words. */
@@ -78,25 +103,29 @@ export const modeScore = (mode: IModeScore | true | null | undefined): IModeScor
 const SEEN = 50;
 
 /** A model's short name: "luna-medium" → "Luna", "haiku-5.5" → "Haiku". */
-const modelName = (model: string | null) => (model ? model.split("-")[0].replace(/^\w/, (c) => c.toUpperCase()) : "Model");
+export const modelName = (model: string | null) => (model ? model.split("-")[0].replace(/^\w/, (c) => c.toUpperCase()) : "Model");
 
 /** What one model saw in a crop on one layer. */
 export interface ICropFinding {
 	model: string;
-	verdict: AuditVerdict;
+	/** its verdict is the check's call; the other models are shown only */
+	decides: boolean;
+	verdict: AuditVerdict | null;
 	/** the model's own sentences on the errors */
 	errors: string[];
 	/** the error types it found likely (50 or more), most likely first, with the share of the crop */
 	issues: { key: string; label: string; likelihood: number; areaPct: number | null }[];
 }
 
-/** Each model's findings on a crop and layer, the model that saw the worst first. */
-export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, cropId: number, layer: AuditLayer): ICropFinding[] {
+/** Each model's findings on a crop and layer, the deciding model (a model name prefix) first. */
+export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, cropId: number, layer: AuditLayer, deciding = "haiku"): ICropFinding[] {
+	const decides = (model: string | null) => (model ?? "").startsWith(deciding);
 	return evidence.automated
 		.filter((a) => a.crop_id === cropId && a.layer === layer && a.assessor_kind === "model")
-		.sort((a, b) => (b.major_likelihood ?? 0) - (a.major_likelihood ?? 0))
+		.sort((a, b) => Number(decides(b.model)) - Number(decides(a.model)))
 		.map((a) => ({
 			model: modelName(a.model),
+			decides: decides(a.model),
 			verdict: a.verdict,
 			errors: Array.isArray(a.details.errors) ? a.details.errors.filter((e): e is string => typeof e === "string" && e.trim() !== "") : [],
 			issues: Object.entries(a.modes ?? {})
@@ -105,20 +134,4 @@ export function cropFindings(evidence: Pick<IAuditCheckEvidence, "automated">, c
 				.sort(([, x], [, y]) => (y.likelihood ?? 0) - (x.likelihood ?? 0))
 				.map(([key, m]) => ({ key, label: MODE_LABELS[key] ?? key.replace(/^m\d+_/, "").replace(/_/g, " "), likelihood: m.likelihood ?? 0, areaPct: m.area_pct ?? null })),
 		}));
-}
-
-/** A prediction layer's saved rating, worked out from its crops: per crop your answer, else the
- * check's call, counted over the crops the check counts (its exclude set, or all when it has none).
- * Two or more major crops make it bad, one makes it ok, none great. The audit asks no question on
- * the whole layer; each use downstream can read the crop answers with its own rule. */
-export function layerRatingFromCrops(
-	evidence: Pick<IAuditCheckEvidence, "crops">,
-	calls: Map<number, AuditVerdict | null>,
-	mine: (cropId: number) => AuditVerdict | null,
-): { quality: PredictionQuality; major: number; counted: number } | null {
-	const counted = evidence.crops.some((c) => c.crop_sets.includes("exclude")) ? evidence.crops.filter((c) => c.crop_sets.includes("exclude")) : evidence.crops;
-	const verdicts = counted.map((c) => mine(c.id) ?? calls.get(c.id) ?? null).filter((v): v is AuditVerdict => v !== null && v !== "unsure");
-	if (!verdicts.length) return null;
-	const major = verdicts.filter((v) => v === "major").length;
-	return { quality: major >= 2 ? "bad" : major === 1 ? "sentinel_ok" : "great", major, counted: verdicts.length };
 }

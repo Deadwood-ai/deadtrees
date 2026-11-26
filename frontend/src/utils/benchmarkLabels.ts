@@ -1,95 +1,55 @@
-/** Benchmark labels (docs/audit-checks.md, Benchmarks): how labelers compare, which targets a
- * filter steps through, and the dataset evaluation answer as a person row. A crop's answer and
+/** Benchmark labels (docs/audit-checks.md, Benchmarks): a target's one label (the latest person
+ * answer, whoever gave it), which targets a filter steps through, and the dataset evaluation answer
+ * as a person row. A crop's answer and
  * its rows (the DT-1272 gold rows' shape) come from utils/cropAnswers.ts, shared with the audit. */
 
-import type { AuditCheckKey, AuditVerdict, IAuditAnswerInput, IAuditAssessment } from "../types/auditChecks";
+import type { AuditVerdict, BenchmarkRef, IAuditAnswerInput, IAuditAssessment } from "../types/auditChecks";
 import { evaluationFlags, keepsDataset, type EvaluationFlag } from "./auditChecks";
-import { LAYER_MODES, type PredictionLayer } from "./cropCalls";
 
-export const PREDICTION_LAYERS = Object.keys(LAYER_MODES) as PredictionLayer[];
 
-/** The latest rows per person on one target. */
-export function rowsByPerson(people: IAuditAssessment[]): Map<string, IAuditAssessment[]> {
-	const byPerson = new Map<string, IAuditAssessment[]>();
-	for (const row of people) {
-		const id = row.assessor_user_id ?? row.assessor;
-		byPerson.set(id, [...(byPerson.get(id) ?? []), row]);
-	}
-	return byPerson;
+/** The same benchmark: one check, and for prediction quality one layer. */
+export const sameBenchmark = (a: BenchmarkRef, b: BenchmarkRef) => a.check_key === b.check_key && a.layer === b.layer;
+
+/** A target's label: the latest person row per layer, whoever gave it ("can't tell" is the crop's
+ * image row). A new answer replaces the label; there is one per target, not one per labeler. */
+export function latestLabel(people: IAuditAssessment[]): IAuditAssessment[] {
+	const latest = new Map<string, IAuditAssessment>();
+	for (const row of [...people].sort((a, b) => a.id - b.id)) latest.set(`${row.crop_id}:${row.layer}`, row);
+	return [...latest.values()];
 }
 
-/** A crop answer reduced to what labelers can disagree on: "can't tell", or each layer's verdict. */
-export function cropVerdicts(rows: IAuditAssessment[]): "cant_tell" | Partial<Record<PredictionLayer, AuditVerdict>> {
-	if (rows.some((r) => r.layer === "image" && r.verdict === "major")) return "cant_tell";
-	return Object.fromEntries(PREDICTION_LAYERS.flatMap((layer) => rows.filter((r) => r.layer === layer).map((r) => [layer, r.verdict])));
+/** The labeling page's two modes: label random new targets, or review the existing labels. */
+export type BenchmarkMode = "new" | "review";
+
+/** A target's key in the page's URL: random new targets have no member id yet. */
+export const targetKey = (t: { dataset_id: number; crop_id: number | null }) => (t.crop_id !== null ? `crop-${t.crop_id}` : `dataset-${t.dataset_id}`);
+
+/** What a benchmark's targets are called: tiles, or datasets. */
+export const targetNoun = (benchmark: BenchmarkRef, n = 2) => `${benchmark.layer ? "tile" : "dataset"}${n === 1 ? "" : "s"}`;
+
+type Labeled = { people: IAuditAssessment[] };
+/** Whether the target has its label: anyone answered it. */
+export const isLabeled = (target: Labeled) => target.people.length > 0;
+/** The latest row of the target's label, for who gave it and when; null without a label. */
+export const latestLabelRow = (target: Labeled) => target.people.reduce<IAuditAssessment | null>((a, b) => (!a || b.id > a.id ? b : a), null);
+
+/** Targets stratified across datasets: the first target of each dataset, then the second of
+ * each, and so on, so labeling in order covers every dataset before it takes a second crop
+ * of one. */
+export function stratified<T extends { dataset_id: number }>(targets: T[]): T[] {
+	const byDataset = new Map<number, T[]>();
+	for (const t of targets) byDataset.set(t.dataset_id, [...(byDataset.get(t.dataset_id) ?? []), t]);
+	const groups = [...byDataset.values()];
+	const rounds = Math.max(0, ...groups.map((g) => g.length));
+	return Array.from({ length: rounds }, (_, round) => groups.flatMap((g) => (round < g.length ? [g[round]] : []))).flat();
 }
 
-function summary(checkKey: AuditCheckKey, rows: IAuditAssessment[]): string {
-	if (checkKey === "dataset_evaluation") {
-		const row = rows.find((r) => r.layer === "image");
-		return row ? (keepsDataset(row.verdict) ? "keep" : row.verdict) : "";
-	}
-	const verdicts = cropVerdicts(rows);
-	return verdicts === "cant_tell" ? verdicts : PREDICTION_LAYERS.map((l) => verdicts[l] ?? "-").join("/");
-}
-
-/** Two or more labelers who answered the target differently (unsure counts as an answer). */
-export function labelersDisagree(checkKey: AuditCheckKey, people: IAuditAssessment[]): boolean {
-	return new Set([...rowsByPerson(people).values()].map((rows) => summary(checkKey, rows))).size > 1;
-}
-
-export type Agreement = "agree" | "they_flag" | "you_flag" | "other";
-
-/** How another verdict compares with yours: the same, they find a problem you did not, or the reverse. */
-export function agreement(mine: AuditVerdict | null | undefined, theirs: AuditVerdict | null | undefined): Agreement | null {
-	if (!mine || !theirs) return null;
-	if (mine === theirs) return "agree";
-	const flags = (v: AuditVerdict) => v === "minor" || v === "major";
-	if (flags(theirs) && !flags(mine)) return "they_flag";
-	if (flags(mine) && !flags(theirs)) return "you_flag";
-	return "other";
-}
-
-export type BenchmarkFilter = "open" | "all" | "disagree" | "excluded";
-export const BENCHMARK_FILTERS: { value: BenchmarkFilter; label: string }[] = [
-	{ value: "open", label: "Open for me" },
-	{ value: "all", label: "All" },
-	{ value: "disagree", label: "Labelers disagree" },
-	{ value: "excluded", label: "Excluded datasets" },
-];
-
-/** The filters a check's benchmark offers. Dataset evaluation labels exclusion itself, blind, so
- * it never shows which datasets are excluded. */
-export const benchmarkFilters = (checkKey: AuditCheckKey) =>
-	checkKey === "dataset_evaluation" ? BENCHMARK_FILTERS.filter((f) => f.value !== "excluded") : BENCHMARK_FILTERS;
-
-type Labeled = { people: IAuditAssessment[]; excludedBy?: "person" | "model" | null };
-export const answeredBy = (target: Labeled, userId: string | undefined) => !!userId && target.people.some((p) => p.assessor_user_id === userId);
-
-/** The targets a filter steps through. `keep` holds targets answered in this visit, so an answer
- * does not pull the target out from under you while "open for me" is on. */
-export function filterTargets<T extends Labeled & { id: number }>(
-	targets: T[],
-	filter: BenchmarkFilter,
-	checkKey: AuditCheckKey,
-	userId: string | undefined,
-	keep: ReadonlySet<number> = new Set(),
-): T[] {
-	const passes = (t: T) => {
-		if (filter === "all") return true;
-		if (filter === "open") return !answeredBy(t, userId);
-		if (filter === "excluded") return !!t.excludedBy;
-		return labelersDisagree(checkKey, t.people);
-	};
-	return targets.filter((t) => passes(t) || keep.has(t.id));
-}
-
-/** The next target after `currentId` (wrapping) that you have not answered; null when none is left. */
-export function nextOpen<T extends Labeled & { id: number }>(targets: T[], currentId: number | null, userId: string | undefined): T | null {
+/** The next target after `currentId` (wrapping) without a label; null when none is left. */
+export function nextOpen<T extends Labeled & { id: number }>(targets: T[], currentId: number | null): T | null {
 	const start = targets.findIndex((t) => t.id === currentId);
 	for (let step = 1; step <= targets.length; step++) {
 		const t = targets[(start + step + targets.length) % targets.length];
-		if (t.id !== currentId && !answeredBy(t, userId)) return t;
+		if (t.id !== currentId && !isLabeled(t)) return t;
 	}
 	return null;
 }
@@ -112,11 +72,11 @@ export function evaluationDraftFromRow(row: IAuditAssessment | null | undefined)
 /** The person row a dataset evaluation answer is stored as (as on the review page), or what is
  * missing. The run is the caller's: the one that judged the dataset, if any. */
 export function evaluationAnswerRow(draft: IEvaluationDraft, datasetId: number, runId: number | null): { row: IAuditAnswerInput } | { missing: string } {
-	if (!draft.verdict) return { missing: "Pick keep (1), keep but fix (2), exclude (3) or unsure (U)" };
+	if (!draft.verdict) return { missing: "Pick OK (1), exclude (2) or unsure (U)" };
 	if (draft.verdict === "major" && !draft.reason) return { missing: "Excluding needs a reason" };
 	const keep = keepsDataset(draft.verdict);
-	// a kept dataset with a fix flag is "keep, fix"
-	const verdict: AuditVerdict = keep && draft.flags.length ? "minor" : draft.verdict;
+	// no "keep, fix" any more: an earlier answer's minor is stored as ok
+	const verdict: AuditVerdict = keep ? "ok" : draft.verdict;
 	return {
 		row: {
 			check_key: "dataset_evaluation",

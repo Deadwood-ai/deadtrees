@@ -1,20 +1,21 @@
 import { Button, Typography } from "antd";
-import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined } from "@ant-design/icons";
 import { IDataset } from "../../types/dataset";
-import { DatasetAuditUserInfo } from "../../hooks/useDatasetAudit";
+import { useDatasetContributors } from "../../hooks/useDatasetAudit";
 import { sanitizeText } from "../../utils/textUtils";
 
 const { Title, Text } = Typography;
 
-const AUDIT_PROTOCOL_URL = "https://docs.google.com/document/d/1EQ52zDOU6X6ze1g-xKd381IPziv72Pt4QV18YDYqIUo/edit";
-
 interface AuditHeaderProps {
+	/** the page: "Audit Review" or "Edits & flags" */
+	title: string;
 	dataset: IDataset;
-	auditData?: DatasetAuditUserInfo | null;
 	onCancel: () => void;
 }
 
-export default function AuditHeader({ dataset, auditData, onCancel }: AuditHeaderProps) {
+export default function AuditHeader({ title, dataset, onCancel }: AuditHeaderProps) {
+	const { data: contributors } = useDatasetContributors();
+	const uploadedBy = contributors?.get(dataset.id);
 	const location = [dataset.admin_level_3 || dataset.admin_level_2, dataset.admin_level_1]
 		.filter(Boolean)
 		.join(", ");
@@ -27,17 +28,8 @@ export default function AuditHeader({ dataset, auditData, onCancel }: AuditHeade
 			<Button shape="circle" onClick={onCancel} icon={<ArrowLeftOutlined />} className="mb-2" />
 			<div>
 				<Title level={5} className="m-0 text-sm">
-					Audit: {dataset.id} - {location}
+					{title}: {dataset.id} - {location}
 				</Title>
-				<a
-					href={AUDIT_PROTOCOL_URL}
-					target="_blank"
-					rel="noopener noreferrer"
-					className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 hover:underline"
-				>
-					<FileTextOutlined />
-					Audit Protocol
-				</a>
 			</div>
 			{additionalInformation && (
 				<Text type="secondary" className="mt-2 block text-xs">
@@ -47,15 +39,9 @@ export default function AuditHeader({ dataset, auditData, onCancel }: AuditHeade
 					</span>
 				</Text>
 			)}
-			{auditData?.uploaded_by_email && (
+			{uploadedBy && (
 				<Text type="secondary" className="mt-1 block text-xs font-medium">
-					Uploaded by: <span className="text-blue-600">{auditData.uploaded_by_email}</span>
-				</Text>
-			)}
-			{auditData?.audited_by && (
-				<Text type="secondary" className="mt-1 block text-xs font-medium text-slate-500">
-					Last audited by:{" "}
-					<span className="text-blue-600">{auditData.audited_by_email || auditData.audited_by}</span>
+					Uploaded by: <span className="text-blue-600">{uploadedBy}</span>
 				</Text>
 			)}
 		</div>

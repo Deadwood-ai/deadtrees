@@ -106,20 +106,14 @@ def handle(ctx) -> dict:
 		for r in rows
 	]
 	predictions = {layer: prediction_polygons(client, table, label_ids[layer]) for layer, (_, table) in LAYERS.items()}
-	# The thresholds the version was registered with (a version before they were recorded runs with today's).
-	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
+	# The run stores the crop answers only: the audit counts each layer's crop calls by the deciding
+	# model of the version's config (rule_config.decider, Haiku).
 	with (
 		tempfile.TemporaryDirectory(prefix='prediction-quality-') as folder,
 		readable_cog(cog, Path(folder), ctx.token, dataset_id, log) as cog_source,
 	):
 		result = run_prediction_quality(
-			dataset_id,
-			cog_source,
-			tiles,
-			shape(aoi) if aoi else None,
-			predictions,
-			ctx.judges,
-			rule_config=config['rule_config'],
+			dataset_id, cog_source, tiles, shape(aoi) if aoi else None, predictions, ctx.judges
 		)
 	ctx.refresh()  # the judges can take longer than the login lasts
 	stored = store.write(
@@ -138,11 +132,7 @@ def handle(ctx) -> dict:
 			category=LogCategory.PROCESS,
 			dataset_id=dataset_id,
 			token=ctx.token,
-			extra={
-				'run_id': ctx.run['id'],
-				**stored,
-				'verdicts': {layer: verdict['verdict'] for layer, verdict in result.verdicts.items()},
-			},
+			extra={'run_id': ctx.run['id'], **stored},
 		),
 	)
 	summary = store.summary(result)

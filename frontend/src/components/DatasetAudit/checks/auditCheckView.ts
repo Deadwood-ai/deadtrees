@@ -32,10 +32,10 @@ export function modelViewImage(evidence: IAuditCheckEvidence | undefined, cropId
 /** The audit's steps in order. */
 export const STEP_ORDER: AuditSectionId[] = AUDIT_SECTIONS.map((s) => s.id);
 
-/** Opens a step, or past the last one goes back to the decision at the top, where the audit is saved. */
+/** Opens a step, or past the last one closes the steps and shows the review line at the top. */
 export function openStep(setView: (patch: Partial<IAuditCheckView>) => void, id: AuditSectionId | null) {
 	setView({ section: id, cropId: null, mapOnly: false });
-	if (id === null) document.querySelector('[data-testid="audit-decision"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+	if (id === null) document.querySelector('[data-testid="audit-review-required"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /** The step after `current`, or null after the last one. The audit goes through every step

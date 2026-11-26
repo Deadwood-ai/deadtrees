@@ -15,13 +15,11 @@ from shared.pagination import fetch_all_rows
 from .check import VERSIONS, CheckResult, CropResult
 from .judge import PROMPT_VERSION
 from .render import CROP_PX, judge_images
-from .rule import RULE_VERSION
 
 CHECK_KEY = 'prediction_quality'
 LAYER_NAMES = {'deadwood': 'deadwood', 'forest': 'forest_cover'}
 IMAGE_KINDS = (('raw', None), ('deadwood_overlay', 'deadwood'), ('forest_cover_overlay', 'forest'))
 SELECTED_BY = 'pq-picker-v1'
-RULE_VERDICTS = {'bad': 'major', 'ok': 'ok', None: 'unsure'}
 
 
 def summary(result: CheckResult) -> dict:
@@ -35,8 +33,6 @@ def summary(result: CheckResult) -> dict:
 			'training_set': sum('training' in r.tile.sets for r in result.crops),
 		},
 		'evidence': {
-			'rule': RULE_VERSION,
-			'verdicts': {LAYER_NAMES[k]: v for k, v in result.verdicts.items()},
 			'epsg': result.epsg,
 			'seconds': result.seconds,
 			'versions': VERSIONS,
@@ -134,38 +130,11 @@ def assessment_rows(r: CropResult, crop_id: int, run_id: int, dataset_id: int, l
 					'verdict': answer.verdict,
 					'major_likelihood': answer.major_likelihood,
 					'modes': answer.modes,
-					'details': {'errors': answer.errors, 'area_pct': answer.area_pct},
+					'details': {'errors': answer.errors, 'summary': answer.summary, 'area_pct': answer.area_pct},
 					'raw': None,
 				}
 			)
 	return rows
-
-
-def rule_rows(result: CheckResult, run_id: int, label_ids: dict) -> list[dict]:
-	"""The dataset verdict per layer as rule rows (assessor_kind 'rule', dataset target).
-
-	The rule is Python in this check (rule.py), versioned like a prompt; a new rule version is
-	recomputed from the stored crop rows and written as new rows, no model calls needed.
-	"""
-	return [
-		{
-			'check_key': CHECK_KEY,
-			'dataset_id': result.dataset_id,
-			'run_id': run_id,
-			'crop_id': None,
-			'assessor_kind': 'rule',
-			'model': 'pq-rule',
-			'prompt_version': RULE_VERSION,
-			'layer': LAYER_NAMES[layer],
-			'label_id': label_ids[layer],
-			'verdict': RULE_VERDICTS[v['verdict']],
-			'major_likelihood': None,
-			'modes': {},
-			'details': v,
-			'raw': None,
-		}
-		for layer, v in result.verdicts.items()
-	]
 
 
 def image_path(dataset_id: int, ortho_sha256: str, crop_id: int, kind: str, label_id: int | None, sha256: str) -> str:
@@ -208,7 +177,8 @@ def store_crops(audit, result: CheckResult, ortho_sha256: str, footprints: dict)
 def write(
 	client, run_id: int, result: CheckResult, *, ortho_sha256: str, label_ids: dict, footprints: dict, put_image
 ) -> dict:
-	"""Store one run's crops, images, model rows and rule rows.
+	"""Store one run's crops, images and model rows. The check stores no dataset verdict: the
+	audit counts each layer's crop calls from these rows with the version's crop cuts.
 
 	client: a Supabase client of the audit worker; footprints: tile id -> WGS84 GeoJSON polygon;
 	put_image(path, bytes, dataset_id) stores a file on the storage server. Images are kept per
@@ -251,7 +221,6 @@ def write(
 		audit.table('images').upsert(
 			new, on_conflict='dataset_id,ortho_sha256,crop_id,label_id,kind', ignore_duplicates=True
 		).execute()
-	assessments += rule_rows(result, run_id, label_ids)
 	audit.table('assessments').insert(assessments).execute()
 	return {
 		'crops': len(crop_ids),

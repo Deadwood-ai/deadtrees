@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Seed one local dataset with automated audit check results for the audit review page
-(docs/qa/playbooks/auditor-check-review.md): a poor georeferencing call with match lines,
-a dataset evaluation (keep, fix) with four crops, and prediction quality on ten crops,
-with stored crop images and one answer of another reviewer.
+"""Seed one local dataset with automated audit check results for the Audit Review page
+(docs/qa/playbooks/auditor-check-review.md): a georeferencing check that needs review
+(one qualified reference, 19.8 m) with match lines, a dataset evaluation the rule could not
+decide (both models ask for a fix, one votes to exclude below the threshold; COG issue) with
+four crops, and prediction quality on ten crops where the judges disagree on one deadwood
+crop, with stored crop images and one answer of another reviewer.
 
 Local stack only: it refuses a database that is not on 127.0.0.1 or localhost.
 Usage, after scripts/qa/env.sh up and reset:
@@ -149,28 +151,33 @@ def image(crop_id, kind, col, row, size, label_id=None, bands=(1, 2, 3)):
 		values ({ds}, '{SHA}', {crop_id or 'null'}, {label_id or 'null'}, '{kind}', '{rel}', 'image/jpeg', 512, 512)""")
 
 
-def assess(check, rid, layer, kind, model, verdict, crop_id=None, label_id=None, modes=None, details=None, likelihood=None):
-	psql(f"""insert into audit.assessments (check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, model, prompt_version, verdict, major_likelihood, modes, details)
-		values ('{check}', {ds}, {crop_id or 'null'}, {rid}, '{layer}', {label_id or 'null'}, '{kind}', '{model}', 'v1', '{verdict}',
-		{'null' if likelihood is None else likelihood}, '{json.dumps(modes or {})}', '{json.dumps(details or {})}')""")
+def assess(check, rid, layer, kind, model, verdict, crop_id=None, label_id=None, modes=None, details=None, likelihood=None,
+           output=None, prompt_version='v1'):
+	psql(f"""insert into audit.assessments (check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, model, prompt_version, verdict, major_likelihood, modes, details, output)
+		values ('{check}', {ds}, {crop_id or 'null'}, {rid}, '{layer}', {label_id or 'null'}, '{kind}', '{model}', '{prompt_version}', '{verdict}',
+		{'null' if likelihood is None else likelihood}, '{json.dumps(modes or {})}', '{json.dumps(details or {})}',
+		{"'" + json.dumps(output) + "'" if output else 'null'})""")
 
 
-# --- dataset evaluation: keep, fix (COG issue), four native crops ---------------------
-ev = run('dataset_evaluation', version('dataset_evaluation', 'v1-qa'))
+# --- dataset evaluation (rule v3): unsure, a COG issue, four native crops -------
+ev = run('dataset_evaluation', version('dataset_evaluation', 'v3-qa'))
 image(None, 'overview', 0, 0, PX)
 for i, (c, r) in enumerate([(600, 700), (2600, 500), (900, 2700), (2900, 2900)]):
 	cid = crop(['evaluation'], c, r, 512)
 	image(cid, 'raw', c, r, 512)
-modes = {'cog_issue': {'likelihood': 80}, 'thumbnail_issue': {'likelihood': 10}, 'blurry': {'likelihood': 5}}
-assess('dataset_evaluation', ev, 'image', 'rule', 'dataset-evaluation-rule', 'minor', modes=modes,
-       details={'reason': None, 'why': ['fix_flagged'], 'fix_flags': ['cog_issue'], 'models': {'luna': 'minor', 'haiku': 'minor'}})
-assess('dataset_evaluation', ev, 'image', 'model', 'luna', 'minor', modes=modes, details={'summary': 'RGB forest scene, sharp; black edge band in the COG'})
+modes = {'cog_issue': {'likelihood': 80}, 'thumbnail_issue': {'likelihood': 10}, 'reprocess': {'likelihood': 70}, 'blurry': {'likelihood': 5}}
+assess('dataset_evaluation', ev, 'image', 'rule', 'dataset-evaluation-rule', 'unsure', modes=modes, prompt_version='v3',
+       details={'reason': 'artifacts', 'why': ['model_excludes_below_threshold'], 'models': {'luna': 'major', 'haiku': 'minor'},
+                'summary': 'A model votes to exclude, but the average likelihood is only 45 (luna 70, haiku 20).'},
+       output={'cog_issue': True, 'thumbnail_issue': False})
+assess('dataset_evaluation', ev, 'image', 'model', 'luna', 'major', modes=modes, details={'summary': 'RGB forest scene, sharp; black edge band in the COG'})
 assess('dataset_evaluation', ev, 'image', 'model', 'haiku', 'minor', modes=modes, details={'summary': 'Sharp RGB forest image with a COG edge artifact'})
 
-# --- prediction quality: deadwood major on 3 of 10 crops ------------------------------
-# the rule's cut-offs, as the version stores them: a crop is major at a mean likelihood of 52 (deadwood).
+# --- prediction quality: deadwood major on 3 of 10 crops, the judges disagree on crop 8 ---
+# the crop cut-offs, as the version stores them: a crop is major at a mean likelihood of 52 (deadwood).
+# The Audit Review counts the crop calls itself (audit.dataset_results); there are no dataset rule rows.
 # A version's config never changes, so a seed with other cut-offs needs another version name.
-pq = run('prediction_quality', version('prediction_quality', 'pq-v1-qa-rule', {'rule_config': {'crop_major_cut': {'deadwood': 52, 'forest': 69}, 'min_major_crops': 2}}))
+pq = run('prediction_quality', version('prediction_quality', 'pq-v1-qa-rule', {'rule_config': {'decider': 'haiku', 'min_major_crops': 2}}))
 DW, FC = 9001, 9002
 major = {3, 4, 8}
 for n in range(10):
@@ -180,21 +187,19 @@ for n in range(10):
 	image(cid, 'deadwood_overlay', c, r, 640, DW, (1, 1, 3))
 	image(cid, 'forest_cover_overlay', c, r, 640, FC, (2, 2, 2))
 	for judge in ('luna', 'haiku'):
+		disagrees = n + 1 == 8 and judge == 'haiku'  # mean likelihood (90 + 20) / 2 = 55: still major
 		assess('prediction_quality', pq, 'image', 'model', judge, 'ok', crop_id=cid, modes={'m0_not_assessable': {'likelihood': 0}})
 		# what the model saw: error types with their share of the crop, and its own words
 		dw_modes = {'m1_dead_missed': {'likelihood': 90, 'area_pct': 12}, 'm4_dw_on_lying_wood': {'likelihood': 60, 'area_pct': 3}} if n + 1 in major else {}
 		dw_details = {'errors': ['Several dead crowns in the upper half are not marked blue.'], 'area_pct': 15} if n + 1 in major else {'errors': []}
-		assess('prediction_quality', pq, 'deadwood', 'model', judge, 'major' if n + 1 in major else 'ok', crop_id=cid, label_id=DW,
-		       likelihood=90 if n + 1 in major else 5, modes=dw_modes, details=dw_details)
+		assess('prediction_quality', pq, 'deadwood', 'model', judge, 'major' if n + 1 in major and not disagrees else 'ok',
+		       crop_id=cid, label_id=DW, likelihood=20 if disagrees else 90 if n + 1 in major else 5,
+		       modes={} if disagrees else dw_modes, details={'errors': []} if disagrees else dw_details)
 		assess('prediction_quality', pq, 'forest_cover', 'model', judge, 'minor' if n == 6 else 'ok', crop_id=cid, label_id=FC,
 		       likelihood=30 if n == 6 else 5)
-assess('prediction_quality', pq, 'deadwood', 'rule', 'pq-rule', 'major', label_id=DW,
-       details={'rule': 'pq-rule-v1', 'verdict': 'bad', 'major_crops': 3, 'judged_crops': 10})
-assess('prediction_quality', pq, 'forest_cover', 'rule', 'pq-rule', 'ok', label_id=FC,
-       details={'rule': 'pq-rule-v1', 'verdict': 'ok', 'major_crops': 0, 'judged_crops': 10})
 
-# another reviewer already answered georef (hidden until the auditor answers)
+# another reviewer already answered georef: not passed
 geo_run = psql(f"select run_id from audit.current_runs where dataset_id = {ds} and check_key = 'georef'")
-psql(f"""insert into audit.assessments (check_key, dataset_id, run_id, layer, assessor_kind, assessor_user_id, verdict)
-	values ('georef', {ds}, {geo_run}, 'georef', 'person', '{OWNER}', 'major')""")
+psql(f"""insert into audit.assessments (check_key, dataset_id, run_id, layer, assessor_kind, assessor_user_id, output)
+	values ('georef', {ds}, {geo_run}, 'georef', 'person', '{OWNER}', '{{"status": "not_passed"}}')""")
 print(ds)

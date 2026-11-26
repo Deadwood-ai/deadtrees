@@ -70,7 +70,7 @@ def test_the_audit_tables_take_a_run_and_a_second_run_on_the_same_ortho(
 					put_image=put_image_with(lambda: auth_token),
 				)
 			)
-		assert [(s['crops'], s['assessments'], s['judged']['images']) for s in stored] == [(1, 5, [])] * 2
+		assert [(s['crops'], s['assessments'], s['judged']['images']) for s in stored] == [(1, 3, [])] * 2
 		assert [len(s['judged']['training']) for s in stored] == [0, 1]
 		crops = audit.table('crops').select('*').eq('dataset_id', dataset_id).execute().data
 		assert len(crops) == 1 and crops[0]['crop_sets'] == ['exclude', 'training']
@@ -85,11 +85,8 @@ def test_the_audit_tables_take_a_run_and_a_second_run_on_the_same_ortho(
 		rows = (
 			audit.table('assessments').select('layer,assessor_kind,verdict').eq('dataset_id', dataset_id).execute().data
 		)
-		assert len(rows) == 10
-		assert {(r['layer'], r['verdict']) for r in rows if r['assessor_kind'] == 'rule'} == {
-			('deadwood', 'major'),
-			('forest_cover', 'unsure'),
-		}
+		# crop answers only: the check stores no dataset verdict
+		assert len(rows) == 6 and {r['assessor_kind'] for r in rows} == {'model'}
 
 
 def test_large_predictions_are_read_page_by_page(test_dataset_for_processing, auth_token, test_processor_user):
@@ -200,7 +197,7 @@ def test_the_handler_runs_on_stored_inputs(
 		out = handler.handle(ctx)
 		assert out['inputs'] == handler.inputs(client, dataset_id)
 		assert out['inputs']['label_ids'] == labels and out['inputs']['ortho_sha256'] == SHA
-		assert out['coverage']['crops'] == 4 and out['evidence']['verdicts']['deadwood']['verdict'] == 'bad'
+		assert out['coverage']['crops'] == 4 and 'verdicts' not in out['evidence']
 		crops = client.schema('audit').table('crops').select('*').eq('dataset_id', dataset_id).execute().data
 		assert len(crops) == 4
 		covered = {c['pixel_x0']: c['selection']['exclude']['predicted']['deadwood'] for c in crops}

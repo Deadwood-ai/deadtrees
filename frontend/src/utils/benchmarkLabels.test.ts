@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditAssessment } from "../types/auditChecks";
-import { agreement, benchmarkFilters, cropVerdicts, evaluationAnswerRow, filterTargets, labelersDisagree, nextOpen } from "./benchmarkLabels";
+import { evaluationAnswerRow, targetKey, targetNoun, latestLabel, latestLabelRow, nextOpen, sameBenchmark, stratified } from "./benchmarkLabels";
 
 const person = (user: string, overrides: Partial<IAuditAssessment>): IAuditAssessment => ({
 	id: 1,
@@ -23,72 +23,54 @@ const person = (user: string, overrides: Partial<IAuditAssessment>): IAuditAsses
 	...overrides,
 });
 
-describe("labelers", () => {
-	it("reads a crop answer as can't tell or a verdict per layer", () => {
-		expect(cropVerdicts([person("a", { layer: "image", verdict: "major" }), person("a", {})])).toBe("cant_tell");
-		expect(cropVerdicts([person("a", { layer: "image" }), person("a", { verdict: "minor" }), person("a", { layer: "forest_cover" })])).toEqual({
-			deadwood: "minor",
-			forest_cover: "ok",
-		});
-	});
-
-	it("finds labelers who disagree on a layer verdict or the image gate", () => {
-		const a = [person("a", { layer: "image" }), person("a", { verdict: "major" })];
-		const b = [person("b", { layer: "image" }), person("b", { verdict: "major" })];
-		expect(labelersDisagree("prediction_quality", [...a, ...b])).toBe(false);
-		expect(labelersDisagree("prediction_quality", [...a, person("c", { layer: "image", verdict: "major" })])).toBe(true);
-		expect(labelersDisagree("prediction_quality", a)).toBe(false);
-		const keep = person("a", { check_key: "dataset_evaluation", layer: "image", crop_id: null, verdict: "minor" });
-		expect(labelersDisagree("dataset_evaluation", [keep, { ...keep, assessor_user_id: "b", assessor: "b", verdict: "ok" }])).toBe(false);
-		expect(labelersDisagree("dataset_evaluation", [keep, { ...keep, assessor_user_id: "b", assessor: "b", verdict: "major" }])).toBe(true);
-	});
-
-	it("marks who found a problem the other did not", () => {
-		expect(agreement("ok", "major")).toBe("they_flag");
-		expect(agreement("major", "ok")).toBe("you_flag");
-		expect(agreement("minor", "minor")).toBe("agree");
-		expect(agreement("minor", "major")).toBe("other");
-		expect(agreement(null, "major")).toBeNull();
+describe("a target's label", () => {
+	it("is the latest answer per layer, whoever gave it", () => {
+		const rows = [
+			person("a", { id: 1, layer: "image" }),
+			person("a", { id: 2, verdict: "major" }),
+			person("b", { id: 3, verdict: "minor" }),
+		];
+		const label = latestLabel(rows);
+		expect(label.map((r) => [r.layer, r.verdict, r.assessor])).toEqual([
+			["image", "ok", "a"],
+			["deadwood", "minor", "b"],
+		]);
+		expect(latestLabelRow({ people: label })?.id).toBe(3);
+		expect(latestLabelRow({ people: [] })).toBeNull();
 	});
 });
 
 describe("stepping through a benchmark", () => {
 	const targets = [1, 2, 3].map((id) => ({ id, people: id === 2 ? [person("me", {})] : [] }));
 
-	it("keeps a target answered in this visit in the open list", () => {
-		expect(filterTargets(targets, "open", "prediction_quality", "me").map((t) => t.id)).toEqual([1, 3]);
-		expect(filterTargets(targets, "open", "prediction_quality", "me", new Set([2])).map((t) => t.id)).toEqual([1, 2, 3]);
-		expect(filterTargets(targets, "all", "prediction_quality", "me")).toHaveLength(3);
+	it("names a target in the URL by its crop or dataset, and calls them tiles or datasets", () => {
+		expect(targetKey({ dataset_id: 7, crop_id: 70 })).toBe("crop-70");
+		expect(targetKey({ dataset_id: 7, crop_id: null })).toBe("dataset-7");
+		expect(targetNoun({ check_key: "prediction_quality", layer: "deadwood" })).toBe("tiles");
+		expect(targetNoun({ check_key: "dataset_evaluation", layer: null }, 1)).toBe("dataset");
 	});
 
-	it("goes to the next target without your answer, wrapping, and stops when none is left", () => {
-		expect(nextOpen(targets, 1, "me")?.id).toBe(3);
-		expect(nextOpen(targets, 3, "me")?.id).toBe(1);
-		expect(nextOpen([targets[1], targets[0]], 1, "me")).toBeNull();
+	it("goes to the next target without a label, wrapping, and stops when none is left", () => {
+		expect(nextOpen(targets, 1)?.id).toBe(3);
+		expect(nextOpen(targets, 3)?.id).toBe(1);
+		expect(nextOpen([targets[1], targets[0]], 1)).toBeNull();
 	});
 });
 
-describe("excluded datasets", () => {
-	it("steps through the crops whose dataset a person or a model excludes", () => {
-		const targets = [
-			{ id: 1, people: [], excludedBy: "person" as const },
-			{ id: 2, people: [], excludedBy: null },
-			{ id: 3, people: [], excludedBy: "model" as const },
-		];
-		expect(filterTargets(targets, "excluded", "prediction_quality", "me").map((t) => t.id)).toEqual([1, 3]);
-	});
-
-	it("is no filter of the dataset evaluation, which labels exclusion blind", () => {
-		expect(benchmarkFilters("prediction_quality").map((f) => f.value)).toContain("excluded");
-		expect(benchmarkFilters("dataset_evaluation").map((f) => f.value)).not.toContain("excluded");
+describe("stratified order", () => {
+	it("takes one target per dataset in turn", () => {
+		const t = (id: number, dataset_id: number) => ({ id, dataset_id });
+		expect(stratified([t(1, 5), t(2, 5), t(3, 5), t(4, 6), t(5, 7), t(6, 7)]).map((x) => x.id)).toEqual([1, 4, 5, 2, 6, 3]);
+		expect(stratified([])).toEqual([]);
 	});
 });
 
 describe("dataset evaluation labels", () => {
-	it("stores keep with a fix flag as keep, fix, with the run that judged the dataset", () => {
+	it("stores OK with its issues, with the run that judged the dataset; an earlier keep, fix is OK", () => {
 		expect(evaluationAnswerRow({ verdict: "ok", reason: null, flags: ["cog_issue"], note: "" }, 5, 41)).toEqual({
-			row: expect.objectContaining({ verdict: "minor", reason_code: null, details: { fix_flags: ["cog_issue"] }, run_id: 41, crop_id: null, layer: "image" }),
+			row: expect.objectContaining({ verdict: "ok", reason_code: null, details: { fix_flags: ["cog_issue"] }, run_id: 41, crop_id: null, layer: "image" }),
 		});
+		expect(evaluationAnswerRow({ verdict: "minor", reason: null, flags: [], note: "" }, 5, 41)).toEqual({ row: expect.objectContaining({ verdict: "ok" }) });
 	});
 
 	it("needs a call, and a reason to exclude", () => {
@@ -97,5 +79,14 @@ describe("dataset evaluation labels", () => {
 		expect(evaluationAnswerRow({ verdict: "major", reason: "blurry", flags: [], note: " soft " }, 5, null)).toEqual({
 			row: expect.objectContaining({ verdict: "major", reason_code: "blurry", reason_text: "soft", details: { fix_flags: [] }, run_id: null }),
 		});
+	});
+});
+
+describe("which benchmark", () => {
+	it("tells the layers of prediction quality apart", () => {
+		const deadwood = { check_key: "prediction_quality", layer: "deadwood" } as const;
+		expect(sameBenchmark(deadwood, { check_key: "prediction_quality", layer: "deadwood" })).toBe(true);
+		expect(sameBenchmark(deadwood, { check_key: "prediction_quality", layer: "forest_cover" })).toBe(false);
+		expect(sameBenchmark({ check_key: "dataset_evaluation", layer: null }, { check_key: "dataset_evaluation", layer: null })).toBe(true);
 	});
 });

@@ -6,6 +6,10 @@ their audit notes give, and kept datasets as negatives, with fixable_issues as t
 hard ones. The old audits are not truth: this set is what Janusch labels on the
 dataset labeling page (label_server.py), and his labels become the benchmark.
 
+The selection ran once (the open `dataset-evaluation-gold` benchmark holds its 250 datasets).
+It reads the saved legacy audits, which are read-only history since the Audit Review,
+for the reasons their notes give; nothing else depends on them.
+
 Reads production only through the trusted analyst login in a read-only
 transaction (docs/playbooks/analyst-database-access.md). Writes one JSON file:
 
@@ -179,7 +183,7 @@ QUERY = """
 SELECT a.dataset_id, a.final_assessment, a.notes, a.cog_issue_notes, a.thumbnail_issue_notes, a.audited_by,
 	extract(year FROM a.audit_date)::int AS audit_year,
 	d.user_id, d.data_access::text, d.platform::text, d.aquisition_year, d.aquisition_month, d.aquisition_day
-FROM public.dataset_audit a
+FROM public.dataset_audit_legacy a
 JOIN public.v2_datasets d ON d.id = a.dataset_id
 JOIN public.v2_cogs c ON c.dataset_id = a.dataset_id
 JOIN public.v2_orthos o ON o.dataset_id = a.dataset_id

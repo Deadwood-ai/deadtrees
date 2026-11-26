@@ -208,5 +208,6 @@ test("resolved core-team members keep the point-observation workflow", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Open map layers" }).click();
   await expect(page.getByText("Point observations", { exact: true })).toBeVisible();
+  // loaded for the count and the CSV; the layer itself starts hidden
   await expect.poll(getObservationRequests).toBeGreaterThan(0);
 });

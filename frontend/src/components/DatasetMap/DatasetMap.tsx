@@ -194,25 +194,15 @@ const getDatasetVisualSpec = (dataset: DatasetMapItem, mode: DatasetMapColorMode
     };
   }
 
-  const finalAssessment = dataset.final_assessment;
-  const hasBadQuality = dataset.deadwood_quality === "bad" || dataset.forest_cover_quality === "bad";
-  const hasMediumQuality = dataset.deadwood_quality === "sentinel_ok" || dataset.forest_cover_quality === "sentinel_ok";
-
-  if (finalAssessment === "exclude_completely" || hasBadQuality || dataset.has_major_issue) {
+  const decision = dataset.audit_decision;
+  if (decision === "exclude") {
     return {
       fill: palette.state.error,
       stroke: "#B91C1C",
       marker: "#DC2626",
     };
   }
-  if (finalAssessment === "fixable_issues" || hasMediumQuality) {
-    return {
-      fill: palette.deadwood[500],
-      stroke: palette.deadwood[700],
-      marker: palette.deadwood[700],
-    };
-  }
-  if (finalAssessment === "no_issues" || finalAssessment === "ready" || dataset.is_audited) {
+  if (decision === "ok") {
     return {
       fill: palette.forest[500],
       stroke: palette.forest[700],

@@ -33,7 +33,6 @@ _tables = {
 	'model_preferences': 'v2_model_preferences',
 	'tile_embeddings': 'v2_tile_embeddings',
 	'acquisition_date_estimates': 'v2_acquisition_date_estimates',
-	'audit_suggestions': 'dataset_audit_suggestions',
 	'georef_checks': 'v2_georef_checks',
 	'notification_preferences': 'user_notification_preferences',
 	'processing_notification_events': 'processing_notification_events',
@@ -173,9 +172,6 @@ class Settings(BaseSettings):
 	SENTINEL2_S3_PREFIX: str = 'sentinel-2-cubes'
 	SENTINEL2_S3_ACCESS_KEY_ID: str = ''
 	SENTINEL2_S3_SECRET_ACCESS_KEY: str = ''
-	# Record the prefilled date check as an automatic decision (applying an
-	# accepted suggested date) when no person has decided. Off: auditors decide.
-	DOY_AUTO_DECIDE: bool = False
 
 	# Optional satellite references of the georeferencing check (georef_check_v1)
 	# besides the keyless ones in processor/src/georef_check_v1/providers.py.
@@ -457,10 +453,6 @@ class Settings(BaseSettings):
 	@property
 	def acquisition_date_estimates_table(self) -> str:
 		return self._tables['acquisition_date_estimates']
-
-	@property
-	def audit_suggestions_table(self) -> str:
-		return self._tables['audit_suggestions']
 
 	@property
 	def georef_checks_table(self) -> str:

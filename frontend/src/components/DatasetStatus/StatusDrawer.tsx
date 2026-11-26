@@ -30,13 +30,11 @@ export default function StatusDrawer({ dataset, queue, onClose, onViewMap }: Sta
   const summary = statusSummary(dataset, queue);
   const outputs = generatedOutputs(dataset);
   const mapAvailable = canOpenOwnerMap(dataset);
-  const hiddenNote = (quality: ContributorDataset["deadwood_quality"]) =>
-    quality === "bad" ? " · hidden from the public map" : "";
   const results = [
-    ["Map image", outputs.map, ""],
-    ["Preview image", outputs.preview, ""],
-    ["Deadwood prediction", outputs.deadwood, hiddenNote(dataset.deadwood_quality)],
-    ["Tree cover prediction", outputs.treecover, hiddenNote(dataset.forest_cover_quality)],
+    ["Map image", outputs.map],
+    ["Preview image", outputs.preview],
+    ["Deadwood prediction", outputs.deadwood],
+    ["Tree cover prediction", outputs.treecover],
   ] as const;
 
   return (
@@ -69,11 +67,11 @@ export default function StatusDrawer({ dataset, queue, onClose, onViewMap }: Sta
       <section className="mb-6" aria-label="Generated results">
         <h3 className="mb-3 text-sm font-semibold">Generated results</h3>
         <dl className="m-0 space-y-2">
-          {results.map(([label, generated, note]) => (
+          {results.map(([label, generated]) => (
             <div key={label} className="flex justify-between gap-3 text-sm">
               <dt className="text-slate-600">{label}</dt>
               <dd className="m-0 text-right" style={{ color: generated ? "#287254" : "#64748b" }}>
-                {generated ? `Generated${note}` : "Not available"}
+                {generated ? "Generated" : "Not available"}
               </dd>
             </div>
           ))}
@@ -93,11 +91,6 @@ export default function StatusDrawer({ dataset, queue, onClose, onViewMap }: Sta
         <p className="mb-1 text-sm font-medium" style={{ color: review.color }}>
           {review.label}
         </p>
-        {review.date && (
-          <p className="mb-3 text-xs text-slate-500">
-            Recorded {review.date}. The date does not indicate which processing run was reviewed.
-          </p>
-        )}
         {review.kind === "excluded" && (
           <Alert
             className="mb-4"

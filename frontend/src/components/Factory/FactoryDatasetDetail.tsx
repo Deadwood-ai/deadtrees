@@ -146,7 +146,7 @@ function DetailHeader({ detail, now }: { detail: FactoryDatasetDetailData; now: 
 					</Tooltip>
 					{canAudit && (
 						<Link to={`/dataset-audit/${row.dataset_id}`}>
-							<Button>Audit</Button>
+							<Button>Audit Review</Button>
 						</Link>
 					)}
 					{access?.can_manage_access && (

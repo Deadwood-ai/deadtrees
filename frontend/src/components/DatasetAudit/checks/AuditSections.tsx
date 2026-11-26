@@ -1,238 +1,120 @@
 import type { ComponentProps, ReactNode } from "react";
-import type { IAuditSuggestion } from "../../../types/acquisitionDate";
 import { Form } from "antd";
-import { useAuth } from "../../../hooks/useAuthProvider";
-import type { AuditFormValues } from "../../../hooks/useDatasetAudit";
-import type { AuditCheckKey, AuditLayer, IAuditChecks } from "../../../types/auditChecks";
-import {
-	AUDIT_SECTIONS,
-	EVALUATION_FLAGS,
-	LAYER_LABELS,
-	answeredFormValues,
-	auditSection,
-	automatedVerdict,
-	legacySectionStatus,
-	myAnswer,
-	sectionStatus,
-	type AuditSectionId,
-	type IAuditSectionDef,
-	type IAuditSectionStatus,
-} from "../../../utils/auditChecks";
-import { AcquisitionDateCard } from "../AcquisitionDateCard";
-import AuditAOICard from "../AuditAOICard";
-import { COGQualityCard, OrthoFilePanel, PhenologyCard, PredictionQualityCard, ThumbnailCard } from "../AuditStepCards";
-import { GeoreferencingCard } from "../GeoreferencingCard";
-import { createConditionalRule } from "../auditConstants";
+import type { IDataset } from "../../../types/dataset";
+import type { IAcquisitionDateEstimate } from "../../../types/acquisitionDate";
+import type { IAuditChecks, IAuditDatasetResult, ReviewItem } from "../../../types/auditChecks";
+import type { IGeorefCheck } from "../../../types/georefCheck";
+import { AUDIT_SECTIONS, auditSection, type AuditSectionId, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { openReviewItems, reviewAnswers, sectionStatus, withDraft, type IReviewContext, type IReviewDraft } from "../../../utils/auditReview";
 import { InlineLoadError } from "../../SectionStates";
-import AnswerDetails from "./AnswerDetails";
+import type AuditAOICard from "../AuditAOICard";
+import AoiStep from "../steps/AoiStep";
+import type { CogFactsProps } from "../steps/CogFacts";
+import DateStep from "../steps/DateStep";
+import EvaluationStep from "../steps/EvaluationStep";
+import GeorefStep from "../steps/GeorefStep";
+import PhenologyStep from "../steps/PhenologyStep";
+import PredictionStep from "../steps/PredictionStep";
 import AuditSection from "./AuditSection";
-import CheckAnswer from "./CheckAnswer";
-import CheckSummary from "./CheckSummary";
-import CropAnswers from "./CropAnswers";
-import EvaluationAnswer from "./EvaluationAnswer";
-import DerivedDecision from "./DerivedDecision";
+import ReviewChanges from "./ReviewChanges";
+import ReviewRequiredLine from "./ReviewRequiredLine";
 import { cropReviewOpen, type IAuditCheckView } from "./auditCheckView";
 import { useAuditStepper } from "./useAuditStepper";
 
-/** A saved-audit field the reviewer's answer sets: it takes part in the form, and so in its
- * validation and saving, without a control of its own. */
-const AnswerField = () => null;
-
 interface AuditSectionsProps {
-	datasetId: number;
+	dataset: IDataset;
 	checks: IAuditChecks | undefined;
-	/** the check results failed to load: say so instead of showing "Not run yet" */
+	/** the check results failed to load: say so instead of "Not run yet" */
 	checksFailed: boolean;
 	onRetryChecks: () => void;
-	/** the audit suggestions and the fields the form took from them, for the steps' "suggested" tags */
-	prefill: { suggestions: IAuditSuggestion[]; prefilledFields: string[] };
-	/** the existing evidence panels, each section's body */
-	panels: {
-		georef: ComponentProps<typeof GeoreferencingCard>;
-		date: ComponentProps<typeof AcquisitionDateCard>;
-		phenology: ComponentProps<typeof PhenologyCard>;
-		aoi: ComponentProps<typeof AuditAOICard>;
-		file: ComponentProps<typeof OrthoFilePanel>;
-		thumbnailUrl: string | null;
-	};
+	/** the dataset's row of audit.dataset_results */
+	result: IAuditDatasetResult | null | undefined;
+	resultFailed: boolean;
+	/** what Save needs besides the draft; the review line reads it too */
+	review: IReviewContext;
 	hasAOI: boolean;
-	/** user reports, shown under the decision and above the sections */
-	userReports: ReactNode;
+	/** each step's evidence besides the results */
+	panels: {
+		cog: CogFactsProps;
+		thumbnailUrl: string | null;
+		aoi: ComponentProps<typeof AuditAOICard>;
+		georefCheck: IGeorefCheck | null | undefined;
+		dateEstimate: IAcquisitionDateEstimate | null | undefined;
+	};
 	view: IAuditCheckView;
 	setView: (patch: Partial<IAuditCheckView>) => void;
-	/** no audit lease on this page */
-	disabled: boolean;
 }
 
-/** The audit sidebar: the derived decision, user reports and the six checks in order.
- * Opening a section puts the map into that check's mode. */
-export default function AuditSections({ datasetId, checks, checksFailed, onRetryChecks, prefill, panels, hasAOI, userReports, view, setView, disabled }: AuditSectionsProps) {
-	const { user } = useAuth();
-	const form = Form.useFormInstance<AuditFormValues>();
-	const phenology = Form.useWatch("has_valid_phenology", { form, preserve: true });
+/** The Audit Review sidebar: what still needs a person, user reports and the seven steps in order.
+ * Opening a step puts the map into that check's mode. The benchmark toggles sit in the steps their
+ * check's benchmark labels: the dataset in the evaluation step, each crop in the crop review. */
+export default function AuditSections({ dataset, checks, checksFailed, onRetryChecks, result, resultFailed, review, hasAOI, panels, view, setView }: AuditSectionsProps) {
+	const form = Form.useFormInstance<IReviewDraft>();
+	const draft = Form.useWatch((values: IReviewDraft) => values, { form, preserve: true }) ?? {};
 	const people = checks?.people ?? [];
 	const evidenceOf = (s: IAuditSectionDef) => (s.checkKey ? checks?.checks[s.checkKey] : undefined);
-	const answeredAll = (s: IAuditSectionDef) => {
-		const evidence = evidenceOf(s);
-		return !!evidence && s.layers.every((layer) => myAnswer(people, user?.id, evidence.run.id, { checkKey: s.checkKey!, layer }));
-	};
-
-	// a section whose check has run reads the audit tables; the others fall back to the saved audit and older tables
-	const status = (s: IAuditSectionDef): IAuditSectionStatus => {
-		const evidence = evidenceOf(s);
-		if (evidence) return sectionStatus(s, evidence, answeredAll(s));
-		return legacySectionStatus(s.id, {
-			hasAOI,
-			phenology,
-			georefCheck: panels.georef.check,
-			dateEstimate: panels.date.estimate,
-			reviewItems: panels.georef.reviewItems,
-		});
-	};
-
-	const statuses = Object.fromEntries(AUDIT_SECTIONS.map((s) => [s.id, status(s)])) as Record<AuditSectionId, IAuditSectionStatus>;
-	const evaluation = checks?.checks.dataset_evaluation;
-	const myEvaluation = evaluation ? myAnswer(people, user?.id, evaluation.run.id, { checkKey: "dataset_evaluation", layer: "image" }) : null;
-	const open = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null, mapOnly: false });
 	const openSection = view.section ? auditSection(view.section) : null;
-	const { goTo, next, back } = useAuditStepper({
-		datasetId,
-		checks,
-		view,
-		setView,
-		disabled,
-		openAnswered: openSection ? answeredAll(openSection) : false,
-		cropReview: cropReviewOpen(view, openSection, openSection ? evidenceOf(openSection) : undefined),
-	});
+	const cropReview = cropReviewOpen(view, openSection, openSection ? evidenceOf(openSection) : undefined);
+	// Enter and Shift+Enter step through the review
+	useAuditStepper({ view, setView, cropReview });
 
-	const answers = (s: IAuditSectionDef) => {
-		const evidence = evidenceOf(s);
-		if (!evidence) return null;
-		return (
-			<div className="mb-3 flex flex-col gap-3">
-				<CheckSummary section={s} evidence={evidence} />
-				{/* a prediction step asks per crop only; its layer rating follows from the crops */}
-				{!s.cropAnswers && s.layers.map((layer) => (
-					<div key={layer}>
-						{s.layers.length > 1 && <div className="mb-1 text-xs font-medium">{LAYER_LABELS[layer]}</div>}
-						<CheckAnswer
-							datasetId={datasetId}
-							section={s}
-							layer={layer}
-							evidence={evidence}
-							people={people}
-							disabled={disabled}
-						/>
-					</div>
-				))}
-				<AnswerDetails section={s} evidence={evidence} people={people} />
-				{s.cropAnswers && (
-<CropAnswers section={s} evidence={evidence} people={people} />
-				)}
-			</div>
-		);
+	// the line follows the page: answers in the draft and a drawn AOI settle their items before Save
+	const answered: ReviewItem[] = [...reviewAnswers(draft, review).answered, ...(hasAOI ? (["aoi"] as const) : [])];
+	const openItems = openReviewItems(result?.review_required, answered);
+	// the step badges show your answers on the page, and an AOI drawn here, before Save
+	const shown = result && withDraft({ ...result, aoi_exists: result.aoi_exists || hasAOI }, draft);
+	const toggle = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null, mapOnly: false });
+	const predictionBody = (id: "forest" | "deadwood") => {
+		const layer = id === "deadwood" ? "deadwood" : "forest_cover";
+		const mapOnly = view.section === id && view.mapOnly && !!review.layers[layer];
+		return <PredictionStep layer={layer} result={result} review={review.layers[layer]} onOpenCrops={mapOnly ? () => setView({ mapOnly: false }) : undefined} />;
 	};
-	// once the reviewer has answered a check, the answer decides its saved-audit field
-	const owned = answeredFormValues(checks, user?.id);
-	const answerOwned = (field: keyof AuditFormValues) => field in owned;
-	// the audit check made a call on the layer: its answer row is the step's answer
-	const ranOn = (checkKey: AuditCheckKey, layer: AuditLayer) => automatedVerdict(checks?.checks[checkKey], layer) !== null;
-
-	// one prediction layer per step: the check's call on the whole layer, its crops, and the saved rating
-	const predictionBody = (layer: "deadwood" | "forest_cover") => (
-		<>
-			{answers(auditSection(layer === "deadwood" ? "deadwood" : "forest"))}
-			<PredictionQualityCard
-				layer={layer}
-				suggestions={prefill.suggestions}
-				prefilledFields={prefill.prefilledFields}
-				byCheck={ranOn("prediction_quality", layer)}
-			/>
-		</>
-	);
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
-		// where the check has run, one answer decides the step and sets the two saved-audit fields;
-		// without it the reviewer fills the two fields by hand
-		evaluation: evaluation ? (
-			<>
-				<EvaluationAnswer datasetId={datasetId} evidence={evaluation} people={people} disabled={disabled} active={view.section === "evaluation"} />
-				<AnswerDetails section={auditSection("evaluation")} evidence={evaluation} people={people} />
-				{EVALUATION_FLAGS.map(
-					({ field }) =>
-						field && (
-							<Form.Item key={field} name={field} noStyle rules={createConditionalRule("Please answer the dataset evaluation")}>
-								<AnswerField />
-							</Form.Item>
-						),
-				)}
-				<OrthoFilePanel {...panels.file} thumbnailUrl={panels.thumbnailUrl} />
-			</>
-		) : (
-			<>
-				<COGQualityCard />
-				<ThumbnailCard thumbnailUrl={panels.thumbnailUrl} />
-				<OrthoFilePanel {...panels.file} />
-			</>
+		evaluation: (
+			<EvaluationStep
+				evidence={checks?.checks.dataset_evaluation}
+				people={people}
+				cog={panels.cog}
+				thumbnailUrl={panels.thumbnailUrl}
+				review={review}
+				active={view.section === "evaluation"}
+			/>
 		),
-		aoi: (
-			<>
-				<div className="mb-2 text-xs text-gray-600">Edit the area of interest on the map. The later checks run inside it.</div>
-				<AuditAOICard {...panels.aoi} />
-			</>
-		),
-		georef: (
-			<>
-				{/* the evidence first, then the call and its answer row */}
-				<GeoreferencingCard {...panels.georef} byCheck={ranOn("georef", "georef")} />
-				{answers(auditSection("georef"))}
-			</>
-		),
-		date: (
-			<>
-				{answers(auditSection("date"))}
-				<AcquisitionDateCard {...panels.date} answerOwned={answerOwned("has_valid_acquisition_date")} />
-			</>
-		),
-		phenology: <PhenologyCard {...panels.phenology} />,
+		aoi: <AoiStep result={result} editor={panels.aoi} />,
+		georef: <GeorefStep check={panels.georefCheck} />,
+		date: <DateStep dataset={dataset} result={result} estimate={panels.dateEstimate} />,
+		phenology: <PhenologyStep dataset={dataset} result={result} />,
+		forest: predictionBody("forest"),
 		deadwood: predictionBody("deadwood"),
-		forest: predictionBody("forest_cover"),
 	};
 
 	return (
 		<>
-			<DerivedDecision
-				evaluation={myEvaluation?.verdict ?? automatedVerdict(evaluation, "image")}
-				needsYou={Object.values(statuses).filter((s) => s.needsYou).length}
-			/>
-			{userReports}
-			{checksFailed && (
+			<ReviewRequiredLine items={openItems} unknown={resultFailed || result === null} />
+			<ReviewChanges people={people} result={result} />
+			{(checksFailed || resultFailed) && (
 				<div className="mb-2">
 					<InlineLoadError message="The automated check results couldn’t load." onRetry={onRetryChecks} />
 				</div>
 			)}
 			{checks && !checks.available && (
-				<div className="mb-2 rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-700">
-					The automated check results can’t be read here yet. Answer with the saved audit fields in each section.
-				</div>
+				<div className="mb-2 rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-700">The automated check results can’t be read on this server yet.</div>
 			)}
 			{AUDIT_SECTIONS.map((s, i) => (
 				<AuditSection
 					key={s.id}
 					number={i + 1}
 					title={s.title}
-					status={statuses[s.id]}
+					status={sectionStatus(s.id, shown, openItems)}
 					open={view.section === s.id}
-					onToggle={() => open(s.id)}
-					onBack={back(s.id)}
-					onNext={() => goTo(next(s.id))}
-					nextLabel={next(s.id) ? "Next step" : "Done: review and save"}
+					onToggle={() => toggle(s.id)}
 				>
 					{bodies[s.id]}
 				</AuditSection>
 			))}
 			<div className="mt-2 px-2 text-[11px] text-gray-400" data-testid="audit-shortcuts">
-				Keys: Enter take the suggestion and go on · Shift+Enter back · K keep · X exclude · Ctrl+S save · the crop review lists its own
+				Keys: Enter next step · Shift+Enter back · B benchmark (step 1) · Ctrl+S save · the crop review lists its own
 			</div>
 		</>
 	);

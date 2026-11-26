@@ -29,7 +29,7 @@ separate checks. A reviewed migration alone does not establish live permissions.
 | Input and processing | `v2_datasets`, `v2_statuses`, `v2_queue`, `v2_logs` | New uploads, completed processing, failures, per-host active workers, waiting age and progress |
 | Outputs | `v2_metadata`, `v2_raw_images`, `v2_orthos`, `v2_orthos_processed`, `v2_cogs`, `v2_thumbnails`, `v2_model_preferences` | Missing outputs, size/runtime anomalies, model-preference update freshness |
 | FreiDATA | `data_publication`, `jt_data_publication_datasets` | Requests created/published in 24h and 30d; states; oldest pending; linked dataset counts |
-| Trust | `dataset_audit_legacy` (the table behind the `dataset_audit` view), `dataset_flags`, `dataset_flag_status_history`, `reference_datasets`, `reference_patches` | Audits, unresolved flags, review progress and export readiness |
+| Trust | `dataset_flags`, `dataset_flag_status_history`, `reference_datasets`, `reference_patches` | Unresolved flags, review progress and export readiness; Audit Review results (`audit` schema) are read with the analyst login |
 | Reuse | `prepackaged_dataset_definitions`, `prepackaged_dataset_versions`, `prepackaged_dataset_download_grants` | Build/publish freshness, package failures, grant issuance/validation/expiry |
 | Delivery | `processing_notification_events`, `user_notification_preferences` | Pending/error deliveries, attempts, overdue retries, sent counts |
 | Field work | `priwa_projects`, `priwa_project_flights`, `priwa_befallsgruppen`, `priwa_befallsgruppe_flights`, `priwa_kaeferbaeume`, `public_tree_observations` | New/updated/deleted observations and flight activity |
@@ -167,7 +167,8 @@ live resources as part of a status refresh.
 
 ## Other workflow checks
 
-- Audit/flags: count audits by `audit_date`, flags by current status and
+- Audit/flags: count Audit Review decisions (`audit.evaluation_decisions`, analyst
+  login) by `decided_at`, flags by current status and
   `created_at`/`updated_at`, and history by `changed_at`. Inspect oldest unresolved
   flags; free-text reasons require a separate authorized investigation.
 - Downloads: group versions by definition/status; compare latest `built_at` and

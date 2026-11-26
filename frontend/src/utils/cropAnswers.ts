@@ -1,8 +1,7 @@
-import type { AuditLayer, AuditVerdict, IAuditAnswerInput, IAuditAssessment } from "../types/auditChecks";
-import type { AuditFormValues } from "../hooks/useDatasetAudit";
-import type { IAuditChecks } from "../types/auditChecks";
-import { AUDIT_SECTIONS, answeredFormValues, formValuesForVerdict, myAnswer, QUALITY_VERDICT } from "./auditChecks";
-import { LAYER_MODES, cropCalls, cropFindings, layerRatingFromCrops, type PredictionLayer } from "./cropCalls";
+import type { AuditLayer, AuditVerdict, IAuditAnswerInput, IAuditAssessment, IAuditCheckEvidence } from "../types/auditChecks";
+import { reviewAnswer } from "./auditChecks";
+import type { ILayerReview } from "./auditReview";
+import { LAYER_MODES, cropFindings, layerCounts, type ICropCall, type PredictionLayer } from "./cropCalls";
 
 /** A reviewer's answer to one error type on a crop. Left unanswered, it is saved as no. */
 export type ProblemAnswer = "yes" | "no" | "unsure";
@@ -41,7 +40,7 @@ export function savedLayer(row: IAuditAssessment): ILayerDraft {
 	for (const [mode, tag] of Object.entries(row.modes ?? {})) if (tag === true) problems[mode] = "yes";
 	const unsure = Array.isArray(row.details?.unsure_modes) ? (row.details.unsure_modes as unknown[]) : [];
 	for (const mode of unsure) if (typeof mode === "string") problems[mode] = "unsure";
-	return { verdict: row.verdict, problems };
+	return { verdict: row.verdict ?? "ok", problems };
 }
 
 /** The reviewer said they cannot tell what the crop shows: their latest image row on it. */
@@ -78,30 +77,30 @@ export function withVerdict(draft: ILayerDraft, verdict: AuditVerdict): ILayerDr
 	return { verdict, problems };
 }
 
-/** Your verdict on a crop's layer for the layer rating: "unsure" when you can't tell what the crop
- * shows (it does not count), null when you have not answered. */
-export function myCropVerdict(people: IAuditAssessment[], userId: string | undefined, runId: number, layer: AuditLayer) {
+/** The review's decision on a crop's layer for the layer rating: "unsure" when the reviewer could
+ * not tell what the crop shows (it does not count), null when nobody answered. */
+export function reviewCropVerdict(people: IAuditAssessment[], runId: number, layer: AuditLayer) {
 	return (cropId: number): AuditVerdict | null => {
 		const target = (l: AuditLayer) => ({ checkKey: "prediction_quality" as const, layer: l, cropId });
-		if (cantTell(myAnswer(people, userId, runId, target("image")))) return "unsure";
-		return myAnswer(people, userId, runId, target(layer))?.verdict ?? null;
+		if (cantTell(reviewAnswer(people, runId, target("image")))) return "unsure";
+		return reviewAnswer(people, runId, target(layer))?.verdict ?? null;
 	};
 }
 
-/** The saved-audit fields your answers decide (answeredFormValues), with each prediction layer you
- * answered (on the layer or on any crop) set to the rating that follows from the crops: your crop
- * answers, else the check's calls. One owner, so the form and the crop review cannot disagree. */
-export function answeredValues(checks: IAuditChecks | undefined, userId: string | undefined): Partial<AuditFormValues> {
-	const values = answeredFormValues(checks, userId);
-	if (!checks || !userId) return values;
-	for (const section of AUDIT_SECTIONS) {
-		const evidence = section.cropAnswers && section.checkKey ? checks.checks[section.checkKey] : undefined;
-		if (!evidence) continue;
-		const layer = section.layers[0];
-		const mine = myCropVerdict(checks.people, userId, evidence.run.id, layer);
-		const answered = myAnswer(checks.people, userId, evidence.run.id, { checkKey: section.checkKey!, layer }) || evidence.crops.some((c) => mine(c.id) !== null);
-		const rating = answered ? layerRatingFromCrops(evidence, cropCalls(evidence, section.layers), mine) : null;
-		if (rating) Object.assign(values, formValuesForVerdict(section.checkKey!, layer, QUALITY_VERDICT[rating.quality]));
-	}
-	return values;
+/** A prediction layer as you left it on the page: the counts your crop answers give the layer and
+ * how many crops you answered. */
+export function layerReview(
+	evidence: IAuditCheckEvidence,
+	calls: Map<number, ICropCall>,
+	layer: PredictionLayer,
+	people: IAuditAssessment[],
+): ILayerReview {
+	const runId = evidence.run.id;
+	const mine = reviewCropVerdict(people, runId, layer);
+	return {
+		counts: layerCounts(evidence, calls, mine),
+		labelId: evidence.automated.find((r) => r.layer === layer && r.label_id !== null)?.label_id ?? null,
+		crops: evidence.crops.length,
+		answered: evidence.crops.filter((c) => mine(c.id) !== null).length,
+	};
 }

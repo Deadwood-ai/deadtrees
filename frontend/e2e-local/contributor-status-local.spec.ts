@@ -31,12 +31,9 @@ const ready = {
   is_thumbnail_done: true,
   is_deadwood_done: true,
   is_forest_cover_done: true,
-  final_assessment: "no_issues",
-  audit_date: "2026-09-02T12:00:00Z",
+  audit_decision: "ok",
   cog_path: "qa/forest.tif",
   thumbnail_path: "qa/forest.png",
-  deadwood_quality: "great",
-  forest_cover_quality: "great",
   has_deadwood_prediction: true,
   has_forest_cover_prediction: true,
 };
@@ -69,11 +66,13 @@ async function installStatus(
     }
     if (table === "get_dataset_status_details") {
       await route.fulfill({
-        json: {
-          ...dataset,
-          notes: "Image alignment needs attention.",
-          is_georeferenced: false,
-        },
+        json: dataset.audit_decision
+          ? {
+              dataset_id: dataset.id,
+              audit_decision: dataset.audit_decision,
+              audit_decided_at: "2026-11-17T10:00:00Z",
+            }
+          : null,
       });
       return;
     }
@@ -100,7 +99,7 @@ test("desktop shows a stopped run with its map and the prior review side by side
   await installStatus(page, {
     has_error: true,
     error_stage: "deadwood_treecover_combined_segmentation",
-    deadwood_quality: "bad",
+    audit_decision: "ok",
   });
   await page.goto("/profile");
   await expect(
@@ -110,7 +109,7 @@ test("desktop shows a stopped run with its map and the prior review side by side
     "Stopped · map available",
   );
   await expect(page.getByTestId("dataset-review-77")).toContainText(
-    "Reviewed · deadwood layer hidden",
+    "Reviewed · accepted",
   );
   await expect(
     page.getByRole("button", { name: "View map for dataset 77" }),
@@ -122,16 +121,14 @@ test("desktop shows a stopped run with its map and the prior review side by side
   await expect(drawer).toContainText(
     "Processing stopped during combined AI analysis.",
   );
-  await expect(drawer).toContainText("A quality review was recorded on 2 Sep 2026.");
-  await expect(drawer).toContainText(
-    "The date does not indicate which processing run was reviewed.",
-  );
+  await expect(drawer).toContainText("A quality review was recorded.");
   await expect(drawer).toContainText("Deadwood prediction");
-  await expect(drawer).toContainText("Generated · hidden from the public map");
+  // the review never hides a prediction
+  await expect(drawer).not.toContainText("hidden from the public map");
   await expect(
     drawer.getByRole("button", { name: "View map", exact: true }),
   ).toBeVisible();
-  await expect(drawer).toContainText("Image alignment needs attention.");
+  await expect(drawer).toContainText("Ready to use.");
   await expect(drawer).not.toContainText(/retry/i);
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page).toHaveURL(/\/profile$/);
@@ -148,8 +145,7 @@ test("desktop tells a contributor when no map exists after an early failure", as
     thumbnail_path: null,
     has_deadwood_prediction: false,
     has_forest_cover_prediction: false,
-    final_assessment: null,
-    audit_date: null,
+    audit_decision: null,
   });
   await page.goto("/profile");
   await expect(page.getByTestId("dataset-processing-77")).toContainText(
@@ -284,7 +280,7 @@ test("mobile owners can inspect excluded datasets without desktop management too
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await installStatus(page, { final_assessment: "exclude_completely" });
+  await installStatus(page, { audit_decision: "exclude" });
   await page.goto("/profile");
   await expect(page.getByRole("list", { name: "My datasets" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Upload Data" })).toHaveCount(
@@ -304,7 +300,7 @@ test("mobile owners can inspect excluded datasets without desktop management too
     }),
   ).toBeVisible();
   await expect(
-    page.getByText("Image alignment needs attention."),
+    page.getByText("Excluded from the public maps and downloads.", { exact: false }),
   ).toBeVisible();
   expect(
     await page.evaluate(

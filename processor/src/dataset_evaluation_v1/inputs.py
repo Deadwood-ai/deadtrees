@@ -1,9 +1,8 @@
 """What the dataset evaluation looks at, read straight from the COG at run time.
 
 One read at most `overview_px` on the long side through the COG overviews gives the
-overview, its valid-data mask, per-band statistics and the perceptual hash. Four
-crops spread over the data show sharpness and
-artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
+overview, its valid-data mask and per-band statistics. Four crops spread over the data
+show sharpness and artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
 windows on the 10 cm UTM grid of the embedding stage), rendered at 5 cm or native
 when coarser, so the prediction quality check judges the same crops. A dataset
 without tiles gets native-resolution windows instead. Either way the crops are the

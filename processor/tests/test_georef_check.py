@@ -282,9 +282,9 @@ def georef_task(test_dataset_for_processing, standardized_local_ortho, test_proc
 
 
 @pytest.mark.comprehensive
-def test_stage_stores_the_check_and_a_matching_audit_suggestion(georef_task, auth_token):
+def test_stage_stores_the_check_and_marks_the_dataset_done(georef_task, auth_token):
 	"""Full stage on the test ortho with real reference tiles (network) and the
-	matcher asset: a check row, the done flag, and a suggestion only for a call."""
+	matcher asset: a check row and the done flag."""
 	from shared.db import use_client
 	from shared.settings import settings
 
@@ -305,20 +305,8 @@ def test_stage_stores_the_check_and_a_matching_audit_suggestion(georef_task, aut
 		status = (
 			client.table(settings.statuses_table).select('*').eq('dataset_id', georef_task.dataset_id).execute().data
 		)
-		suggestions = (
-			client.table(settings.audit_suggestions_table)
-			.select('*')
-			.eq('dataset_id', georef_task.dataset_id)
-			.eq('field', 'is_georeferenced')
-			.execute()
-			.data
-		)
 	assert status[0]['is_georef_check_done'] is True
 	assert len(check) == 1 and check[0]['reference_evidence'], check
-	if check[0]['decision'] == 'uncertain':
-		assert suggestions == []
-	else:
-		assert [(s['field'], s['value']) for s in suggestions] == [('is_georeferenced', check[0]['decision'] == 'good')]
 
 
 @pytest.mark.unit
@@ -402,15 +390,17 @@ def test_wayback_lookup_runs_beside_the_providers_and_keeps_the_reference_order(
 	looked_up = threading.Event()
 	providers = [Provider(f'p{i}', f'g{i}', 'xyz', f'https://tiles.example/{i}/{{z}}/{{x}}/{{y}}') for i in range(3)]
 	captures = [
-		{'release': 1, 'capture_date': '2015-06-01'},
-		{'release': 2, 'capture_date': '2019-06-01'},
-		{'release': 3, 'capture_date': '2023-06-01'},
+		{'release': 1, 'capture_date': '2015-06-01', 'zoom': 18},
+		{'release': 2, 'capture_date': '2019-06-01', 'zoom': 19},
+		{'release': 3, 'capture_date': '2023-06-01', 'zoom': 19},
 	]
+	zooms = {}
 
 	def render(grid, provider, session):
 		# The slow Wayback lookup must not wait for the provider tiles.
 		if not provider.name.startswith('wayback') and not looked_up.wait(timeout=10):
 			raise RuntimeError('wayback lookup did not run beside the providers')
+		zooms[provider.name] = provider.max_zoom
 		return np.random.default_rng(len(provider.name)).integers(0, 255, (4, 4, 3), dtype=np.uint8), 17
 
 	def wayback_captures(lon, lat, zoom, session):
@@ -425,6 +415,40 @@ def test_wayback_lookup_runs_beside_the_providers_and_keeps_the_reference_order(
 
 	assert errors == {}
 	assert [r.provider for r in refs] == ['p0', 'p1', 'p2', 'wayback-2', 'wayback-1']
+	# a capture's tiles start at the zoom its date was found at
+	assert (zooms['wayback-1'], zooms['wayback-2']) == (18, 19)
+
+
+@pytest.mark.unit
+def test_a_wayback_release_without_imagery_at_the_zoom_is_dated_up_to_two_zooms_lower():
+	from processor.src.georef_check_v1.references import WAYBACK_CONFIG, wayback_captures
+
+	# the metadata layer of a zoom answers only where the release has imagery at it
+	top = {'old': 17, 'mid': 18, 'new': 19, 'coarse': 16}
+	asked = []
+
+	class Session:
+		def get(self, url, params=None, timeout=None):
+			if url == WAYBACK_CONFIG:
+				catalog = {
+					str(i): {'itemTitle': f'World Imagery (Wayback {year}-06-01)', 'metadataLayerUrl': name}
+					for i, (name, year) in enumerate([('old', 2014), ('mid', 2017), ('new', 2021), ('coarse', 2023)])
+				}
+				return SimpleNamespace(json=lambda: catalog)
+			name, layer = url.split('/')[0], int(url.split('/')[1])
+			z = 23 - layer
+			asked.append((name, z))
+			features = [{'attributes': {'SRC_DATE2': 1_500_000_000_000 + top[name]}}] if z <= top[name] else []
+			return SimpleNamespace(json=lambda: {'features': features})
+
+	captures = {c['release']: c for c in wayback_captures(7.85, 47.99, 19, Session())}
+	assert [(captures[i]['zoom'], captures[i]['capture_date'] is not None) for i in range(4)] == [
+		(17, True),
+		(18, True),
+		(19, True),
+		(None, False),  # nothing within two zooms: no capture, as before
+	]
+	assert sorted(z for name, z in asked if name == 'coarse') == [17, 18, 19]
 
 
 @pytest.mark.unit

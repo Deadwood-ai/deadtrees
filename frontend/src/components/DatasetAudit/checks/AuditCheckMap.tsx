@@ -5,8 +5,7 @@ import type { Map as OLMap } from "ol";
 import type BaseLayer from "ol/layer/Base";
 import type { IAuditCheckEvidence, IAuditImage } from "../../../types/auditChecks";
 import type { IGeorefCheck } from "../../../types/georefCheck";
-import { stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
-import { cropCalls, cropsForReview } from "../../../utils/cropCalls";
+import { orderedCrops, stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
 import CropImage from "../review/CropImage";
 import AuditCropReview, { type AuditCropReviewProps } from "./AuditCropReview";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
@@ -47,7 +46,6 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const [provider, setProvider] = useState<string>();
 	const [showMatches, setShowMatches] = useState(true);
 	const [droneOpacity, setDroneOpacity] = useState(60);
-	const [colorByVerdict, setColorByVerdict] = useState(true);
 	const [showModelView, setShowModelView] = useState(!!(section?.map?.kind === "crops" && section.map.showModelView));
 	// the step's own layer first: what the model saw of that prediction
 	const [imageKind, setImageKind] = useState<CropImageKind>(section?.map?.kind === "crops" ? section.map.images[0] : "raw");
@@ -57,19 +55,8 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const shownProvider = provider ?? references[0]?.value;
 	// keyed on the rows, not the evidence object: an answer must not rebuild the squares or move the map
 	const cropRows = evidence?.crops;
-	const automated = evidence?.automated;
-	const run = evidence?.run;
-	const colorLayers = cropMode?.colorLayers;
-	// the same calls and order the crop answers use: the crops the check counted major first
-	const calls = useMemo(
-		() => (cropMode && run && cropRows?.length ? cropCalls({ run, automated: automated ?? [], crops: cropRows }, colorLayers ?? []) : null),
-		[cropMode, run, automated, cropRows, colorLayers],
-	);
-	const crops = useMemo(() => (calls && cropRows ? cropsForReview({ crops: cropRows }, calls) : null), [calls, cropRows]);
-	const flagged = useMemo(
-		() => (calls && colorByVerdict ? new Set([...calls].filter(([, call]) => call === "major").map(([id]) => id)) : undefined),
-		[calls, colorByVerdict],
-	);
+	// the same order the crop review uses
+	const crops = useMemo(() => (cropMode && cropRows?.length ? orderedCrops({ crops: cropRows }) : null), [cropMode, cropRows]);
 
 	useSectionLayers(section?.shows ?? null);
 
@@ -93,7 +80,7 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	);
 	const predictionShown = section?.shows?.deadwood ? layerControl.showDeadwood : section?.shows?.forestCover ? layerControl.showForestCover : false;
 	useGeorefLayers({ map, orthoLayer, check: georef, provider: shownProvider, showMatches, droneOpacity });
-	useCropSquares({ map, crops, selectedId: cropId, flagged, onSelect: onSelectCrop });
+	useCropSquares({ map, crops, selectedId: cropId, onSelect: onSelectCrop });
 
 	const index = crops ? crops.findIndex((c) => c.id === cropId) : -1;
 	// the map follows the crop only while you see it: back on the map (M) it zooms to the current one
@@ -165,11 +152,6 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 						<span>{index >= 0 ? `Crop ${index + 1} of ${crops.length}` : `${crops.length} crops · click one`}</span>
 						<Button size="small" icon={<RightOutlined />} aria-label="Next crop" onClick={() => step(1)} />
 					</div>
-					{cropMode.colorLayers.length > 0 && (
-						<Checkbox checked={colorByVerdict} onChange={(e) => setColorByVerdict(e.target.checked)}>
-							Mark the crops the check counted major (orange, dashed, "!")
-						</Checkbox>
-					)}
 				</>
 			)}
 			{cropMode && (

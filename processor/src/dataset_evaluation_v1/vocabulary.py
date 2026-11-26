@@ -7,8 +7,8 @@ LAYER = 'image'
 # The model's word for each verdict of audit.verdict.
 VERDICTS = {'keep': 'ok', 'fix': 'minor', 'exclude': 'major', 'unsure': 'unsure'}
 
-# Exclude reasons (the audit's fixed list). Duplicates, georeferencing and season are
-# decided by their own checks, so the models never name them.
+# Exclude reasons (the audit's fixed list). Georeferencing and season are decided by their
+# own checks and duplicates are refused at upload, so the models never name them.
 REASONS = (
 	'blurry',
 	'duplicate',

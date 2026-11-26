@@ -1,4 +1,4 @@
-"""Georeferencing checks: access, the decision invariant and the re-review of disagreeing audits."""
+"""Georeferencing checks: access, the decision invariant, the audit run and the check output."""
 
 import json
 from pathlib import Path
@@ -17,7 +17,7 @@ from api.tests.db.test_acquisition_date_estimates import (  # noqa: F401
 	processor_user,
 )
 
-QUEUE = 'SELECT item,fields,reason FROM public.audit_review_queue WHERE dataset_id=%s'
+RESULT = 'SELECT georef_status, georef_source, review_required, checks_run FROM audit.dataset_results WHERE dataset_id=%s'
 
 
 def check_json(dataset, decision, level, p90=None):
@@ -27,14 +27,14 @@ def check_json(dataset, decision, level, p90=None):
 		'rules_version': 'georef-rules-v1',
 		'decision': decision,
 		'evidence_level': level,
-		'reason': 'references_agree',
+		'reason': 'references_disagree' if decision == 'uncertain' else 'references_agree',
 		'p90_m': p90,
-		'reference_evidence': [],
+		'reference_evidence': [{'provider': 'esri', 'qualified': True, 'decides': True, 'support': 0.6, 'p90_m': p90 or 14.0}],
 	}
 
 
 def write_check(db, dataset, decision, level, p90=None, queue='upload'):
-	"""Store a check and its suggestion the way the processor stage does."""
+	"""Store a check the way the processor stage does (older processors still send a suggestion)."""
 	act_as(db, processor_user(db), PROCESSOR_EMAIL)
 	suggestion = (
 		None if decision == 'uncertain' else {'value': decision == 'good', 'reason': level, 'details': {'p90_m': p90}}
@@ -68,15 +68,13 @@ def test_each_check_is_an_audit_run_with_one_model_assessment(db):
 		" WHERE c.dataset_id=%s AND c.check_key='georef'"
 	)
 	assert db.execute(current, (dataset,)).fetchall() == []
-	assert db.execute('SELECT count(*) FROM audit.review_queue WHERE dataset_id=%s', (dataset,)).fetchone() == (0,)
-	# once an operator activates it, the next check becomes current and goes to review
+	# the output is computed from the stored check, whichever version made it
+	assert db.execute(RESULT, (dataset,)).fetchone() == ('needs_review', 'check', ['georef'], [])
+	# once an operator activates it, the next check becomes current
 	db.execute("UPDATE audit.check_versions SET is_active=true WHERE version='georef-rules-v1_romav2.0.1'")
 	write_check(db, dataset, 'uncertain', 'conflict')
 	assert db.execute(current, (dataset,)).fetchall() == [('unsure', 'romav2.0.1', 'georef-rules-v1', 'conflict')]
-	assert db.execute(
-		"SELECT verdict::text, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='georef'",
-		(dataset,),
-	).fetchall() == [('unsure', True)]
+	assert db.execute(RESULT, (dataset,)).fetchone() == ('needs_review', 'check', ['georef'], ['georef'])
 
 
 ACTIVATION = (
@@ -94,12 +92,9 @@ def test_the_activation_migration_makes_the_existing_version_count(db):
 
 	db.execute(update)
 	assert db.execute(version).fetchall() == [('review_all', True)]
-	# from now on a check of that version is the dataset's current run and goes to review
+	# from now on a check of that version is the dataset's current run
 	write_check(db, dataset, 'poor', 'strong', 22.6)
-	assert db.execute(
-		"SELECT verdict::text, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='georef'",
-		(dataset,),
-	).fetchall() == [('major', True)]
+	assert db.execute(RESULT, (dataset,)).fetchone() == ('estimated', 'check', [], ['georef'])
 
 	# while another version is active it changes nothing
 	db.execute(
@@ -110,44 +105,11 @@ def test_the_activation_migration_makes_the_existing_version_count(db):
 	assert db.execute(version).fetchall() == [('review_all', False)]
 
 
-def audit_georeferencing(db, auditor, dataset, good):
-	act_as(db, auditor)
-	db.execute(
-		"INSERT INTO public.dataset_audit(dataset_id,audited_by,is_georeferenced,audit_date) VALUES (%s,%s,%s,now() - interval '1 day')",
-		(dataset, auditor, good),
-	)
-	as_admin(db)
-
-
-def test_a_check_disagreeing_with_a_saved_audit_goes_to_re_review(db):
-	auditor = create_user(db, can_audit=True)
-	agrees, disagrees, uncertain = (create_dataset(db, create_user(db)) for _ in range(3))
-	for dataset in (agrees, disagrees, uncertain):
-		audit_georeferencing(db, auditor, dataset, True)
-
-	write_check(db, agrees, 'good', 'strong', 2.7)
-	write_check(db, disagrees, 'poor', 'strong', 22.6)
-	write_check(db, uncertain, 'uncertain', 'insufficient')
-
-	assert db.execute(QUEUE, (agrees,)).fetchall() == []
-	assert db.execute(QUEUE, (disagrees,)).fetchall() == [
-		('is_georeferenced', ['is_georeferenced'], 'suggestion_changed:audit:georef/georef-rules-v1_romav2.0.1')
-	]
-	assert db.execute(QUEUE, (uncertain,)).fetchall() == []
-
-	# the auditor confirms the saved verdict: saving takes it off the queue until the evidence changes again
-	act_as(db, auditor)
-	db.execute(
-		"UPDATE public.dataset_audit SET is_georeferenced=true, audit_date=now() + interval '1 second' WHERE dataset_id=%s",
-		(disagrees,),
-	)
-	as_admin(db)
-	assert db.execute(QUEUE, (disagrees,)).fetchall() == []
-	# an uncertain rerun removes the earlier suggestion instead of leaving it stale
-	write_check(db, disagrees, 'uncertain', 'conflict')
-	assert db.execute(
-		'SELECT count(*) FROM public.dataset_audit_suggestions WHERE dataset_id=%s', (disagrees,)
-	).fetchone() == (0,)
+def test_the_check_writes_no_audit_suggestion(db):
+	dataset = create_dataset(db, create_user(db))
+	write_check(db, dataset, 'good', 'strong', 2.7)
+	assert db.execute("SELECT count(*) FROM public.dataset_audit_suggestions WHERE dataset_id = %s", (dataset,)).fetchone() == (0,)
+	assert db.execute(RESULT, (dataset,)).fetchone()[:2] == ('estimated', 'check')
 
 
 def test_read_access_follows_dataset_visibility_and_only_the_processor_writes(db):
@@ -181,13 +143,13 @@ def test_uncertain_decisions_carry_an_uncertain_evidence_level(db):
 		write_check(db, dataset, 'uncertain', 'strong')
 
 
-def test_a_failed_store_changes_neither_the_check_nor_the_suggestion(db):
+def test_a_failed_store_changes_nothing(db):
 	dataset = create_dataset(db, create_user(db))
 	write_check(db, dataset, 'poor', 'strong', 22.6)
 	act_as(db, processor_user(db), PROCESSOR_EMAIL)
 	db.execute('SAVEPOINT broken')
 	with pytest.raises(psycopg.errors.CheckViolation):
-		# an invalid check aborts the whole call, so the suggestion cannot be dropped alone
+		# an invalid check aborts the whole call, so the run is not stored alone
 		db.execute(
 			'SELECT public.store_georef_check(%s::jsonb, NULL)',
 			(json.dumps(check_json(dataset, 'uncertain', 'strong')),),
@@ -197,10 +159,9 @@ def test_a_failed_store_changes_neither_the_check_nor_the_suggestion(db):
 	assert db.execute('SELECT decision FROM public.v2_georef_checks WHERE dataset_id=%s', (dataset,)).fetchone() == (
 		'poor',
 	)
-	assert db.execute(
-		"SELECT value FROM public.dataset_audit_suggestions WHERE dataset_id=%s AND field='is_georeferenced'",
-		(dataset,),
-	).fetchone() == (False,)
+	assert db.execute("SELECT count(*) FROM audit.runs WHERE dataset_id=%s AND check_key='georef'", (dataset,)).fetchone() == (
+		1,
+	)
 
 
 def test_only_the_processor_stores_checks(db):

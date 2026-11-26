@@ -47,16 +47,20 @@ review page lists and what a later rule version is recomputed from.
 |---|---|---|---|
 | `luna-medium/pq-v6`, `haiku-5.5/pq-v6` (version v2; v1 ran `pq-v5`) | model | crop, layer `image` | `major` when the model cannot assess the crop (mode `m0_not_assessable`) |
 | same | model | crop, layers `deadwood` and `forest_cover` | the model's `ok`, `minor` or `major`, its `major_likelihood`, and per failure mode a likelihood and the affected area |
-| `pq-rule/pq-rule-v1` | rule | dataset, one row per layer | `major` when 2 or more exclude-set crops are major, else `ok`; `unsure` when no crop could be judged |
-
-A crop counts as major when the judges' mean `major_likelihood` reaches the layer's cut
-(deadwood 52, forest 69). A judge that could not assess the crop does not count in the
-mean. The cuts and the crop count are read from the version's
-`config` (`rule_config`), so a registered version runs with the numbers it was
-registered with. The rule row's `details` hold the counts
-(`major_crops`, `judged_crops`) and the weighted major share of the training set, which
-the review page shows. `audit.review_queue` reads the rule rows. The version starts in
-`review_all`. Nothing is written to `dataset_audit` yet.
+The check gives no dataset verdict and writes no dataset rows since the Audit Review
+(the earlier `pq-rule` rows stay as history). `audit.dataset_results` counts the crop
+calls of the current run per layer, over every crop it judged (exclude and training
+sets): a crop's call is the deciding model's verdict (`config.rule_config.decider`,
+Haiku; rule `pq-rule-v2`) where it could assess the crop. Luna's answer is stored and
+shown, not counted; which model decides will follow from the benchmarks. A crop the
+deciding model could not assess, or calls `ambiguous` (prompt `pq-v6`), counts for no
+side. The page shows Total, Major,
+Minor and OK. A layer never needs review on its own dataset: its quality is to be
+reviewed on a stratified random sample of crops (not built yet). Reviewers still answer
+crops in the crop review, OK, Minor, Major or Ambiguous (no one can reliably tell what is
+right, e.g. shrub or tree, an unusual dieback), and an operator adds a crop to the
+layer's benchmark with that answer as its label. Each layer has its own crop benchmark
+(`pq-deadwood-gold`, `pq-forest-cover-gold`), labeled and scored apart.
 
 The failure modes (prompts `pq-v5` and `pq-v6`): dead trees missed, deadwood on live vegetation, on
 non-vegetation, on lying wood, deadwood artifacts; trees missed, forest on non-trees,

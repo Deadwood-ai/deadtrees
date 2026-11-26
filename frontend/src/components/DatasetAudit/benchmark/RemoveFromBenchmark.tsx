@@ -2,14 +2,13 @@ import { useState } from "react";
 import { Button, Modal, message } from "antd";
 import { useCanOperate } from "../../../hooks/useUserPrivileges";
 import { useAddBenchmarkTarget, useRemoveBenchmarkTarget } from "../../../hooks/useAuditBenchmarks";
-import type { AuditCheckKey, IBenchmarkTarget } from "../../../types/auditChecks";
+import type { IAuditBenchmark, IBenchmarkTarget } from "../../../types/auditChecks";
 import { useAuditShortcuts } from "../checks/useAuditShortcuts";
 
 type Removed = { dataset_id: number; crop_id: number | null };
 
 interface RemoveFromBenchmarkProps {
-	checkKey: AuditCheckKey;
-	benchmark: { id: number; name: string; version: string };
+	benchmark: IAuditBenchmark;
 	/** the target on screen; null when the filter shows none, while Undo stays */
 	target: IBenchmarkTarget | null;
 	/** how many targets of the loaded benchmark sit on the target's dataset */
@@ -23,7 +22,7 @@ interface RemoveFromBenchmarkProps {
 /** "Remove (Del)" for operators: takes the current crop, or its whole dataset, out of the open
  * benchmark after a confirm step (audit.remove_benchmark_target). The labels stay; Undo adds the
  * last removal back while the page is open. Nothing for everyone else. */
-export default function RemoveFromBenchmark({ checkKey, benchmark, target, datasetTargets, onRemoved, active }: RemoveFromBenchmarkProps) {
+export default function RemoveFromBenchmark({ benchmark, target, datasetTargets, onRemoved, active }: RemoveFromBenchmarkProps) {
 	const { canOperate } = useCanOperate();
 	const remove = useRemoveBenchmarkTarget(benchmark.id);
 	const add = useAddBenchmarkTarget();
@@ -39,7 +38,7 @@ export default function RemoveFromBenchmark({ checkKey, benchmark, target, datas
 	const run = async (cropId: number | null) => {
 		if (!pending) return;
 		try {
-			const removed = await remove.mutateAsync({ checkKey, datasetId: pending.target.dataset_id, cropId });
+			const removed = await remove.mutateAsync({ benchmark, datasetId: pending.target.dataset_id, cropId });
 			setPending(null);
 			if (!removed.length) return;
 			setUndo((u) => [...u, removed]);
@@ -53,7 +52,7 @@ export default function RemoveFromBenchmark({ checkKey, benchmark, target, datas
 		const last = undo[undo.length - 1];
 		if (!last) return;
 		try {
-			for (const row of last) await add.mutateAsync({ checkKey, datasetId: row.dataset_id, cropId: row.crop_id });
+			for (const row of last) await add.mutateAsync({ benchmark, datasetId: row.dataset_id, cropId: row.crop_id });
 			setUndo((u) => u.slice(0, -1));
 			message.success(last.length > 1 ? `${last.length} crops are back in the benchmark` : "It is back in the benchmark");
 		} catch (error) {

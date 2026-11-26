@@ -188,10 +188,11 @@ def _load_candidates(client) -> list[DuplicateCandidate]:
 	zip_uploads = {
 		row['dataset_id'] for row in _select_all(client, settings.raw_images_table, 'dataset_id', 'dataset_id')
 	}
+	# the Audit Review's evaluation decision is the only exclusion (audit.evaluation_decisions)
 	excluded = {
 		row['dataset_id']
-		for row in _select_all(client, 'dataset_audit', 'dataset_id,final_assessment', 'dataset_id')
-		if row['final_assessment'] == 'exclude_completely'
+		for row in _select_all(client.schema('audit'), 'evaluation_decisions', 'dataset_id,decision', 'dataset_id')
+		if row['decision'] == 'exclude'
 	}
 	failed = {
 		row['dataset_id']

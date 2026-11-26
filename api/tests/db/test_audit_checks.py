@@ -307,7 +307,7 @@ def test_a_crop_joins_more_sets_but_keeps_its_window(db):
 		)
 
 
-def test_latest_answers_and_disagreements_follow_the_current_run(db):
+def test_latest_answers_follow_the_current_run(db):
 	janusch, clemens = create_user(db, can_audit=True), create_user(db, can_audit=True)
 	dataset = create_dataset(db, create_user(db))
 	version_id = register_version(db)
@@ -329,10 +329,6 @@ def test_latest_answers_and_disagreements_follow_the_current_run(db):
 	assert sorted(latest) == sorted(
 		[(str(janusch), 'major'), (str(clemens), 'minor'), ('haiku-5.5/v4', 'ok'), ('luna-medium/v4', 'major')]
 	)
-	assert db.execute(
-		'SELECT crop_id,people_disagree,people_and_models_disagree,verdicts FROM audit.disagreements WHERE dataset_id=%s',
-		(dataset,),
-	).fetchall() == [(crop, True, True, {str(janusch): 'major', str(clemens): 'minor', 'luna-medium/v4': 'major'})]
 	# the earlier run's model answer stays in the table but no longer counts
 	assert db.execute('SELECT count(*) FROM audit.assessments WHERE run_id=%s', (old_run,)).fetchone() == (1,)
 
@@ -349,111 +345,34 @@ def test_a_newer_run_that_is_not_current_does_not_hide_the_current_answers(db):
 	rerun = create_run(db, dataset, version_id, current=False)
 	model_row(db, dataset, rerun, crop, 'ok')
 	act_as(db, auditor)
-	assert db.execute('SELECT verdicts FROM audit.disagreements WHERE crop_id=%s', (crop,)).fetchall() == [
-		({str(auditor): 'ok', 'luna-medium/v4': 'major'},)
+	assert db.execute('SELECT assessor,verdict FROM audit.current_assessments WHERE crop_id=%s', (crop,)).fetchall() == [
+		('luna-medium/v4', 'major')
 	]
 
 
-def test_a_reviewer_disagrees_with_the_checks_call_not_with_each_model(db):
-	"""Two models and a rule answer per target; they often differ among themselves."""
+def test_only_the_service_role_imports_and_only_person_rows(db):
 	auditor = create_user(db, can_audit=True)
 	dataset = create_dataset(db, create_user(db))
 	run = create_run(db, dataset, register_version(db))
-	# dataset level: the rule row is the call
-	model_row(db, dataset, run, None, 'ok')
-	model_row(db, dataset, run, None, 'major', model='haiku-5.5')
-	model_row(db, dataset, run, None, 'minor', model='pq-rule', kind='rule', version='pq-rule-v1')
-	# crop level: no rule row, the models' worst verdict is the call
-	agreed, corrected, unsure = (create_crop(db, dataset, x0=x0) for x0 in (0, 512, 1024))
-	for crop in (agreed, corrected):
-		model_row(db, dataset, run, crop, 'ok')
-		model_row(db, dataset, run, crop, 'minor', model='haiku-5.5')
-	model_row(db, dataset, run, unsure, 'unsure')
-	model_row(db, dataset, run, unsure, 'ok', model='haiku-5.5')
-	person_row(db, auditor, dataset, None, 'minor', run)  # confirms the rule's verdict
-	person_row(db, auditor, dataset, agreed, 'minor', run)  # confirms the worst model verdict
-	person_row(db, auditor, dataset, corrected, 'ok', run)  # says the check is wrong
-	person_row(db, auditor, dataset, unsure, 'major', run)  # settles what the check left open
-
-	def listed():
-		act_as(db, auditor)
-		return db.execute(
-			'SELECT crop_id,people_disagree,people_and_models_disagree FROM audit.disagreements '
-			'WHERE dataset_id=%s ORDER BY crop_id NULLS FIRST',
-			(dataset,),
-		).fetchall()
-
-	assert listed() == [(corrected, False, True)]
-	person_row(db, auditor, dataset, None, 'ok', run)  # now overrides the rule
-	assert listed() == [(None, False, True), (corrected, False, True)]
-
-
-def import_legacy(db, auditor, dataset, verdict, created_at="now() - interval '1 year'", layer='deadwood'):
-	as_admin(db)
-	db.execute(
-		'INSERT INTO audit.assessments(check_key,dataset_id,layer,assessor_kind,assessor_user_id,verdict,imported_from,created_at) '
-		f"VALUES ('prediction_quality',%s,%s,'person',%s,%s,'dataset_audit',{created_at})",
-		(dataset, layer, auditor, verdict),
-	)
-
-
-def test_imported_audits_never_count_as_people_agreeing_or_disagreeing(db):
-	janusch, clemens, teja = (create_user(db, can_audit=True) for _ in range(3))
-	dataset, quiet = (create_dataset(db, create_user(db)) for _ in range(2))
-	run = create_run(db, dataset, register_version(db))
-	as_worker(db)
-	db.execute(
-		'INSERT INTO audit.assessments(check_key,dataset_id,run_id,layer,assessor_kind,model,prompt_version,verdict) '
-		"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','major')",
-		(dataset, run),
-	)
-	as_admin(db)
-	# old audits: Clemens said fine, Teja said bad; a later re-review by Janusch is native
-	import_legacy(db, clemens, dataset, 'ok')
-	import_legacy(db, teja, dataset, 'major')
-	# imported rows that disagree only with each other are not an adjudication case
-	import_legacy(db, clemens, quiet, 'ok')
-	import_legacy(db, teja, quiet, 'major')
-
-	act_as(db, janusch)
-	assert db.execute(
-		'SELECT people_disagree,people_and_models_disagree,legacy_and_models_disagree FROM audit.disagreements '
-		'WHERE dataset_id=%s AND crop_id IS NULL',
-		(dataset,),
-	).fetchall() == [(False, False, True)]
-	assert db.execute('SELECT count(*) FROM audit.disagreements WHERE dataset_id=%s', (quiet,)).fetchone() == (0,)
-
-	# the same person's native answer replaces their imported one, even if the import is dated later
-	import_legacy(db, janusch, dataset, 'ok', created_at="now() + interval '1 day'")
-	person_row(db, janusch, dataset, None, 'major', run)
-	act_as(db, janusch)
-	assert db.execute(
-		'SELECT verdict,imported_from FROM audit.latest_assessments WHERE dataset_id=%s AND assessor=%s',
-		(dataset, str(janusch)),
-	).fetchone() == ('major', None)
-	assert db.execute(
-		'SELECT count(*) FROM audit.latest_assessments WHERE dataset_id=%s AND imported_from IS NULL', (dataset,)
-	).fetchone() == (2,)
-
-	# only the service role marks rows as imported, and only person rows
+	act_as(db, auditor)
 	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
 		db.execute(
 			'INSERT INTO audit.assessments(check_key,dataset_id,layer,assessor_kind,assessor_user_id,verdict,imported_from) '
-			"VALUES ('prediction_quality',%s,'deadwood','person',%s,'ok','dataset_audit')",
-			(dataset, janusch),
+			"VALUES ('prediction_quality',%s,'deadwood','person',%s,'ok','legacy_audit')",
+			(dataset, auditor),
 		)
 	as_worker(db)
 	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
 		db.execute(
 			'INSERT INTO audit.assessments(check_key,dataset_id,run_id,layer,assessor_kind,model,prompt_version,verdict,imported_from) '
-			"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','ok','dataset_audit')",
+			"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','ok','legacy_audit')",
 			(dataset, run),
 		)
 	as_admin(db)
 	with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
 		db.execute(
 			'INSERT INTO audit.assessments(check_key,dataset_id,run_id,layer,assessor_kind,model,prompt_version,verdict,imported_from) '
-			"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','ok','dataset_audit')",
+			"VALUES ('prediction_quality',%s,%s,'deadwood','model','luna-medium','v4','ok','legacy_audit')",
 			(dataset, run),
 		)
 
@@ -472,8 +391,8 @@ def test_api_roles_get_only_the_privileges_the_policies_use(db):
 		'benchmark_scores',
 		'latest_assessments',
 		'current_assessments',
-		'disagreements',
-		'review_queue',
+		'evaluation_decisions',
+		'dataset_results',
 	)
 	granted = {
 		(role, table): set(privileges)
@@ -503,13 +422,6 @@ def test_api_roles_get_only_the_privileges_the_policies_use(db):
 	).fetchone() == (False, True, False)
 
 
-def queue(db, dataset):
-	return db.execute(
-		'SELECT layer,version,verdict,needs_review,reason,reviewed FROM audit.review_queue WHERE dataset_id=%s ORDER BY layer',
-		(dataset,),
-	).fetchall()
-
-
 def test_a_rule_change_recomputes_from_the_stored_model_rows(db):
 	auditor = create_user(db, can_audit=True)
 	dataset = create_dataset(db, create_user(db))
@@ -535,98 +447,10 @@ def test_a_rule_change_recomputes_from_the_stored_model_rows(db):
 	) == sorted(
 		[(False, 'luna-medium/v4', 'major'), (False, 'luna-medium/v4', 'ok'), (True, 'pq-dataset-rule/v2', 'ok')]
 	)
-	assert queue(db, dataset) == [('deadwood', 'v2', 'ok', True, 'review_all', False)]
 	# the v1 verdict stays as history
 	assert db.execute(
 		"SELECT count(*) FROM audit.assessments WHERE dataset_id=%s AND assessor='pq-dataset-rule/v1'", (dataset,)
 	).fetchone() == (1,)
-
-
-def test_the_review_queue_follows_the_mode_and_the_reviews(db):
-	operator, auditor = create_operator(db), create_user(db, can_audit=True)
-	version_id = register_version(db)
-	act_as(db, operator)
-	db.execute('SELECT audit.activate_version(%s)', (version_id,))
-	db.execute("UPDATE audit.check_versions SET mode='review_uncertain' WHERE id=%s", (version_id,))
-	as_admin(db)
-	agreed, disagreed, unsure = (create_dataset(db, create_user(db)) for _ in range(3))
-	for dataset, answers in ((agreed, ('ok', 'ok')), (disagreed, ('ok', 'major')), (unsure, ('unsure', 'ok'))):
-		run = create_run(db, dataset, version_id)
-		for model, verdict in zip(('luna-medium', 'haiku-5.5'), answers):
-			model_row(db, dataset, run, None, verdict, model=model, layer='image')
-
-	act_as(db, auditor)
-	assert queue(db, agreed) == [('image', 'v1', 'ok', False, None, False)]
-	assert queue(db, disagreed) == [('image', 'v1', 'major', True, 'models_disagree', False)]
-	assert queue(db, unsure) == [('image', 'v1', 'unsure', True, 'unsure', False)]
-	# a person's answer takes it off the list; an imported old audit does not
-	import_legacy(db, auditor, unsure, 'ok', layer='image')
-	person_row(db, auditor, disagreed, None, 'ok', layer='image')  # no run: not a review of these results
-	act_as(db, auditor)
-	assert queue(db, disagreed) == [('image', 'v1', 'major', True, 'models_disagree', False)]
-	disagreed_run = db.execute('SELECT run_id FROM audit.current_runs WHERE dataset_id=%s', (disagreed,)).fetchone()[0]
-	person_row(db, auditor, disagreed, None, 'ok', disagreed_run, layer='image')
-	act_as(db, auditor)
-	# the review on the run counts; the person's answer is not an automated result
-	assert queue(db, disagreed) == [('image', 'v1', 'major', False, 'models_disagree', True)]
-	assert db.execute(
-		"SELECT count(*) FROM audit.current_assessments WHERE dataset_id=%s AND assessor_kind='person'", (disagreed,)
-	).fetchone() == (0,)
-	assert queue(db, unsure) == [('image', 'v1', 'unsure', True, 'unsure', False)]
-
-	# auto_apply leaves only the spot-check sample
-	everything = register_version(db, version='v2', spot_check_pct=100)
-	nothing = register_version(db, version='v3', spot_check_pct=0)
-	for version, expected in ((everything, 'spot_check'), (nothing, None)):
-		act_as(db, operator)
-		db.execute("UPDATE audit.check_versions SET mode='auto_apply' WHERE id=%s", (version,))
-		as_admin(db)
-		dataset = create_dataset(db, create_user(db))
-		model_row(db, dataset, create_run(db, dataset, version), None, 'ok', layer='image')
-		act_as(db, auditor)
-		assert [(r[4], r[3]) for r in queue(db, dataset)] == [(expected, expected is not None)]
-
-
-def test_a_review_holds_for_the_same_evidence_and_reopens_for_a_new_ortho(db):
-	auditor = create_user(db, can_audit=True)
-	dataset = create_dataset(db, create_user(db))
-	version_id = register_version(db)
-
-	def run_on(inputs, source=None, version=version_id, rule=None):
-		activate(db, 'prediction_quality', version)
-		as_worker(db)
-		run = db.execute(
-			'INSERT INTO audit.runs(check_key,check_version_id,dataset_id,queue,status,finished_at,source_run_id,inputs) '
-			"VALUES ('prediction_quality',%s,%s,'upload','done',now(),%s,%s) RETURNING id",
-			(version, dataset, source, json.dumps(inputs)),
-		).fetchone()[0]
-		db.execute(
-			"INSERT INTO audit.current_runs(dataset_id,check_key,run_id) VALUES (%s,'prediction_quality',%s) "
-			'ON CONFLICT (dataset_id,check_key) DO UPDATE SET run_id=excluded.run_id',
-			(dataset, run),
-		)
-		if rule:
-			model_row(db, dataset, run, None, 'major', model='pq-dataset-rule', kind='rule', version=rule)
-		else:
-			model_row(db, dataset, run, None, 'major', layer='deadwood')
-		return run
-
-	ortho_a = {'ortho_sha256': 'a' * 64, 'labels': [42]}
-	first = run_on(ortho_a)
-	person_row(db, auditor, dataset, None, 'ok', first)
-	act_as(db, auditor)
-	assert queue(db, dataset)[0][3:] == (False, 'review_all', True)
-	# a rule-only recomputation and a new prompt on the same inputs keep the review
-	run_on({}, source=first, version=register_version(db, version='v2'), rule='v2')
-	act_as(db, auditor)
-	assert queue(db, dataset)[0][3:] == (False, 'review_all', True)
-	run_on(ortho_a, version=register_version(db, version='v3'))
-	act_as(db, auditor)
-	assert queue(db, dataset)[0][3:] == (False, 'review_all', True)
-	# a replaced ortho reopens it
-	run_on({'ortho_sha256': 'b' * 64, 'labels': [43]})
-	act_as(db, auditor)
-	assert queue(db, dataset)[0][3:] == (True, 'review_all', False)
 
 
 def test_operators_activate_a_version_and_can_keep_its_mode(db):
@@ -833,8 +657,8 @@ def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 		'benchmark_scores',
 		'latest_assessments',
 		'current_assessments',
-		'disagreements',
-		'review_queue',
+		'evaluation_decisions',
+		'dataset_results',
 	):
 		db.execute(f'SELECT * FROM audit.{table} LIMIT 1').fetchall()
 	assert count(db, 'assessments', dataset) == 1
@@ -843,20 +667,24 @@ def test_analyst_reads_every_audit_table_and_view_without_writing(db):
 		db.execute('DELETE FROM audit.assessments WHERE dataset_id=%s', (dataset,))
 
 
-# Later check migrations build on the base and come down first.
+# Later check migrations build on the base and come down first. The Audit Review makes the
+# export view and the factory read model depend on the evaluation decision: they come down too.
 LATER_CHECKS_DOWN = """
-DROP FUNCTION audit.remove_benchmark_target(text, bigint, bigint);
-DROP FUNCTION audit.add_benchmark_target(text, bigint, bigint);
+DROP FUNCTION audit.remove_benchmark_target(text, bigint, bigint, text);
+DROP FUNCTION audit.add_benchmark_target(text, bigint, bigint, text);
 DROP FUNCTION audit.store_dataset_evaluation(bigint, jsonb);
-DROP FUNCTION audit.duplicate_candidates(bigint, bigint, text, integer, real);
-DROP TABLE audit.image_hashes;
+DROP VIEW audit.dataset_results;
+DROP FUNCTION audit.georef_output_v1(public.v2_georef_checks),
+	audit.acquisition_date_output_v1(public.v2_acquisition_date_estimates);
+DROP FUNCTION public.factory_filtered_datasets(jsonb);
+DROP VIEW public.factory_attention_records, public.factory_dataset_records, public.v_export_polygon_candidates;
+DROP FUNCTION audit.is_dataset_excluded(bigint), audit.excluded_dataset_ids();
+DROP VIEW audit.evaluation_decisions;
 """
 
 DOWN = (
 	LATER_CHECKS_DOWN
 	+ """
-DROP VIEW audit.review_queue;
-DROP VIEW audit.disagreements;
 DROP VIEW audit.current_assessments;
 DROP VIEW audit.latest_assessments;
 DROP FUNCTION audit.activate_version(bigint, boolean);
@@ -875,13 +703,13 @@ DROP SCHEMA audit;
 
 
 def test_the_migration_can_be_reverted_without_touching_other_objects(db):
-	"""Nothing outside the framework depends on it, so the down path is a plain drop without CASCADE."""
+	"""Nothing else depends on the framework, so the down path is a plain drop without CASCADE."""
 	db.execute(DOWN)
 	assert db.execute(
 		"SELECT to_regnamespace('audit'), to_regtype('audit.verdict'), to_regprocedure('internal.is_audit_worker()')"
 	).fetchone() == (None, None, None)
 	# objects that existed before the migration are untouched
-	assert db.execute("SELECT to_regclass('public.audit_review_queue') IS NOT NULL").fetchone() == (True,)
+	assert db.execute("SELECT to_regclass('public.dataset_audit') IS NOT NULL").fetchone() == (True,)
 
 
 def test_only_a_run_of_the_active_version_becomes_current(db):

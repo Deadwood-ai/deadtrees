@@ -168,7 +168,7 @@ def test_only_visible_model_predictions_are_correctable(db):
 	as_admin(db)
 	db.execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (archived_dataset,))
 	db.execute(
-		"INSERT INTO public.dataset_audit(dataset_id,final_assessment) VALUES (%s,'exclude_completely')",
+		"INSERT INTO audit.assessments(check_key,dataset_id,layer,assessor_kind,verdict,imported_from) VALUES ('dataset_evaluation',%s,'image','person','major','legacy_audit')",
 		(excluded_dataset,),
 	)
 	hidden = [(dataset, *create_prediction(db, dataset, owner)) for dataset in (private_dataset, archived_dataset, excluded_dataset)]

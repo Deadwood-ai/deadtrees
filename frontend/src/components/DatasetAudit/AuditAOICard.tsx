@@ -8,7 +8,7 @@ import {
 	ScissorOutlined,
 	UndoOutlined,
 } from "@ant-design/icons";
-import { Button, Form } from "antd";
+import { Button } from "antd";
 
 import type { AOIToolbarState } from "../DatasetDetailsMap/hooks/useAOIEditor";
 import { InlineSkeleton } from "../SectionStates";
@@ -193,25 +193,6 @@ export default function AuditAOICard({
 				</div>
 			)}
 
-			<Form.Item
-				shouldUpdate={(previousValues, currentValues) =>
-					previousValues.final_assessment !== currentValues.final_assessment
-				}
-				className="mb-0 mt-2"
-			>
-				{({ getFieldValue }) => {
-					const assessment = getFieldValue("final_assessment");
-					if (aoiToolbarState.hasAOI) return null;
-
-					return (
-						<div className={`text-xs ${assessment === "no_issues" ? "text-orange-600" : "text-gray-500"}`}>
-							{assessment === "no_issues"
-								? "AOI required for \"Ready\" assessment"
-								: "AOI optional for this assessment"}
-						</div>
-					);
-				}}
-			</Form.Item>
 		</div>
 	);
 }

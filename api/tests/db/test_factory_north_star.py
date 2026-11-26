@@ -108,17 +108,19 @@ def test_uploads_before_retained_runs_never_count_as_results(db, operator):
 
 
 def test_only_usable_audits_count_as_reference_data(db, operator):
+	"""Reference data: datasets whose evaluation decision is ok (an earlier "keep, fix" too), dated by that decision."""
 	before = north_star(db, operator)
 	start = week(before, -3)['start']
 	contributor = user(db)
-	for assessment in ('no_issues', 'fixable_issues', 'exclude_completely'):
+	for verdict in ('ok', 'minor', 'major'):
 		row = upload(db, contributor, at(db, start, '-30 days'))
 		db.execute(
-			'INSERT INTO public.dataset_audit(dataset_id,audit_date,final_assessment,audited_by) VALUES (%s,%s,%s,%s)',
-			(row, at(db, start, '1 day'), assessment, operator),
+			'INSERT INTO audit.assessments(check_key,dataset_id,layer,assessor_kind,assessor_user_id,verdict,created_at) '
+			"VALUES ('dataset_evaluation',%s,'image','person',%s,%s,%s)",
+			(row, operator, verdict, at(db, start, '1 day')),
 		)
 	after = north_star(db, operator)
-	assert delta(before, after, 'audited_usable', -3) == 1
+	assert delta(before, after, 'audited_usable', -3) == 2
 
 
 def test_downloads_split_reuse_and_skip_team_downloaders(db, operator):

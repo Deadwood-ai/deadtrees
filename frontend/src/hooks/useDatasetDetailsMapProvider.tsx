@@ -63,8 +63,12 @@ const DatasetDetailsMapContext = createContext<DatasetDetailsMapContextType>({
 /** The basemap the audit map opens on: the reviewer judges imagery, so satellite rather than streets. */
 export const SATELLITE_MAP_STYLE = "satellite-streets-v12";
 
-/** `initialMapStyle`: the basemap a map opens on (default streets); the layer control can change it. */
-export const DatasetDetailsMapProvider = (props: { children: React.ReactNode; initialMapStyle?: string }) => {
+/** How the audit map opens: on satellite imagery with the predictions hidden, so the reviewer
+ * judges the image itself; a prediction step shows its layer. */
+export const AUDIT_MAP_START: Partial<LayerControlState> = { mapStyle: SATELLITE_MAP_STYLE, showDeadwood: false, showForestCover: false };
+
+/** `initial`: how a map's layers start (default: streets, every layer shown); the layer control changes them. */
+export const DatasetDetailsMapProvider = (props: { children: React.ReactNode; initial?: Partial<LayerControlState> }) => {
   // Viewport state
   const [viewport, setViewport] = useState({
     center: [0, 0],
@@ -73,9 +77,7 @@ export const DatasetDetailsMapProvider = (props: { children: React.ReactNode; in
   const [navigatedFrom, setNavigationSource] = useState<NavigationSource>(null);
 
   // Layer control state
-  const [layerControl, setLayerControl] = useState<LayerControlState>(() =>
-    props.initialMapStyle ? { ...defaultLayerControl, mapStyle: props.initialMapStyle } : defaultLayerControl,
-  );
+  const [layerControl, setLayerControl] = useState<LayerControlState>(() => ({ ...defaultLayerControl, ...props.initial }));
 
   // Individual setters for layer control (to avoid full re-renders when only one value changes)
   const setMapStyle = useCallback((style: string) => {

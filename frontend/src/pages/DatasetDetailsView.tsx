@@ -28,6 +28,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { hasForestCoverPredictionOutput } from "../utils/predictionAvailability";
 import { observeOwnedResult } from "../utils/observeOwnedResult";
+import { deadwoodPhenologyWarning, phenologyProbabilityAt } from "../utils/phenologyUtils";
 
 import DatasetLayerControlPanel from "../components/DatasetDetailsMap/DatasetLayerControlPanel";
 import EditingSidebar from "../components/DatasetDetailsMap/EditingSidebar";
@@ -131,16 +132,15 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
     selectedDeadwoodLabelId ?? preferredDeadwoodLabel?.id ?? null;
   const effectiveSelectedForestLabelId =
     selectedForestLabelId ?? preferredForestLabel?.id ?? null;
-  const auditInfo = dataset
-    ? {
-        final_assessment: dataset.final_assessment,
-        forest_cover_quality: dataset.forest_cover_quality,
-        deadwood_quality: dataset.deadwood_quality,
-        has_valid_phenology: dataset.has_valid_phenology ?? null,
-        has_valid_acquisition_date: dataset.has_valid_acquisition_date ?? null,
-        audit_date: dataset.audit_date ?? null,
-      }
-    : null;
+  // The deadwood layer starts hidden for an image likely taken outside the maximum greenness
+  // period, where leafless live crowns can look dead. The audit never hides a prediction.
+  const phenologyProbability =
+    dataset.phenology_probability ??
+    phenologyProbabilityAt(phenologyData?.phenology_curve, dataset.aquisition_year, dataset.aquisition_month, dataset.aquisition_day);
+  const deadwoodWarning = deadwoodPhenologyWarning(phenologyProbability);
+  useEffect(() => {
+    setShowDeadwood(!deadwoodWarning);
+  }, [dataset.id, deadwoodWarning, setShowDeadwood]);
 
   // Back button handler
   const handleBackClick = useCallback(() => {
@@ -243,7 +243,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
           dataset={dataset}
           phenologyData={phenologyData}
           isPhenologyLoading={isPhenologyLoading}
-          auditInfo={auditInfo}
+          phenologyProbability={phenologyProbability}
           overlappingDatasets={overlappingDatasets || []}
           isLoadingOverlapping={isLoadingOverlapping}
         />
@@ -388,22 +388,8 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
               setShowAOI={setShowAOI}
               hasForestCover={hasDisplayableForestCover}
               hasDeadwood={hasDeadwood}
+              deadwoodWarning={deadwoodWarning}
               hasAOI={hasAOI}
-              forestCoverQuality={
-                auditInfo?.forest_cover_quality as
-                  | "great"
-                  | "sentinel_ok"
-                  | "bad"
-                  | undefined
-              }
-              deadwoodQuality={
-                auditInfo?.deadwood_quality as
-                  | "great"
-                  | "sentinel_ok"
-                  | "bad"
-                  | undefined
-              }
-              canBypassQualityRestriction={canAudit}
               canAudit={canAudit}
               deadwoodVariants={deadwoodVariants ?? []}
               forestVariants={forestVariants ?? []}
@@ -474,7 +460,6 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
           onEditDeadwood={() => editing.handleStartEditing("deadwood")}
           onEditForestCover={() => editing.handleStartEditing("forest_cover")}
           isLoggedIn={!!user}
-          allowBadQualityLayers={canAudit}
           deadwoodLabelIdOverride={
             canAudit && selectedDeadwoodLabelId !== null
               ? selectedDeadwoodLabelId
@@ -538,22 +523,8 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
             setShowAOI={setShowAOI}
             hasForestCover={hasDisplayableForestCover}
             hasDeadwood={hasDeadwood}
+            deadwoodWarning={deadwoodWarning}
             hasAOI={hasAOI}
-            forestCoverQuality={
-              auditInfo?.forest_cover_quality as
-                | "great"
-                | "sentinel_ok"
-                | "bad"
-                | undefined
-            }
-            deadwoodQuality={
-              auditInfo?.deadwood_quality as
-                | "great"
-                | "sentinel_ok"
-                | "bad"
-                | undefined
-            }
-            canBypassQualityRestriction={canAudit}
             canAudit={canAudit}
             deadwoodVariants={deadwoodVariants ?? []}
             forestVariants={forestVariants ?? []}

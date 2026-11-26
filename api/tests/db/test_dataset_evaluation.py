@@ -1,4 +1,4 @@
-"""Dataset evaluation check: the store function, perceptual hashes and duplicate candidates."""
+"""Dataset evaluation check: the store function and the decision its rule row makes."""
 
 import json
 
@@ -43,7 +43,7 @@ def queued_run(db, dataset, version_id, queue='upload'):
 	return run
 
 
-def call(model, verdict, likelihood, kind='model', version='v1'):
+def call(model, verdict, likelihood, kind='model', version='v1', output=None):
 	return {
 		'assessor_kind': kind,
 		'model': model,
@@ -53,10 +53,11 @@ def call(model, verdict, likelihood, kind='model', version='v1'):
 		'modes': {'blurry': {'likelihood': likelihood}},
 		'details': {'reason': 'blurry' if verdict == 'major' else None, 'summary': 'A forest.'},
 		'raw': {'text': '{}'} if kind == 'model' else None,
+		'output': output,
 	}
 
 
-def result(sha=SHA, phash=1234, crops=2):
+def result(sha=SHA, crops=2):
 	shift = lambda i: {'type': 'Polygon', 'coordinates': [[[x + i * 0.001, y] for x, y in SQUARE['coordinates'][0]]]}
 	return {
 		'ortho_sha256': sha,
@@ -98,10 +99,9 @@ def result(sha=SHA, phash=1234, crops=2):
 		'assessments': [
 			call('luna-medium', 'major', 80),
 			call('haiku-5.5', 'major', 70),
-			# the one rule row: band check and duplicates are folded in and kept as run evidence
-			call('dataset-evaluation-rule', 'major', 75, 'rule'),
+			# the one rule row: the band check is folded in and kept as run evidence
+			call('dataset-evaluation-rule', 'major', 75, 'rule', 'v3', {'cog_issue': True, 'thumbnail_issue': False}),
 		],
-		'phash': {'method': 'phash-dct64-v1', 'value': phash},
 	}
 
 
@@ -123,6 +123,14 @@ def evaluation(db):
 	db.execute("UPDATE audit.check_versions SET is_active=false WHERE check_key='dataset_evaluation'")
 	db.execute('UPDATE audit.check_versions SET is_active=true WHERE id=%s', (version,))
 	return owner, dataset, version
+
+
+def evaluation_result(db, dataset):
+	return db.execute(
+		'SELECT evaluation_decision, evaluation_source, cog_issue, thumbnail_issue, review_required '
+		'FROM audit.dataset_results WHERE dataset_id=%s',
+		(dataset,),
+	).fetchone()
 
 
 def finish(db, run, dataset):
@@ -147,7 +155,7 @@ def test_a_stored_run_lands_whole_and_leaves_the_lifecycle_to_the_worker(db, eva
 	rows = db.execute(
 		'SELECT assessor, verdict, layer, crop_id FROM audit.assessments WHERE run_id=%s ORDER BY id', (run,)
 	).fetchall()
-	assert [r[0] for r in rows] == ['luna-medium/v1', 'haiku-5.5/v1', 'dataset-evaluation-rule/v1']
+	assert [r[0] for r in rows] == ['luna-medium/v1', 'haiku-5.5/v1', 'dataset-evaluation-rule/v3']
 	assert {r[2] for r in rows} == {'image'} and all(r[3] is None for r in rows)
 	images = db.execute(
 		'SELECT kind, crop_id IS NULL FROM audit.images WHERE dataset_id=%s ORDER BY id', (dataset,)
@@ -157,14 +165,12 @@ def test_a_stored_run_lands_whole_and_leaves_the_lifecycle_to_the_worker(db, eva
 		db.execute('SELECT crop_sets FROM audit.crops WHERE dataset_id=%s', (dataset,)).fetchall()
 		== [(['evaluation'],)] * 2
 	)
-	assert db.execute('SELECT hash FROM audit.image_hashes WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 1234
+	assert db.execute(
+		"SELECT output FROM audit.assessments WHERE run_id=%s AND assessor_kind='rule'", (run,)
+	).fetchone() == ({'cog_issue': True, 'thumbnail_issue': False},)
 	finish(db, run, dataset)
-	# The review queue reads the rule rows: the dataset rule excludes, so a person reviews it.
-	queue = db.execute(
-		"SELECT verdict, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='dataset_evaluation'",
-		(dataset,),
-	).fetchone()
-	assert queue == ('major', True)
+	# the rule row is the check's decision: exclude, decided by the check, no review needed
+	assert evaluation_result(db, dataset) == ('exclude', 'check', True, False, [])
 
 
 def test_a_rerun_on_the_same_ortho_reuses_its_crops_and_images(db, evaluation):
@@ -238,62 +244,18 @@ def test_only_the_audit_worker_stores_runs(db, evaluation):
 	assert db.execute('SELECT status FROM audit.runs WHERE id=%s', (run,)).fetchone()[0] == 'running'
 
 
-def test_duplicate_candidates_find_copies_re_exports_and_same_day_flights(db, evaluation):
-	owner, dataset, version = evaluation
-	other_user = create_user(db)
-	copy = create_dataset(db, other_user)
-	add_ortho(db, copy, sha=SHA)  # the same file uploaded by someone else
-	reexport = create_dataset(db, other_user, date=(2023, 5, 1))
-	add_ortho(db, reexport, sha='1' * 64, box='BOX(7.801 48.001,7.811 48.011)')
-	same_day = create_dataset(db, owner)
-	add_ortho(db, same_day, sha='2' * 64, box='BOX(7.802 48.000,7.812 48.010)')
-	elsewhere = create_dataset(db, owner)
-	add_ortho(db, elsewhere, sha='3' * 64, box='BOX(9.0 50.0,9.01 50.01)')
-	far_hash = create_dataset(db, other_user)
-	add_ortho(db, far_hash, sha='4' * 64, box='BOX(7.80 48.00,7.81 48.01)')
-	# an archived copy is a resolved duplicate, not a candidate
-	archived = create_dataset(db, other_user)
-	add_ortho(db, archived, sha=SHA)
-	as_admin(db)
-	db.execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (archived,))
-	for d, sha, value in ((reexport, '1' * 64, 0b1011), (far_hash, '4' * 64, -1)):
-		db.execute(
-			"INSERT INTO audit.image_hashes(dataset_id,ortho_sha256,method,hash) VALUES (%s,%s,'phash-dct64-v1',%s)",
-			(d, sha, value),
-		)
-
-	as_worker(db)
-	rows = db.execute(
-		'SELECT dataset_id, kind, hamming, overlap FROM audit.duplicate_candidates(%s,%s)', (dataset, 0b1001)
-	).fetchall()
-	as_admin(db)
-	found = {r[0]: r[1] for r in rows}
-	assert found == {copy: 'same_file', reexport: 'same_image', same_day: 'same_flight_day'}
-	assert [r[1] for r in rows] == ['same_file', 'same_image', 'same_flight_day']
-	assert dict((r[0], r[2]) for r in rows)[reexport] == 1
-	assert 0.75 < dict((r[0], r[3]) for r in rows)[reexport] < 0.85
-
-
-def test_image_hashes_are_written_only_by_the_worker(db, evaluation):
-	owner, dataset, _ = evaluation
-	act_as(db, owner)
-	db.execute('SAVEPOINT nope')
-	with pytest.raises(psycopg.errors.InsufficientPrivilege):
-		db.execute(
-			"INSERT INTO audit.image_hashes(dataset_id,ortho_sha256,method,hash) VALUES (%s,%s,'phash-dct64-v1',1)",
-			(dataset, SHA),
-		)
-	db.execute('ROLLBACK TO SAVEPOINT nope')
-	as_admin(db)
+def test_a_hash_from_an_older_worker_is_ignored(db, evaluation):
+	_, dataset, version = evaluation
+	run = queued_run(db, dataset, version)
+	store(db, run, {**result(), 'phash': {'method': 'phash-dct64-v1', 'value': 1234}})
+	assert db.execute('SELECT count(*) FROM audit.assessments WHERE run_id=%s', (run,)).fetchone() == (3,)
 
 
 def test_the_migration_can_be_reverted_without_touching_the_base(db):
 	from api.tests.db.test_audit_checks import LATER_CHECKS_DOWN
 
 	db.execute(LATER_CHECKS_DOWN)
-	assert db.execute(
-		"SELECT to_regclass('audit.image_hashes'), to_regprocedure('audit.store_dataset_evaluation(bigint,jsonb)')"
-	).fetchone() == (None, None)
+	assert db.execute("SELECT to_regprocedure('audit.store_dataset_evaluation(bigint,jsonb)')").fetchone() == (None,)
 	assert db.execute("SELECT to_regclass('audit.runs') IS NOT NULL").fetchone() == (True,)
 
 
@@ -324,23 +286,22 @@ def test_a_crop_on_the_clip_grid_joins_the_crop_another_check_stored(db, evaluat
 	)
 
 
-def test_a_decided_verdict_is_one_rule_row_and_not_a_disagreement(db, evaluation):
-	"""The queue reads every dataset-level rule row as a verdict. With the band check and
-	the duplicates as rows of their own, every verdict but ok looked like a disagreement
-	and could never leave review."""
+def test_v2_rule_rows_name_the_fix_flags_in_their_details(db, evaluation):
+	"""Rule v2 wrote no output: its COG and thumbnail issues are read from details.fix_flags, and its
+	"keep, fix" (minor) is the decision ok."""
 	_, dataset, version = evaluation
 	run = queued_run(db, dataset, version)
-	store(db, run, result())
+	payload = result()
+	payload['assessments'][2] = {
+		**call('dataset-evaluation-rule', 'minor', 20, 'rule', 'v2'),
+		'details': {'fix_flags': ['thumbnail_issue', 'reprocess']},
+	}
+	store(db, run, payload)
 	finish(db, run, dataset)
-	db.execute("UPDATE audit.check_versions SET mode='review_uncertain' WHERE id=%s", (version,))
-
-	assert db.execute(
-		"SELECT verdict::text, reason, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='dataset_evaluation'",
-		(dataset,),
-	).fetchall() == [('major', None, False)]
+	assert evaluation_result(db, dataset) == ('ok', 'check', False, True, [])
 
 
-def test_an_empty_cog_stores_one_rule_row_that_sends_the_exclusion_to_review(db, evaluation):
+def test_an_empty_cog_stores_one_rule_row_that_excludes(db, evaluation):
 	_, dataset, version = evaluation
 	run = queued_run(db, dataset, version)
 	empty = {
@@ -361,9 +322,4 @@ def test_an_empty_cog_stores_one_rule_row_that_sends_the_exclusion_to_review(db,
 	assert db.execute('SELECT assessor FROM audit.assessments WHERE run_id=%s', (run,)).fetchall() == [
 		('empty_cog/v1',)
 	]
-	assert db.execute('SELECT count(*) FROM audit.image_hashes WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 0
-	queue = db.execute(
-		"SELECT verdict, needs_review FROM audit.review_queue WHERE dataset_id=%s AND check_key='dataset_evaluation'",
-		(dataset,),
-	).fetchone()
-	assert queue == ('major', True)
+	assert evaluation_result(db, dataset) == ('exclude', 'check', None, None, [])

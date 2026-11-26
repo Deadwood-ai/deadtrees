@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditAssessment } from "../types/auditChecks";
-import { answeredValues, cropAnswerRows, myCropVerdict, savedLayer, suggestedLayer, withProblem, withVerdict } from "./cropAnswers";
+import { cropAnswerRows, layerReview, reviewCropVerdict, savedLayer, suggestedLayer, withProblem, withVerdict } from "./cropAnswers";
 
 const row = (overrides: Partial<IAuditAssessment>): IAuditAssessment =>
 	({
@@ -73,34 +73,42 @@ describe("editing a layer answer", () => {
 	});
 });
 
-describe("myCropVerdict", () => {
+describe("reviewCropVerdict", () => {
 	const person = (layer: IAuditAssessment["layer"], verdict: IAuditAssessment["verdict"], crop_id = 3) =>
 		row({ assessor_kind: "person", assessor_user_id: "me", model: null, layer, verdict, crop_id });
 
 	it("gives your layer verdict, and unsure (not counted) when you can't tell what the crop shows", () => {
-		const mine = myCropVerdict([person("deadwood", "major"), person("image", "major", 4), person("deadwood", "ok", 4)], "me", 10, "deadwood");
+		const mine = reviewCropVerdict([person("deadwood", "major"), person("image", "major", 4), person("deadwood", "ok", 4)], 10, "deadwood");
 		expect(mine(3)).toBe("major");
 		expect(mine(4)).toBe("unsure");
 		expect(mine(5)).toBeNull();
 	});
 });
 
-describe("answeredValues", () => {
+describe("layerReview", () => {
 	const person = (layer: IAuditAssessment["layer"], verdict: IAuditAssessment["verdict"], crop_id: number | null) =>
 		row({ assessor_kind: "person", assessor_user_id: "me", model: null, layer, verdict, crop_id });
 	const crop = (id: number) => ({ id, ortho_sha256: "x", crop_sets: ["exclude"], geometry: { type: "Polygon" as const, coordinates: [] } });
-	const checks = (people: IAuditAssessment[]) => ({
-		available: true,
-		checks: { prediction_quality: { run: { id: 10, check_key: "prediction_quality" as const, inputs: {}, evidence: {} }, automated: [], queue: [], crops: [crop(1), crop(2), crop(3)], images: [] } },
-		people,
+	const evidence = {
+		run: { id: 10, check_key: "prediction_quality" as const, inputs: {}, evidence: {} },
+		automated: [row({ crop_id: 1, label_id: 55 })],
+		crops: [crop(1), crop(2), crop(3)],
+		images: [],
+	};
+	const calls = new Map([
+		[1, { verdict: "minor" as const }],
+		[2, { verdict: "ok" as const }],
+		[3, { verdict: "major" as const }],
+	]);
+
+	it("counts the layer with your crop answers and says how far you are", () => {
+		const review = layerReview(evidence, calls, "deadwood", [person("deadwood", "ok", 1)]);
+		expect(review).toEqual({ counts: { total: 3, major: 1, minor: 0, ok: 2, ambiguous: 0 }, labelId: 55, crops: 3, answered: 1 });
 	});
 
-	it("sets an answered prediction layer to the rating from your crop answers, not an older layer answer", () => {
-		const people = [person("deadwood", "minor", null), person("deadwood", "major", 1), person("deadwood", "major", 2)];
-		expect(answeredValues(checks(people), "me").deadwood_quality).toBe("bad");
-	});
-
-	it("leaves a layer you have not answered to the suggestions", () => {
-		expect(answeredValues(checks([]), "me").deadwood_quality).toBeUndefined();
+	it("counts your ambiguous crops apart, outside the total", () => {
+		const review = layerReview(evidence, calls, "deadwood", [person("deadwood", "ambiguous", 3)]);
+		expect(review.counts).toEqual({ total: 2, major: 0, minor: 1, ok: 1, ambiguous: 1 });
+		expect(review.answered).toBe(1);
 	});
 });

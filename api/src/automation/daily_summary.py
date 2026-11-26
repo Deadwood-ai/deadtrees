@@ -437,26 +437,30 @@ def fetch_failures(client: Client, period_start: datetime, period_end: datetime)
 
 
 def fetch_audit_metrics(client: Client, period_start: datetime) -> tuple[int, list]:
-	"""Fetch audit statistics and top auditors"""
-	period_str = period_start.isoformat()
-	
-	# Get audits from period
-	response = client.table('dataset_audit').select(
-		'dataset_id, audited_by'
-	).gte('audit_date', period_str).execute()
-	
-	audit_count = 0
+	"""Audit Review decisions in the period and the reviewers who made them.
+
+	An audit is a reviewer's dataset evaluation answer (a native person row on the dataset
+	in audit.assessments); imported legacy audits are history and do not count.
+	"""
+	response = (
+		client.schema('audit')
+		.table('assessments')
+		.select('dataset_id, assessor_user_id')
+		.eq('check_key', 'dataset_evaluation')
+		.eq('assessor_kind', 'person')
+		.is_('crop_id', 'null')
+		.is_('imported_from', 'null')
+		.gte('created_at', period_start.isoformat())
+		.execute()
+	)
+
+	reviewed = {(row['dataset_id'], row['assessor_user_id']) for row in response.data or []}
+	audit_count = len({dataset_id for dataset_id, _ in reviewed})
 	auditor_counts = {}
-	auditor_ids = set()
-	
-	if response.data:
-		audit_count = len(response.data)
-		for row in response.data:
-			auditor_id = row.get("audited_by")
-			if auditor_id:
-				auditor_ids.add(auditor_id)
-				auditor_counts[auditor_id] = auditor_counts.get(auditor_id, 0) + 1
-	
+	for _, auditor_id in reviewed:
+		auditor_counts[auditor_id] = auditor_counts.get(auditor_id, 0) + 1
+	auditor_ids = set(auditor_counts)
+
 	# Get auditor emails
 	top_auditors = []
 	auditor_emails = {}

@@ -454,12 +454,20 @@ def _hide_labels_from_non_owners(dataset_id: int, owner: str, rule: str) -> None
 		if rule == 'archived':
 			db_client.table(settings.datasets_table).update({'archived': True}).eq('id', dataset_id).execute()
 		else:
-			db_client.table('dataset_audit').insert(
-				{'dataset_id': dataset_id, 'audited_by': owner, 'final_assessment': 'exclude_completely'}
+			# a reviewer's evaluation decision exclude hides the dataset from the public surface
+			db_client.schema('audit').table('assessments').insert(
+				{
+					'check_key': 'dataset_evaluation',
+					'dataset_id': dataset_id,
+					'layer': 'image',
+					'assessor_kind': 'person',
+					'assessor_user_id': owner,
+					'verdict': 'major',
+				}
 			).execute()
 
 
-@pytest.mark.parametrize('rule', ['archived', 'exclude_completely'])
+@pytest.mark.parametrize('rule', ['archived', 'excluded'])
 def test_downloads_contain_only_labels_the_user_may_read(
 	rule, auth_token, test_dataset_for_download, test_user, test_user2
 ):
@@ -489,7 +497,7 @@ def test_downloads_contain_only_labels_the_user_may_read(
 			assert not [name for name in archive.namelist() if name.startswith('labels_')]
 	finally:
 		with use_service_client() as db_client:
-			db_client.table('dataset_audit').delete().eq('dataset_id', dataset_id).execute()
+			db_client.schema('audit').table('assessments').delete().eq('dataset_id', dataset_id).eq('check_key', 'dataset_evaluation').execute()
 			db_client.table(settings.datasets_table).update({'archived': False}).eq('id', dataset_id).execute()
 		_delete_labels(auth_token, dataset_id)
 		shutil.rmtree(settings.downloads_path / str(dataset_id), ignore_errors=True)

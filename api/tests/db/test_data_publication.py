@@ -108,25 +108,20 @@ def test_datasets_for_publication(auth_token, test_user):
 
 				client.table(settings.statuses_table).insert(status_data).execute()
 				if i % 2 == 0:
+					# a reviewer's evaluation decision: ready
 					audit_rows.append(
 						{
+							'check_key': 'dataset_evaluation',
 							'dataset_id': dataset_id,
-							'is_georeferenced': True,
-							'has_valid_acquisition_date': True,
-							'has_valid_phenology': True,
-							'deadwood_quality': 'sentinel_ok',
-							'forest_cover_quality': 'great',
-							'aoi_done': True,
-							'has_cog_issue': False,
-							'has_thumbnail_issue': False,
-							'audited_by': test_user,
-							'has_major_issue': False,
-							'final_assessment': 'ready',
+							'layer': 'image',
+							'assessor_kind': 'person',
+							'assessor_user_id': test_user,
+							'verdict': 'ok',
 						}
 					)
 
 			with use_service_client() as service_client:
-				service_client.table('dataset_audit').insert(audit_rows).execute()
+				service_client.schema('audit').table('assessments').insert(audit_rows).execute()
 
 			yield dataset_ids
 
@@ -143,7 +138,6 @@ def test_datasets_for_publication(auth_token, test_user):
 			for publication_id in {link['publication_id'] for link in links.data}:
 				service_client.table('data_publication').delete().eq('id', publication_id).execute()
 			for dataset_id in dataset_ids:
-				service_client.table('dataset_audit').delete().eq('dataset_id', dataset_id).execute()
 				service_client.table(settings.metadata_table).delete().eq('dataset_id', dataset_id).execute()
 				service_client.table(settings.statuses_table).delete().eq('dataset_id', dataset_id).execute()
 				service_client.table(settings.datasets_table).delete().eq('id', dataset_id).execute()

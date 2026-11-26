@@ -3,8 +3,12 @@
 A processing stage that predicts, for every dataset, a probability distribution
 over the day of the flight year from the orthophoto itself and, where the
 Sentinel pipeline has processed the site, the Sentinel-2 weekly series of the
-flight year. The distribution feeds the audit (prefilled, never auto-saved) and
-a suggested date on the dataset page.
+flight year. In the Audit Review the model is called **AerialStamp**: it reports whether
+the recorded date should be replaced and by which date; it never changes the dataset.
+
+Cite: Mosig, C., Montero Loaiza, D., Mahecha, M., Vajna-Jehle, J., Kattenborn, T. (2026).
+AerialStamp: estimating the acquisition date of aerial orthophotos. EarthArXiv,
+https://eartharxiv.org/repository/view/15721/. Code: github.com/cmosig/aerialstamp.
 
 The model is the research model `doy_estimation/deploy/v1` (report:
 `side_projects/doy_estimation/report.pdf` in the sentinel-mortality repo).
@@ -94,57 +98,27 @@ Calibrated on out-of-fold predictions of the deployed recipes
   estimates have MAE 17.7 d (S2, 57 % of S2 datasets) / 20.8 d (no-S2, 22 %),
   80-83 % within 30 days.
 
-## From suggestion to decision
+## Audit Review output
 
-Methods write-up with examples: section 8 of the research report
-(`side_projects/doy_estimation/report.pdf` in the sentinel-mortality repo).
+`audit.acquisition_date_output_v1(v2_acquisition_date_estimates)` turns the stored
+estimate into the Audit Review's output (`audit.dataset_results`,
+`docs/audit-checks.md`), computed live:
 
-- **Predicted vs suggested date.** Every estimate has a predicted date (the
-  circular median). A suggested date is the same value, but only offered as a
-  replacement for the dataset's date when the month is missing or on a huge
-  mismatch.
-- **Suggestions** (`dataset_audit_suggestions`, generic for any source) prefill
-  empty audit fields, tagged "suggested"; nothing is saved. This stage suggests
-  `has_valid_acquisition_date` (false only on a huge mismatch),
-  `accept_suggested_acquisition_date` (the recommendation, only with a
-  suggestion) and `acquisition_date_notes`.
-- **Decisions** (`acquisition_date_decisions`) are the outcome of the date
-  check: date valid?, suggestion accepted/rejected, reported and resulting
-  date, model version, evidence snapshot (distribution, ranges, offset). Saving
-  the audit records the auditor's decision (trigger). With `DOY_AUTO_DECIDE=true`
-  the processor records the prefill as an automatic decision when no person has
-  decided; an automatic decision never replaces a person's.
-- **Accepting** writes the suggested date to `v2_datasets` as a full day with
-  `aquisition_date_source = 'model_suggestion'` and a pointer to the decision
-  (`aquisition_date_decision_id`); the change is logged in
-  `v2_dataset_edit_history`. The dataset page shows the date as
-  "model-suggested" with the reported date and the evidence.
-- **One active decision per dataset.** Older ones are deactivated, never
-  overwritten, with date and reason: `new_decision` (re-audit),
-  `estimate_contradicts` (a new estimate of the same date disagrees: decided
-  fine but now a huge mismatch; decided wrong and kept but now no problem;
-  month missing and an undecided suggestion), `date_edited` (hand edit),
-  `cutoff` (operator). Deactivation changes only the decision: the saved audit
-  (and every export reading it) keeps the last verdict. The audit page sees no
-  active decision, shows the old verdict and why it was reopened, and offers the
-  current suggestion in the date fields; saving records a new decision (also
-  when the verdict is unchanged).
-- **Re-review list for every audit item** (`audit_review_queue`, "Needs
-  re-review" filter in the audit list): a saved audit item is listed when newer
-  machine evidence disagrees with it - a reopened date decision, or, for any
-  other audit field, a suggestion whose value changed after the audit was saved
-  and differs from the saved value (a rerun repeating the same value does not
-  count). The audit page offers the current suggestion for exactly those fields;
-  saving takes the item off. Any future stage that writes suggestions for other
-  audit fields (phenology, prediction quality, ...) gets this for free.
-- **Prefill once per page load.** Suggestions are applied when the audit,
-  suggestions and decisions have loaded; later refetches (e.g. after a rerun)
-  never change what the auditor is editing.
-- **Existing audits** became `legacy_audit` decisions dated by their audit; they
-  stay active unless the first estimate contradicts them.
-- **Downstream readers** of `dataset_audit.has_valid_acquisition_date` (e.g. the
-  metadata export and training filters) keep seeing the last saved verdict,
-  also while a check is reopened.
+- **Confident**: one mode and an 80 % range of at most 90 days (the accept
+  recommendation above).
+- **Reason**: `mismatch` (a huge mismatch), `missing_month` (only a year recorded) or
+  `missing_day` (only a month recorded, and the predicted date falls in it).
+- **Replace**: a reason and a confident estimate; the new date is the predicted date.
+- Also reported: the predicted date, the 80 % range in days, the modes, the model
+  version and when it was estimated.
+
+The date never needs review. A reviewer may override replace yes or no with a note (a
+person row with output `{"replace": bool}` and `reason_text`); the latest reviewer
+answer wins. Nothing writes `v2_datasets`: the stage stores estimates only, without
+audit suggestions or decisions (`DOY_AUTO_DECIDE` is gone). The earlier
+`acquisition_date_decisions` stay as read-only history, and a dataset whose date was
+replaced by an accepted suggestion keeps `aquisition_date_source = 'model_suggestion'`
+until its date is edited by hand.
 
 ## Rerun for all datasets
 
@@ -156,10 +130,4 @@ python3 scripts/requeue_doy_estimation.py --all              # everything with a
 ```
 
 Queued at priority 1 (behind uploads), task `doy_estimation_v1` only. A rerun
-replaces estimates and suggestions; decisions it contradicts are reopened, the
-others stay. To re-check every decision made before a date (e.g. after a model
-upgrade), run as service role before queueing:
-
-```sql
-select public.supersede_acquisition_date_decisions_before('2026-10-01');
-```
+replaces the estimate, and with it the Audit Review output.

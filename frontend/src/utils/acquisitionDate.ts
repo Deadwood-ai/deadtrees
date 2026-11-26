@@ -1,7 +1,6 @@
 import type {
   IAcquisitionDateDecision,
   IAcquisitionDateEstimate,
-  IAuditSuggestion,
   IDoyDistribution,
 } from "../types/acquisitionDate";
 
@@ -34,53 +33,6 @@ export function datasetDateSuggestion(
   if (!estimate?.suggested_date || !estimate.suggestion_reason) return null;
   if (!isEstimateCurrent(estimate, dataset)) return null;
   return { date: estimate.suggested_date, reason: estimate.suggestion_reason };
-}
-
-/** Whether the reported date lies outside the model's 80% range: a full date outside every
- * range, a month that touches none. Null when there is nothing to compare (no month, or no
- * ranges). Outside the range the model is not sure the date is right, so the audit step says
- * "Uncertain" and prefills nothing, even when the date is not unlikely enough to call it wrong. */
-export function reportedOutsideLikelyRange(
-  estimate: Pick<IAcquisitionDateEstimate, "hdi" | "recorded_year" | "recorded_month" | "recorded_day">,
-): boolean | null {
-  const ranges = estimate.hdi?.["80"];
-  const { recorded_year: y, recorded_month: m, recorded_day: d } = estimate;
-  if (!ranges?.length || !y || !m) return null;
-  const pad = (v: number) => String(v).padStart(2, "0");
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  // ranges are ISO dates in the flight year, so plain string comparison orders them
-  const from = `${y}-${pad(m)}-${pad(d ?? 1)}`;
-  const to = `${y}-${pad(m)}-${pad(d ?? lastDay)}`;
-  return !ranges.some(([start, end]) => from <= end && to >= start);
-}
-
-/** The stored suggestions without "the date is valid" where the reported date lies outside the
- * model's 80% range: there the reviewer decides. */
-export function withoutUncertainDate(
-  suggestions: IAuditSuggestion[],
-  estimate: Parameters<typeof reportedOutsideLikelyRange>[0] | null | undefined,
-): IAuditSuggestion[] {
-  if (!estimate || !reportedOutsideLikelyRange(estimate)) return suggestions;
-  return suggestions.filter((s) => !(s.field === "has_valid_acquisition_date" && s.value === true));
-}
-
-/** The audit fields a date decision is made from. */
-export const DATE_DECISION_FIELDS = ["has_valid_acquisition_date", "accept_suggested_acquisition_date"];
-
-/** Audit form values proposed by machine suggestions: for fields the saved
- * audit leaves empty, and for `reopen` fields (the date fields of a reopened
- * date check), where the saved value is only the previous verdict. */
-export function suggestedAuditValues(
-  saved: Record<string, unknown> | null | undefined,
-  suggestions: IAuditSuggestion[],
-  reopen: string[] = [],
-): { values: Record<string, unknown>; fields: string[] } {
-  const values: Record<string, unknown> = {};
-  for (const s of suggestions) {
-    const current = saved?.[s.field];
-    if (reopen.includes(s.field) || current === null || current === undefined || current === "") values[s.field] = s.value;
-  }
-  return { values, fields: Object.keys(values) };
 }
 
 /** Day-of-year fraction [0, 1) of an ISO date, on the model's 365-bin circle. */
@@ -161,15 +113,4 @@ export function decisionDistribution(d: IAcquisitionDateDecision | null | undefi
   const e = d?.evidence;
   if (!e?.probabilities || !e.hdi || !e.predicted_date || !e.flight_year) return null;
   return { probabilities: e.probabilities, hdi: e.hdi, predicted_date: e.predicted_date, flight_year: e.flight_year };
-}
-
-const DEACTIVATED_REASON: Record<NonNullable<IAcquisitionDateDecision["superseded_reason"]>, string> = {
-  new_decision: "replaced by a newer decision",
-  estimate_contradicts: "a newer estimate of the date model disagrees with it",
-  date_edited: "the date was edited afterwards",
-  cutoff: "all decisions before a cutoff date were reopened",
-};
-
-export function describeDeactivation(d: IAcquisitionDateDecision): string {
-  return d.superseded_reason ? DEACTIVATED_REASON[d.superseded_reason] : "";
 }

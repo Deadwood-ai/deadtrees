@@ -3,7 +3,8 @@
 # =============================================================================
 # Simple Batch Extract Audited Deadwood Labels
 # =============================================================================
-# Extracts all labels from datasets with final_assessment='no_issues'
+# Extracts all labels from datasets whose Audit Review evaluation decision is
+# ok (audit.evaluation_decisions: a reviewer's, an imported audit's or the check's)
 # Creates GeoPackages with aoi, deadwood, and forest_cover layers
 # Only processes datasets that don't already have geopackages
 # =============================================================================
@@ -87,24 +88,18 @@ echo "=========================================="
 echo "Extracting Audited Deadwood Labels"
 echo "=========================================="
 
-# Get all high-quality audited datasets
-echo "Finding high-quality audited datasets..."
+# Get all audited datasets ready for use
+echo "Finding audited datasets ready for use..."
 TEMP_CSV=$(mktemp).csv
 
-# AND da.has_valid_acquisition_date = true
-# AND da.has_valid_phenology = true
-# AND da.is_georeferenced = true
-
 ogr2ogr -f "CSV" \
-    -sql "SELECT DISTINCT
-            da.dataset_id,
+    -sql "SELECT
+            e.dataset_id,
             d.file_name as dataset_name
-          FROM dataset_audit da
-          JOIN v2_datasets d ON da.dataset_id = d.id
-          WHERE da.final_assessment = 'no_issues'
-          AND da.deadwood_quality != 'bad'
-          AND da.forest_cover_quality != 'bad'
-          ORDER BY da.dataset_id" \
+          FROM audit.evaluation_decisions e
+          JOIN v2_datasets d ON e.dataset_id = d.id
+          WHERE e.decision = 'ok'
+          ORDER BY e.dataset_id" \
     "$TEMP_CSV" \
     "$DB_CONN"
 
@@ -119,10 +114,10 @@ tail -n +2 "$TEMP_CSV" > "${TEMP_CSV}.data"
 mv "${TEMP_CSV}.data" "$TEMP_CSV"
 
 TOTAL_DATASETS=$(wc -l < "$TEMP_CSV")
-echo "Found $TOTAL_DATASETS high-quality audited datasets"
+echo "Found $TOTAL_DATASETS audited datasets ready for use"
 
 if [ "$TOTAL_DATASETS" -eq 0 ]; then
-    echo "No high-quality audited datasets found"
+    echo "No audited datasets ready for use found"
     rm -f "$TEMP_CSV"
     exit 0
 fi
@@ -170,7 +165,7 @@ while IFS=',' read -r dataset_id dataset_name; do
 
     # Extract deadwood layer from canonical candidate view.
     # Polygon-selection logic is already resolved in the view.
-    # Export script only applies use-case level dataset audit filters.
+    # Export script only applies the dataset's audit decision.
     ogr2ogr -f "GPKG" \
         -update \
         -nln "deadwood_auto_cover" \
@@ -188,9 +183,7 @@ while IFS=',' read -r dataset_id dataset_name; do
               FROM v_export_polygon_candidates
               WHERE dataset_id = $dataset_id
                 AND layer_type = 'deadwood'
-                AND final_assessment = 'no_issues'
-                AND deadwood_quality != 'bad'
-                AND forest_cover_quality != 'bad'" \
+                AND audit_decision = 'ok'" \
         "$output_file" \
         "$DB_CONN" 2>/dev/null
 
@@ -212,9 +205,7 @@ while IFS=',' read -r dataset_id dataset_name; do
               FROM v_export_polygon_candidates
               WHERE dataset_id = $dataset_id
                 AND layer_type = 'forest_cover'
-                AND final_assessment = 'no_issues'
-                AND deadwood_quality != 'bad'
-                AND forest_cover_quality != 'bad'" \
+                AND audit_decision = 'ok'" \
         "$output_file" \
         "$DB_CONN" 2>/dev/null
 

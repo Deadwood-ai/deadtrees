@@ -28,7 +28,7 @@ export function AuditOpenElsewhere({ message, onBack, onContinueHere }: AuditOpe
 		<AuditLockBlocked message={message}>
 			<div className="mb-4 text-sm text-gray-500">Continuing here turns off saving on the other page.</div>
 			<div className="flex justify-center gap-2">
-				<Button onClick={onBack}>Back to queue</Button>
+				<Button onClick={onBack}>Back to the Audit Review</Button>
 				<Button type="primary" onClick={onContinueHere}>
 					Continue here
 				</Button>
@@ -54,7 +54,7 @@ export function AuditLockLostNotice({ message, onBack }: AuditLockLostNoticeProp
 					<div>{message}</div>
 					{/* The surrounding audit form is disabled; leaving must stay possible. */}
 					<Button size="small" className="mt-2" disabled={false} onClick={onBack}>
-						Back to queue
+						Back to the Audit Review
 					</Button>
 				</>
 			}

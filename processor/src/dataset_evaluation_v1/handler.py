@@ -1,10 +1,11 @@
 """The dataset evaluation as an audit worker handler (audit_worker.worker.HANDLERS).
 
-handle(ctx) reads the stored COG (private datasets too), its CLIP tiles, the
-thumbnail and the duplicate candidates, asks the version's judges, uploads the judged
-images with ctx.put_image and stores crops, images and assessments in one call to
-audit.store_dataset_evaluation. The worker finishes the run with the returned
-evidence, coverage and cost, and points the dataset at it when the version is active.
+handle(ctx) reads the stored COG (private datasets too), its CLIP tiles and the
+thumbnail, asks the version's judges, uploads the judged images with ctx.put_image and
+stores crops, images and assessments in one call to audit.store_dataset_evaluation.
+recompute(ctx) runs this version's rule alone over an earlier run's stored answers (a
+rule-only run). The worker finishes the run with the returned evidence, coverage and
+cost, and points the dataset at it when the version is active.
 """
 
 import tempfile
@@ -23,15 +24,16 @@ from ..utils.stored_inputs import (
 	stored_cog,
 	tile_rows,
 )
-from .check import CONFIG, evaluate, store_payload
+from .check import CONFIG, evaluate, rule_only_verdict, store_payload
 from .inputs import Tile, read_inputs
-from .rules import PHASH_METHOD, phash
+from .vocabulary import CHECK_KEY, LAYER
 
-# v2: the orthophoto alone. v1 judged inside the AOI and drew its edge on the overview; the
-# AOI is a check of its own (DT-1538).
-VERSION = 'v2'
+# v3: the dataset rule without the duplicate check, and the COG and thumbnail issues as the
+# rule row's output (the prompt and images of v2). v2 judged the orthophoto alone; v1 judged
+# inside the AOI, which is a check of its own (DT-1538).
+VERSION = 'v3'
 
-__all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
+__all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready', 'recompute']
 
 
 def ready(status: dict) -> bool:
@@ -51,12 +53,22 @@ def identity(sha256: str) -> dict:
 	return {'ortho_sha256': sha256}
 
 
-def handle(ctx) -> dict:
-	# The code is the version: its prompt and sampling under an earlier version's name would mix
-	# two behaviours in that version's results. Such a run fails; an operator activates this version.
-	queued_for = (getattr(ctx, 'version', None) or {}).get('version', VERSION)
+def version_config(ctx) -> dict:
+	"""The config of the run's version; refuses a run of another version.
+
+	The code is the version: its prompt, sampling and rule under an earlier version's name would
+	mix two behaviours in that version's results. Such a run fails; an operator activates this
+	version. The thresholds are the ones the version was registered with (a version before they
+	were recorded runs with today's)."""
+	version = getattr(ctx, 'version', None) or {}
+	queued_for = version.get('version', VERSION)
 	if queued_for != VERSION:
 		raise ValueError(f'the run is of version {queued_for}; this code judges {VERSION}')
+	return {**CONFIG, **version.get('config', {})}
+
+
+def handle(ctx) -> dict:
+	config = version_config(ctx)
 	dataset_id = ctx.run['dataset_id']
 	client = ctx.client
 	log = LogContext(
@@ -70,32 +82,10 @@ def handle(ctx) -> dict:
 	):
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
 		seen = read_inputs(cog_source, seed=dataset_id, tiles=tiles(client, dataset_id))
-	# The thresholds the version was registered with (a version before they were recorded runs with today's).
-	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
-	image_hash, candidates = None, []
-	if not seen.empty:  # an empty COG is excluded by rule; there is nothing to compare
-		image_hash = phash(seen.overview, seen.valid)
-		candidates = (
-			client.schema('audit')
-			.rpc(
-				'duplicate_candidates',
-				{
-					'p_dataset_id': dataset_id,
-					'p_hash': image_hash,
-					'p_method': PHASH_METHOD,
-					'p_max_hamming': config['duplicates']['max_hamming'],
-					'p_min_overlap': config['duplicates']['min_overlap'],
-				},
-			)
-			.execute()
-			.data
-		)
 	evaluation = evaluate(
 		seen,
 		ctx.judges,
 		source_profile=(ortho.ortho_info or {}).get('Profile'),
-		image_hash=image_hash,
-		duplicate_candidates=candidates or [],
 		thumbnail=thumbnail,
 		rule_config=config['rule_config'],
 	)
@@ -132,6 +122,44 @@ def handle(ctx) -> dict:
 		'coverage': {'crops': len(seen.crops), 'crop_picker': seen.settings['crop_picker']},
 		'cost': evaluation.cost,
 	}
+
+
+def recompute(ctx) -> dict:
+	"""A rule-only run (run.source_run_id): this version's rule over the source run's stored
+	model answers and band check, no model call. It stores only the new rule row;
+	audit.current_assessments adds the source run's model rows to it. The run takes over the
+	source's inputs, evidence and coverage, so it counts as judging the same evidence and the
+	review page finds the crops and images the answers were given on."""
+	config = version_config(ctx)
+	audit = ctx.client.schema('audit')
+	source_id = ctx.run['source_run_id']
+	source = audit.table('runs').select('status, inputs, evidence, coverage').eq('id', source_id).execute().data
+	if not source or source[0]['status'] != 'done':
+		raise ValueError(f'source run {source_id} has not finished; there are no answers to recompute from')
+	rows = (
+		audit.table('assessments')
+		.select('assessor_kind, model, prompt_version, verdict, major_likelihood, modes, details')
+		.eq('run_id', source_id)
+		.is_('crop_id', 'null')
+		.order('id')
+		.execute()
+		.data
+	)
+	verdict = rule_only_verdict(rows, source[0]['evidence'], config['rule_config'])
+	audit.table('assessments').insert(
+		{'check_key': CHECK_KEY, 'dataset_id': ctx.run['dataset_id'], 'run_id': ctx.run['id'], 'layer': LAYER}
+		| verdict.row()
+	).execute()
+	logger.info(
+		'Dataset evaluation recomputed',
+		LogContext(
+			category=LogCategory.PROCESS,
+			dataset_id=ctx.run['dataset_id'],
+			token=ctx.token,
+			extra={'run_id': ctx.run['id'], 'source_run_id': source_id, 'verdict': verdict.verdict},
+		),
+	)
+	return {key: source[0][key] for key in ('inputs', 'evidence', 'coverage')}
 
 
 def tile_of(row: dict) -> Tile:
