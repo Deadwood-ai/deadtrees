@@ -32,13 +32,18 @@ describe("suggestedLayer", () => {
 		judgement({ id: 3, tile_id: 9, problems: { m2_dw_on_live_vegetation: { likelihood: 99 } } }),
 	];
 
-	it("ticks what a model saw (50 or more) and takes major from the call", () => {
-		expect(suggestedLayer(models, 3, "deadwood", true)).toEqual({ verdict: "major", problems: { m1_dead_missed: "yes", m4_dw_on_lying_wood: "yes" } });
+	it("starts from the call, with what a model saw (50 or more) ticked", () => {
+		expect(suggestedLayer(models, 3, "deadwood", "major")).toEqual({ verdict: "major", problems: { m1_dead_missed: "yes", m4_dw_on_lying_wood: "yes" } });
+		// the deciding model said minor without an error type likely enough to tick: still minor
+		expect(suggestedLayer(models, 3, "forest_cover", "minor")).toEqual({ verdict: "minor", problems: {} });
+		// an ok call means none of the error types
+		expect(suggestedLayer(models, 3, "deadwood", "ok")).toEqual({ verdict: "ok", problems: {} });
+		expect(suggestedLayer(models, 3, "deadwood", "ambiguous").verdict).toBe("ambiguous");
 	});
 
-	it("is minor when a model saw a problem the call is not major for, ok when none saw one", () => {
-		expect(suggestedLayer(models, 3, "deadwood", false).verdict).toBe("minor");
-		expect(suggestedLayer(models, 3, "forest_cover", false)).toEqual({ verdict: "ok", problems: {} });
+	it("without a call: minor when a model saw a problem, ok when none saw one", () => {
+		expect(suggestedLayer(models, 3, "deadwood", null).verdict).toBe("minor");
+		expect(suggestedLayer(models, 3, "forest_cover", null)).toEqual({ verdict: "ok", problems: {} });
 	});
 });
 

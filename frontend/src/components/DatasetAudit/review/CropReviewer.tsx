@@ -81,11 +81,8 @@ export default function CropReviewer(props: CropReviewerProps) {
 	const problems: readonly string[] = LAYER_MODES[layer];
 	const focus = problems[Math.min(focusIndex, problems.length - 1)];
 
-	/** The starting point on a tile: the models' findings, major where the call is major. */
-	const suggested = (id: number): ILayerDraft => {
-		const call = crops.find((c) => c.id === id)?.verdict;
-		return suggestedLayer(judgements, id, layer, call ? call === "major" : null);
-	};
+	/** The starting point on a tile: the check's call with the models' findings. */
+	const suggested = (id: number): ILayerDraft => suggestedLayer(judgements, id, layer, crops.find((c) => c.id === id)?.verdict ?? null);
 	/** Your answer on a tile as it stands: what you changed, else what was saved, else the suggestion. */
 	const draftOf = (id: number): ILayerDraft => {
 		const saved = mine(id);

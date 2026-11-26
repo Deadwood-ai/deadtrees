@@ -10,15 +10,18 @@ export interface ILayerDraft {
 	problems: Partial<Record<string, ProblemAnswer>>;
 }
 
-/** The reviewer's starting point on a tile's layer: the error types a model saw ticked yes, and
- * the verdict major where the check's call is major, minor where a model saw a problem, else ok. */
-export function suggestedLayer(judgements: ITileJudgement[], tileId: number, layer: PredictionLayer, callMajor: boolean | null): ILayerDraft {
+/** The reviewer's starting point on a tile's layer: the check's call (the deciding model's
+ * verdict) with the error types a model saw ticked yes (none on an ok call). Without a call:
+ * major where a model said major, minor where one saw a problem, else ok. */
+export function suggestedLayer(judgements: ITileJudgement[], tileId: number, layer: PredictionLayer, call: AuditVerdict | null): ILayerDraft {
+	if (call === "ambiguous") return withVerdict({ verdict: call, problems: {} }, call, layer);
+	if (call === "ok") return { verdict: call, problems: {} };
 	const findings = cropFindings(judgements, tileId, layer, null);
 	const seen = new Set(findings.flatMap((f) => f.issues.map((i) => i.key)));
 	const problems: ILayerDraft["problems"] = {};
 	for (const mode of LAYER_MODES[layer]) if (seen.has(mode)) problems[mode] = "yes";
-	const major = callMajor ?? findings.some((f) => f.verdict === "major");
-	const verdict: AuditVerdict = major ? "major" : Object.keys(problems).length ? "minor" : "ok";
+	if (call === "minor" || call === "major") return { verdict: call, problems };
+	const verdict: AuditVerdict = findings.some((f) => f.verdict === "major") ? "major" : Object.keys(problems).length ? "minor" : "ok";
 	return { verdict, problems };
 }
 
