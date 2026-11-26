@@ -10,7 +10,8 @@ that run's rows the way the processor's stage writes its own
 (process_doy_estimation._store / _clear):
 
 - v2_acquisition_date_estimates: upsert on dataset_id.
-- v2_statuses.is_doy_estimation_done = true.
+- v2_statuses.is_doy_estimation_done = true (not with --skip-status, which writes the
+  estimates table only).
 - clears.jsonl (no year / ortho not sampleable): the estimate is deleted.
 
 The Audit Review reads the estimate (audit.acquisition_date_output_v1); a date
@@ -211,11 +212,12 @@ def plan(conn) -> Counter:
 	return c
 
 
-def write(conn) -> Counter:
+def write(conn, skip_status: bool) -> Counter:
 	c = Counter()
 	c['estimates upserted'] = conn.execute(UPSERT_ESTIMATES_SQL).rowcount
 	c['cleared estimates'] = conn.execute(CLEAR_SQL).rowcount
-	c['statuses marked done'] = conn.execute(MARK_DONE_SQL).rowcount
+	if not skip_status:
+		c['statuses marked done'] = conn.execute(MARK_DONE_SQL).rowcount
 	return c
 
 
@@ -227,6 +229,7 @@ def main() -> int:
 	mode.add_argument('--execute', action='store_true', help='write with --db-url-env and commit')
 	ap.add_argument('--db-url-env', help='env var with the writer connection (needed for --rehearse/--execute)')
 	ap.add_argument('--batch', type=int, default=500, help='datasets per transaction')
+	ap.add_argument('--skip-status', action='store_true', help='write the estimates table only, not v2_statuses')
 	a = ap.parse_args()
 	estimates, clears = load_bundle(a.bundle)
 	ids = sorted(set(estimates) | set(clears))
@@ -242,7 +245,7 @@ def main() -> int:
 			stage(conn, chunk, estimates, clears)
 			c = plan(conn)
 			if writes:
-				c.update(write(conn))
+				c.update(write(conn, a.skip_status))
 				if a.execute:
 					conn.commit()
 				else:
