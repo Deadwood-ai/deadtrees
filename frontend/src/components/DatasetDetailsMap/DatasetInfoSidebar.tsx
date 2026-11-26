@@ -24,7 +24,7 @@ import AcquisitionDateEvidence from "../AcquisitionDate/AcquisitionDateEvidence"
 import DatasetAccessSection from "../DatasetAccess/DatasetAccessSection";
 import { useDatasetGroundResolution } from "../../hooks/useDatasets";
 import { useDatasetAuditSummary } from "../../hooks/useDatasetAuditSummary";
-import { auditSettled, cropReasoning, georefFinding, predictionFinding } from "../../utils/datasetAuditSummary";
+import { cropReasoning, georefFinding, predictionFinding, reviewOpen } from "../../utils/datasetAuditSummary";
 import type { ICropReasoning } from "../../types/auditChecks";
 
 interface DatasetInfoSidebarProps {
@@ -183,7 +183,9 @@ const GeorefRow = ({ datasetId }: { datasetId: number }) => {
       {isLoading ? (
         <div className="h-4 w-16 animate-pulse rounded bg-gray-200" />
       ) : (
-        <Typography.Text data-testid="dataset-audit-georef">{auditSettled(summary) ? georefFinding(summary) : <Pending />}</Typography.Text>
+        <Typography.Text data-testid="dataset-audit-georef">
+          {!summary ? "Not checked" : reviewOpen(summary, "georef") ? <Pending /> : georefFinding(summary)}
+        </Typography.Text>
       )}
     </InfoRow>
   );
@@ -241,16 +243,14 @@ const AuditExplanation = () => (
 );
 
 /** The quality of the predictions, from the automated audit with vision language models: how
- * many sample crops each prediction gets wrong, with the model's reasoning; pending until no
- * review is required. Marked experimental; the (i) explains it. */
+ * many sample crops each prediction gets wrong, with the model's reasoning. No person reviews
+ * them per dataset (tiles are reviewed on a sample), so they show as soon as the check ran.
+ * Marked experimental; the (i) explains it. */
 const AuditSection = ({ datasetId }: { datasetId: number }) => {
   const { data: summary, isLoading } = useDatasetAuditSummary(datasetId);
-  const settled = auditSettled(summary);
   const finding = (total: number | null | undefined, major: number | null | undefined, minor: number | null | undefined) =>
     isLoading ? (
       <span className="inline-block h-4 w-16 animate-pulse rounded bg-gray-200" />
-    ) : !settled ? (
-      <Pending />
     ) : (
       (predictionFinding(total ?? null, major ?? null, minor ?? null) ?? "Not checked")
     );
@@ -270,13 +270,13 @@ const AuditSection = ({ datasetId }: { datasetId: number }) => {
           label="Deadwood cover quality"
           testId="dataset-audit-deadwood"
           finding={finding(summary?.deadwood_total, summary?.deadwood_major, summary?.deadwood_minor)}
-          reasoning={settled ? (summary.deadwood_reasoning ?? []) : []}
+          reasoning={summary?.deadwood_reasoning ?? []}
         />
         <QualityRow
           label="Tree cover quality"
           testId="dataset-audit-tree-cover"
           finding={finding(summary?.forest_cover_total, summary?.forest_cover_major, summary?.forest_cover_minor)}
-          reasoning={settled ? (summary.forest_cover_reasoning ?? []) : []}
+          reasoning={summary?.forest_cover_reasoning ?? []}
         />
       </div>
     </Section>

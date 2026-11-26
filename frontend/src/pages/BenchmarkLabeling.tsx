@@ -6,7 +6,7 @@ import { useCanAudit, useCanOperate } from "../hooks/useUserPrivileges";
 import { useBenchmark, useBenchmarkCandidate, useSaveBenchmarkLabel } from "../hooks/useAuditBenchmarks";
 import type { DatasetReviewInput, TileReviewInput } from "../types/auditChecks";
 import { stepCrop } from "../utils/auditChecks";
-import { BENCHMARKS, nextOpen, targetKey, targetNoun, type BenchmarkMode, type IBenchmarkTarget, type ITileTarget } from "../utils/benchmarkLabels";
+import { BENCHMARKS, targetKey, targetNoun, type BenchmarkMode, type IBenchmarkTarget, type ITileTarget } from "../utils/benchmarkLabels";
 import StatusPage from "../components/StatusPage";
 import { useAuditShortcuts } from "../components/DatasetAudit/checks/useAuditShortcuts";
 import BenchmarkCropReview from "../components/DatasetAudit/benchmark/BenchmarkCropReview";
@@ -53,13 +53,10 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 		const id = stepCrop(targets, current?.id ?? null, by);
 		go(targets.find((t) => t.id === id) ?? null);
 	};
-	const toNextOpen = () => {
-		const next = nextOpen(targets, current?.id ?? null);
-		if (next) go(next);
-	};
 
 	/** Stores a label, which puts the target into the benchmark. A new target is followed by the
-	 * next random one; in review the crop review moves on by itself, a dataset moves on here. */
+	 * next random one; in review the crop review moves on by itself, a dataset moves on here to the
+	 * next label in the list (every target in review has one, so there is no "next open"). */
 	const onSave = async (target: IBenchmarkTarget, review: DatasetReviewInput | TileReviewInput, advance = false) => {
 		try {
 			await save(target, review);
@@ -69,7 +66,7 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 		}
 		if (mode === "new") void candidate.next().then(() => go(null));
 		else if (advance) {
-			const next = nextOpen(targets, target.id);
+			const next = targets[targets.findIndex((t) => t.id === target.id) + 1];
 			if (next) go(next);
 		}
 		return true;
@@ -161,7 +158,7 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 							onSave={(review) => onSave(current, review, true)}
 							saving={isPending}
 							onSkip={mode === "new" ? skip : undefined}
-							keys={{ ArrowRight: () => step(1), ArrowLeft: () => step(-1), Tab: toNextOpen }}
+							keys={{ ArrowRight: () => step(1), ArrowLeft: () => step(-1) }}
 						/>
 					</div>
 				)

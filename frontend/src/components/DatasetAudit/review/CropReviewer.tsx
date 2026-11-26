@@ -115,6 +115,14 @@ export default function CropReviewer(props: CropReviewerProps) {
 		}
 		return null;
 	};
+	/** Where Save and Enter go once every crop has your answer: with a next step (the Audit Review),
+	 * nowhere, as Enter then opens that step; without one (reviewing a benchmark's labels), on to
+	 * the next crop in the list, stopping at the last. */
+	const nextAfter = (): number | null => {
+		const open = nextOpen();
+		if (open !== null || onDone) return open;
+		return crops[crops.findIndex((c) => c.id === cropId) + 1]?.id ?? null;
+	};
 
 	/** Stores a tile's answer; false when nothing was saved. */
 	const store = async (answer: ILayerDraft | null = draft, inBenchmark = false) => {
@@ -129,12 +137,10 @@ export default function CropReviewer(props: CropReviewerProps) {
 			});
 		return saved;
 	};
-	/** Saves a crop's answer and goes to the next crop without one (or the next step). */
+	/** Saves a crop's answer and goes to the next crop without one (see nextAfter). */
 	const save = async (answer: ILayerDraft | null = draft) => {
 		if (!(await store(answer))) return;
-		// after the last crop without your answer, stay: Enter then goes on to the next step
-		const next = nextOpen();
-		if (next !== null) goTo(next);
+		goTo(nextAfter());
 	};
 	/** B: the tile goes into the benchmark, your answer stored as its label, or out of it again. */
 	const toggleBenchmark = async () => {
@@ -162,7 +168,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 	// the next crop without your answer, and once there is none, to the next step
 	const enter = () => {
 		if (crop && (!answered(crop.id) || edits.has(crop.id))) return void save();
-		const next = nextOpen();
+		const next = nextAfter();
 		if (next !== null) goTo(next);
 		else onDone?.();
 	};

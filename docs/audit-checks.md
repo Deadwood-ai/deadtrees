@@ -53,7 +53,8 @@ review counts while the run judged the same prediction label.
 `review_required`, in step order: `evaluation` (the check is unsure and no review
 counts), `aoi` (processing done, no AOI), `georef` (`needs_review` and no review counts),
 `date` (the date review is stale: the estimate's advice flipped since; a new estimate
-with the same advice keeps it). The prediction layers never need review.
+with the same advice keeps it). The prediction layers never need review, and an excluded
+dataset needs none at all: once the evaluation excludes it, its other checks do not matter.
 
 `audit.georef_output_v1(v2_georef_checks)` and
 `audit.acquisition_date_output_v1(v2_acquisition_date_estimates)` turn the measured

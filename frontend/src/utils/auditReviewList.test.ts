@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditDatasetResult } from "../types/auditChecks";
-import { NO_FILTERS, TABS, activeFilterCount, filterRows, filtersFromParams, listParams, nextPendingReview, stagesOf, tabOf, type IAuditListRow } from "./auditReviewList";
+import { NO_FILTERS, TABS, activeFilterCount, filterRows, filtersFromParams, listParams, nextInList, stagesOf, tabOf, type IAuditListRow } from "./auditReviewList";
 
 const row = (id: number, result: Partial<IAuditDatasetResult> | null, over: Partial<IAuditListRow> = {}): IAuditListRow => ({
 	id,
@@ -54,7 +54,9 @@ describe("filters", () => {
 	});
 
 	it("filter by the review and the dataset", () => {
-		expect(only({ reviewRequired: true })).toEqual([2]);
+		expect(only({ review: "any" })).toEqual([2]);
+		expect(only({ review: "georef" })).toEqual([2]);
+		expect(only({ review: "aoi" })).toEqual([]);
 		expect(only({ inBenchmark: true })).toEqual([2]);
 		expect(only({ reviewedBy: "a@x.org" })).toEqual([2]);
 		expect(only({ id: " 3 " })).toEqual([3]);
@@ -66,27 +68,27 @@ describe("filters", () => {
 	});
 
 	it("round-trip through the URL and count what is set", () => {
-		const filters = { ...NO_FILTERS, decision: "exclude" as const, majorShare: 10, reviewRequired: true, reviewedBy: "a@x.org" };
+		const filters = { ...NO_FILTERS, decision: "exclude" as const, majorShare: 10, review: "georef" as const, reviewedBy: "a@x.org" };
 		const params = listParams("pending", filters);
-		expect(params.toString()).toBe("tab=pending&decision=exclude&major=10&review=1&reviewer=a%40x.org");
+		expect(params.toString()).toBe("tab=pending&decision=exclude&major=10&review=georef&reviewer=a%40x.org");
 		expect(filtersFromParams(params)).toEqual(filters);
 		expect(activeFilterCount(filters)).toBe(4);
 		expect(activeFilterCount(NO_FILTERS)).toBe(0);
+		// an unknown reason in an old link is no filter, not an empty list
+		expect(filtersFromParams(new URLSearchParams("review=1")).review).toBeNull();
 	});
 });
 
 describe("Save & Next", () => {
-	const row = (dataset_id: number, review_required: string[]) => ({ dataset_id, review_required }) as Pick<IAuditDatasetResult, "dataset_id" | "review_required">;
-	const rows = [row(30, ["georef"]), row(20, []), row(15, ["date"]), row(10, ["dataset_evaluation"])];
-
-	it("goes on to the next dataset that needs review, newest first, from any dataset", () => {
-		expect(nextPendingReview(rows, 30)).toBe(15);
-		expect(nextPendingReview(rows, 20)).toBe(15);
-		expect(nextPendingReview(rows, 25)).toBe(15);
-	});
-
-	it("wraps round, and stops when no other dataset needs review", () => {
-		expect(nextPendingReview(rows, 10)).toBe(30);
-		expect(nextPendingReview([row(10, ["georef"])], 10)).toBeNull();
+	it("goes on to the next row of the list it was opened from, with its tab and filters", () => {
+		expect(nextInList(rows, "/dataset-audit?tab=all", 4)).toBe(3);
+		// excluded datasets only: 3 is the one, and after it the list ends
+		expect(nextInList(rows, "/dataset-audit?tab=all&decision=exclude", 4)).toBe(3);
+		expect(nextInList(rows, "/dataset-audit?tab=all&decision=exclude", 3)).toBeNull();
+		// the pending tab, even after saving took the current dataset out of it
+		expect(nextInList(rows, "/dataset-audit?tab=pending", 3)).toBe(2);
+		expect(nextInList(rows, "/dataset-audit?tab=pending", 2)).toBeNull();
+		// opened without a list: the whole list
+		expect(nextInList(rows, "/dataset-audit", 2)).toBe(1);
 	});
 });

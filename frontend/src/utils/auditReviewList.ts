@@ -2,8 +2,8 @@
  * filter on the same rows) and the filters, kept in the URL. */
 
 import type { AuditDataset } from "../hooks/useAuditDatasets";
-import type { EvaluationDecision, GeorefStatus, IAuditDatasetResult } from "../types/auditChecks";
-import { majorShare } from "./auditReview";
+import type { EvaluationDecision, GeorefStatus, IAuditDatasetResult, ReviewItem } from "../types/auditChecks";
+import { REVIEW_ITEMS, majorShare } from "./auditReview";
 
 export interface IAuditListRow {
 	id: number;
@@ -45,7 +45,8 @@ export interface IAuditListFilters {
 	dateReplaced: "yes" | "no" | null;
 	/** the least share of major crops (0 to 100) on either prediction layer */
 	majorShare: number | null;
-	reviewRequired: boolean;
+	/** a review is required: for any reason, or for this one */
+	review: ReviewItem | "any" | null;
 	inBenchmark: boolean;
 	reviewedBy: string | null;
 }
@@ -58,7 +59,7 @@ export const NO_FILTERS: IAuditListFilters = {
 	georef: null,
 	dateReplaced: null,
 	majorShare: null,
-	reviewRequired: false,
+	review: null,
 	inBenchmark: false,
 	reviewedBy: null,
 };
@@ -72,7 +73,7 @@ const PARAMS: Record<keyof IAuditListFilters, string> = {
 	georef: "georef",
 	dateReplaced: "date",
 	majorShare: "major",
-	reviewRequired: "review",
+	review: "review",
 	inBenchmark: "benchmark",
 	reviewedBy: "reviewer",
 };
@@ -80,6 +81,7 @@ const PARAMS: Record<keyof IAuditListFilters, string> = {
 export function filtersFromParams(params: URLSearchParams): IAuditListFilters {
 	const get = (key: keyof IAuditListFilters) => params.get(PARAMS[key]);
 	const major = Number(get("majorShare"));
+	const review = get("review");
 	return {
 		id: get("id") ?? "",
 		country: get("country"),
@@ -88,7 +90,7 @@ export function filtersFromParams(params: URLSearchParams): IAuditListFilters {
 		georef: get("georef") as IAuditListFilters["georef"],
 		dateReplaced: get("dateReplaced") === "yes" || get("dateReplaced") === "no" ? (get("dateReplaced") as "yes" | "no") : null,
 		majorShare: get("majorShare") !== null && Number.isFinite(major) ? major : null,
-		reviewRequired: get("reviewRequired") === "1",
+		review: review === "any" || REVIEW_ITEMS.includes(review as ReviewItem) ? (review as IAuditListFilters["review"]) : null,
 		inBenchmark: get("inBenchmark") === "1",
 		reviewedBy: get("reviewedBy"),
 	};
@@ -129,7 +131,8 @@ export function filterRows(rows: IAuditListRow[], tab: AuditListTab, f: IAuditLi
 			if (f.georef && (r?.georef_status ?? "none") !== f.georef) return false;
 			if (f.dateReplaced && r?.date_replace !== (f.dateReplaced === "yes")) return false;
 			if (f.majorShare !== null && !(r && (majorShare(r) ?? -1) >= f.majorShare)) return false;
-			if (f.reviewRequired && !r?.review_required.length) return false;
+			if (f.review === "any" && !r?.review_required.length) return false;
+			if (f.review && f.review !== "any" && !r?.review_required.includes(f.review)) return false;
 			if (f.inBenchmark && !r?.in_benchmark) return false;
 			if (f.reviewedBy && !row.reviewers.includes(f.reviewedBy)) return false;
 			return true;
@@ -137,14 +140,12 @@ export function filterRows(rows: IAuditListRow[], tab: AuditListTab, f: IAuditLi
 		.sort((a, b) => b.id - a.id);
 }
 
-/** Where Save & Next goes: the next dataset that needs review after this one, in the Pending
- * audit reviews order (newest first), wrapping round; null when no other one needs review. */
-export function nextPendingReview(results: Pick<IAuditDatasetResult, "dataset_id" | "review_required">[], currentId: number): number | null {
-	const pending = results
-		.filter((r) => r.review_required.length && r.dataset_id !== currentId)
-		.map((r) => r.dataset_id)
-		.sort((a, b) => b - a);
-	return pending.find((id) => id < currentId) ?? pending[0] ?? null;
+/** Where Save & Next goes: the next row after this dataset in the list it was opened from, as the
+ * table showed it (its tab and filters, newest first); null after the last one. The current
+ * dataset need not be in the list any more: saving may have taken it out (no review left). */
+export function nextInList(rows: IAuditListRow[], listPath: string, currentId: number): number | null {
+	const params = new URLSearchParams(listPath.split("?")[1] ?? "");
+	return filterRows(rows, tabOf(params.get("tab")), filtersFromParams(params)).find((r) => r.id < currentId)?.id ?? null;
 }
 
 /** The processing statuses in the rows (besides idle), for the stage filter. */

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Button, Checkbox, Input, Select } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { NO_FILTERS, type IAuditListFilters } from "../../../utils/auditReviewList";
-import { DECISION_LABELS, GEOREF_LABELS } from "../../../utils/auditReview";
+import { DECISION_LABELS, GEOREF_LABELS, REVIEW_ITEMS, REVIEW_ITEM_LABELS } from "../../../utils/auditReview";
 import type { EvaluationDecision, GeorefStatus } from "../../../types/auditChecks";
 
 interface AuditListFiltersProps {
@@ -76,12 +76,12 @@ export default function AuditListFilters({ filters, onChange, countries, stages,
 				<Field label="Major crops">
 					{select("majorShare", 120, MAJOR_SHARES.map((p) => ({ label: `≥ ${p}%`, value: p })), "Any share")}
 				</Field>
+				<Field label="Review required">
+					{select("review", 170, [{ label: "For any reason", value: "any" }, ...REVIEW_ITEMS.map((i) => ({ label: REVIEW_ITEM_LABELS[i], value: i }))], "Either")}
+				</Field>
 				<Field label="Reviewed by">{select("reviewedBy", 180, reviewers.map((r) => ({ label: r, value: r })), "Anyone")}</Field>
 			</div>
 			<div className="flex flex-wrap items-center gap-4">
-				<Checkbox checked={filters.reviewRequired} onChange={(e) => onChange({ reviewRequired: e.target.checked })}>
-					Review required
-				</Checkbox>
 				<Checkbox checked={filters.inBenchmark} onChange={(e) => onChange({ inBenchmark: e.target.checked })}>
 					In benchmark
 				</Checkbox>

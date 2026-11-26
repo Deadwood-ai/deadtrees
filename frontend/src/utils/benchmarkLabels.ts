@@ -65,16 +65,6 @@ export function stratified<T extends { dataset_id: number }>(targets: T[]): T[] 
 	return Array.from({ length: rounds }, (_, round) => groups.flatMap((g) => (round < g.length ? [g[round]] : []))).flat();
 }
 
-/** The next target after `currentId` (wrapping) without a label; null when none is left. */
-export function nextOpen<T extends { id: number; label: unknown }>(targets: T[], currentId: number | null): T | null {
-	const start = targets.findIndex((t) => t.id === currentId);
-	for (let step = 1; step <= targets.length; step++) {
-		const t = targets[(start + step + targets.length) % targets.length];
-		if (t.id !== currentId && !isLabeled(t)) return t;
-	}
-	return null;
-}
-
 /** The images a labeler sees of a tile: of the newest run that cut its layer's overlay, the raw
  * image and the overlay, preferring the overlay of the prediction the label judged (so a label
  * keeps its picture after a rerun). */

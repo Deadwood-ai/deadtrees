@@ -159,7 +159,7 @@ export default function EvaluationReviewer({ datasetId, images, label, models, b
 					<div className="text-[11px] text-gray-500">Labeled blind: the models show once the dataset has a label.</div>
 				)}
 				<div className="text-[11px] text-gray-500">
-					<kbd>Shift</kbd>+<kbd>Space</kbd> keep and save · <kbd>←</kbd> <kbd>→</kbd> datasets · <kbd>Tab</kbd> next open
+					<kbd>Shift</kbd>+<kbd>Space</kbd> keep and save · <kbd>←</kbd> <kbd>→</kbd> datasets
 				</div>
 			</aside>
 		</div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IDatasetAuditSummary } from "../types/auditChecks";
-import { auditSettled, cropReasoning, georefFinding, predictionFinding, readableReason } from "./datasetAuditSummary";
+import { cropReasoning, georefFinding, predictionFinding, readableReason, reviewOpen } from "./datasetAuditSummary";
 
 const summary = (patch: Partial<IDatasetAuditSummary> = {}): IDatasetAuditSummary => ({
   review_required: [],
@@ -19,11 +19,11 @@ const summary = (patch: Partial<IDatasetAuditSummary> = {}): IDatasetAuditSummar
 });
 
 describe("the dataset page's audit rows", () => {
-  it("shows findings only once no review is required", () => {
-    expect(auditSettled(summary())).toBe(true);
-    expect(auditSettled(summary({ review_required: ["georef"] }))).toBe(false);
-    expect(auditSettled(summary({ evaluation_decision: null }))).toBe(false);
-    expect(auditSettled(null)).toBe(false);
+  it("holds a finding back only while its own check waits for a review", () => {
+    expect(reviewOpen(summary(), "georef")).toBe(false);
+    expect(reviewOpen(summary({ review_required: ["georef"] }), "georef")).toBe(true);
+    // an open evaluation review does not hold back the georeferencing
+    expect(reviewOpen(summary({ review_required: ["evaluation"], evaluation_decision: null }), "georef")).toBe(false);
   });
 
   it("says how far the image is off and how many sample crops a prediction gets wrong", () => {

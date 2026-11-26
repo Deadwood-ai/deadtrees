@@ -320,6 +320,9 @@ test.describe("benchmark labeling", () => {
     await page.keyboard.press("3");
     await expect.poll(() => saved.length).toBe(1);
     expect(saved[0]).toMatchObject({ tile_id: 101, layer: "deadwood", verdict: "major", in_benchmark: true });
+    // every tile in review has a label: saving goes on to the next one in the list
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 2 of 2");
+    await page.keyboard.press("ArrowLeft");
     await expect(page.getByTestId("benchmark-labeled-by")).toContainText("labeler-local-e2e");
     expect(removals()).toEqual([]);
   });

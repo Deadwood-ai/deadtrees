@@ -296,6 +296,22 @@ def test_aoi_review_and_benchmark_ticks(db):
 	assert outcome(db, dataset, 'in_benchmark') == (True,)
 
 
+def test_an_excluded_dataset_needs_no_review(db):
+	auditor, dataset = create_user(db, can_audit=True), create_dataset(db, create_user(db))
+	add_ortho(db, dataset)
+	db.execute(
+		'INSERT INTO public.v2_statuses(dataset_id,current_status,is_cog_done,is_combined_model_done) '
+		"VALUES (%s,'idle',true,true)",
+		(dataset,),
+	)
+	assert outcome(db, dataset, 'review_required') == (['aoi'],)
+	# once excluded, the missing AOI no longer matters
+	review(db, auditor, dataset, decision='exclude', exclude_reason='other')
+	assert outcome(db, dataset, 'evaluation_decision', 'review_required') == ('exclude', [])
+	review(db, auditor, dataset, decision='keep')
+	assert outcome(db, dataset, 'review_required') == (['aoi'],)
+
+
 def test_deleting_a_reviewers_account_keeps_their_reviews(db):
 	auditor, dataset = create_user(db, can_audit=True), create_dataset(db, create_user(db))
 	add_ortho(db, dataset)
