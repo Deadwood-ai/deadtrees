@@ -116,9 +116,8 @@ slider, and the matched points coloured by offset.
 
 - Provider check: `python3 scripts/check_georef_providers.py` (all keyless
   providers render real imagery as of 2026-10-02).
-- Rollout: new uploads queue the stage only once every processor host runs it
-  (`UPLOAD_TASK_TYPES` and the upload modal's step list). Stage the model asset
-  on each host before the release that adds the stage reaches it.
+- New uploads queue the stage last (`UPLOAD_TASK_TYPES` and the upload modal's
+  step list), so every processor host needs the model asset staged.
 
 - Bulk (re)runs: `scripts/requeue_georef_check.py`. `--audited` restricts it to
   datasets with an audit evaluation decision. It selects datasets without a check or
