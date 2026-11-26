@@ -65,7 +65,7 @@ a time; its commands and safety rules are in [audit-checks.md](../audit-checks.m
 
 Open the Audit Review. **All audits** lists every dataset, **Pending audit reviews** the
 ones a check asks about, **Benchmark** the three benchmarks. A check asks for a person
-when the dataset evaluation is unsure, processing finished without an AOI, the
+when the dataset evaluation is unsure, the AOI step ran or failed without an AOI, the
 georeferencing needs review, or the date estimate's advice flipped after a reviewer's
 answer. The prediction layers never ask, and an excluded dataset asks nothing more; you
 can still answer them. The filters narrow either tab, e.g. to one review reason or to the

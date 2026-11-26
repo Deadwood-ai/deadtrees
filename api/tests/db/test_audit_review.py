@@ -300,7 +300,16 @@ def test_aoi_review_and_benchmark_ticks(db):
 		"VALUES (%s,'idle',true,true)",
 		(dataset,),
 	)
-	assert outcome(db, dataset, 'is_processing_done', 'review_required', 'in_benchmark') == (True, ['aoi'], False)
+	# no AOI while the AOI step has not run yet is no reason for a review
+	assert outcome(db, dataset, 'is_processing_done', 'review_required', 'in_benchmark') == (True, [], False)
+	# the step ran and found no AOI, or it failed: a person draws one
+	db.execute('UPDATE public.v2_statuses SET is_aoi_done=true WHERE dataset_id=%s', (dataset,))
+	assert outcome(db, dataset, 'review_required') == (['aoi'],)
+	db.execute(
+		"UPDATE public.v2_statuses SET is_aoi_done=false, has_error=true, error_stage='aoi_segmentation' WHERE dataset_id=%s",
+		(dataset,),
+	)
+	assert outcome(db, dataset, 'review_required') == (['aoi'],)
 	review(db, operator, dataset, in_benchmark=True)
 	assert outcome(db, dataset, 'in_benchmark') == (True,)
 
@@ -309,8 +318,8 @@ def test_an_excluded_dataset_needs_no_review(db):
 	auditor, dataset = create_user(db, can_audit=True), create_dataset(db, create_user(db))
 	add_ortho(db, dataset)
 	db.execute(
-		'INSERT INTO public.v2_statuses(dataset_id,current_status,is_cog_done,is_combined_model_done) '
-		"VALUES (%s,'idle',true,true)",
+		'INSERT INTO public.v2_statuses(dataset_id,current_status,is_cog_done,is_combined_model_done,is_aoi_done) '
+		"VALUES (%s,'idle',true,true,true)",
 		(dataset,),
 	)
 	assert outcome(db, dataset, 'review_required') == (['aoi'],)
@@ -454,8 +463,8 @@ def test_the_review_list_filters_counts_and_pages_on_the_server(db):
 	as_admin(db)
 	db.execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (archived,))
 	db.execute(
-		'INSERT INTO public.v2_statuses(dataset_id,current_status,is_cog_done,is_combined_model_done,has_error,error_stage,error_message) VALUES '
-		"(%s,'cog_processing',false,false,false,null,null),(%s,'idle',true,true,false,null,null),(%s,'idle',false,false,true,'cog','gdal broke')",
+		'INSERT INTO public.v2_statuses(dataset_id,current_status,is_cog_done,is_combined_model_done,is_aoi_done,has_error,error_stage,error_message) VALUES '
+		"(%s,'cog_processing',false,false,false,false,null,null),(%s,'idle',true,true,true,false,null,null),(%s,'idle',false,false,false,true,'cog','gdal broke')",
 		(excluded, pending, failed),
 	)
 	db.execute(
