@@ -77,7 +77,8 @@ export default function CropAnswerPanel({ layer, findings, draft, focus, onFocus
 									disabled={disabled}
 									aria-label={MODE_LABELS[mode]}
 									onChange={(e) => onProblem(mode, e.target.value as ProblemAnswer)}
-									options={ANSWERS}
+									// ambiguous: no one can tell, so only "?" is an answer
+									options={draft.verdict === "ambiguous" ? ANSWERS.map((a) => ({ ...a, disabled: a.value !== "unsure" })) : ANSWERS}
 								/>
 							</div>
 						);

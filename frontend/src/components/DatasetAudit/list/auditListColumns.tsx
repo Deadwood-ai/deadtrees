@@ -1,6 +1,7 @@
 import { Badge, Button, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { AuditListTab, IAuditListRow } from "../../../utils/auditReviewList";
+import { isSortable, type AuditListTab, type IAuditListRow, type IListSort } from "../../../utils/auditReviewList";
+import { processingColumns } from "./processingColumns";
 import {
 	DECISION_LABELS,
 	REVIEW_ITEM_LABELS,
@@ -15,15 +16,13 @@ import type { PredictionLayer } from "../../../types/auditChecks";
 const DECISION_COLORS = { keep: "green", exclude: "red" } as const;
 const NONE = <span className="text-gray-400">—</span>;
 
-const location = (row: IAuditListRow) => [row.dataset.admin_level_3, row.dataset.admin_level_1].filter(Boolean).join(", ") || "Unknown";
+const location = (row: IAuditListRow) => [row.admin_level_3, row.admin_level_1].filter(Boolean).join(", ") || "Unknown";
 
 function acquisitionDate(row: IAuditListRow): string {
-	const { aquisition_year: y, aquisition_month: m, aquisition_day: d } = row.dataset;
+	const { aquisition_year: y, aquisition_month: m, aquisition_day: d } = row;
 	if (!y) return "Unknown";
 	return [y, m, d].filter(Boolean).map((part, i) => (i ? String(part).padStart(2, "0") : String(part))).join("-");
 }
-
-const numberOr = (value: number | null | undefined, fallback = -1) => (typeof value === "number" ? value : fallback);
 
 function LayerCell({ row, layer }: { row: IAuditListRow; layer: PredictionLayer }) {
 	const counts = layerResult(row.result, layer);
@@ -37,38 +36,36 @@ function LayerCell({ row, layer }: { row: IAuditListRow; layer: PredictionLayer 
 	);
 }
 
-const layerShare = (row: IAuditListRow, layer: PredictionLayer) => {
-	const counts = layerResult(row.result, layer);
-	return counts ? (share(counts.major, counts.total) ?? -1) : -1;
-};
-
 /** The table's columns: the same in every tab; Edits & flags adds the count of user reports and
- * edits, the segmentation benchmark the patch editor. */
+ * edits, the segmentation benchmark the patch editor, the switch the processing stages. The
+ * server sorts (utils/auditReviewList listOrder); `sort` marks the sorted column. */
 export function auditListColumns({
 	tab,
+	sort,
+	showStages,
 	onOpen,
 	onReferencePatches,
 }: {
 	tab: AuditListTab;
+	sort: IListSort;
+	showStages: boolean;
 	onOpen: (id: number) => void;
 	/** the reference tab: open the reference patch editor */
 	onReferencePatches?: (id: number) => void;
 }): ColumnsType<IAuditListRow> {
 	const columns: ColumnsType<IAuditListRow> = [
-		{ title: "ID", dataIndex: "id", key: "id", width: 80, sorter: (a, b) => a.id - b.id, defaultSortOrder: "descend" },
+		{ title: "ID", dataIndex: "dataset_id", key: "id", width: 80 },
 		{
 			title: "Location",
 			key: "location",
 			width: 170,
 			render: (_, row) => <span className="text-sm">{location(row)}</span>,
-			sorter: (a, b) => location(a).localeCompare(location(b)),
 		},
 		{
 			title: "Acquired",
 			key: "date",
 			width: 100,
 			render: (_, row) => <span className="font-mono text-xs">{acquisitionDate(row)}</span>,
-			sorter: (a, b) => acquisitionDate(a).localeCompare(acquisitionDate(b)),
 		},
 		{
 			title: "Evaluation",
@@ -84,14 +81,12 @@ export function auditListColumns({
 					</Tooltip>
 				);
 			},
-			sorter: (a, b) => (a.result?.evaluation_decision ?? "").localeCompare(b.result?.evaluation_decision ?? ""),
 		},
 		{
 			title: "Georeferencing",
 			key: "georef",
 			width: 150,
 			render: (_, row) => (row.result?.georef_status ? <span className="text-xs">{georefText(row.result)}</span> : NONE),
-			sorter: (a, b) => numberOr(a.result?.georef_offset_m) - numberOr(b.result?.georef_offset_m),
 		},
 		{
 			title: "Date",
@@ -114,10 +109,9 @@ export function auditListColumns({
 				const p = row.result?.phenology_probability;
 				return p == null ? NONE : <Tag color={p >= 0.7 ? "green" : p >= 0.4 ? "gold" : "red"}>{Math.round(p * 100)}%</Tag>;
 			},
-			sorter: (a, b) => numberOr(a.result?.phenology_probability) - numberOr(b.result?.phenology_probability),
 		},
-		{ title: "Tree cover major", key: "forest", width: 120, render: (_, row) => <LayerCell row={row} layer="forest_cover" />, sorter: (a, b) => layerShare(a, "forest_cover") - layerShare(b, "forest_cover") },
-		{ title: "Deadwood major", key: "deadwood", width: 120, render: (_, row) => <LayerCell row={row} layer="deadwood" />, sorter: (a, b) => layerShare(a, "deadwood") - layerShare(b, "deadwood") },
+		{ title: "Tree cover major", key: "forest", width: 120, render: (_, row) => <LayerCell row={row} layer="forest_cover" /> },
+		{ title: "Deadwood major", key: "deadwood", width: 120, render: (_, row) => <LayerCell row={row} layer="deadwood" /> },
 		{
 			title: "Review reason",
 			key: "review",
@@ -135,7 +129,6 @@ export function auditListColumns({
 					</span>
 				);
 			},
-			sorter: (a, b) => (a.result?.review_required.length ?? 0) - (b.result?.review_required.length ?? 0),
 		},
 	];
 	if (tab === "edits-flags") {
@@ -149,17 +142,17 @@ export function auditListColumns({
 						<Badge count={row.flags + row.edits} size="small" />
 					</Tooltip>
 				) : null,
-			sorter: (a, b) => a.flags + a.edits - (b.flags + b.edits),
 		});
 	}
+	if (showStages) columns.push(processingColumns());
 	if (onReferencePatches) {
 		columns.push({
 			title: "Reference patches",
 			key: "reference_patches",
 			width: 150,
 			render: (_, row) => (
-				<Button size="small" onClick={() => onReferencePatches(row.id)}>
-					{row.dataset.has_ml_tiles ? "Continue patches" : "Generate patches"}
+				<Button size="small" onClick={() => onReferencePatches(row.dataset_id)}>
+					{row.has_ml_tiles ? "Continue patches" : "Generate patches"}
 				</Button>
 			),
 		});
@@ -170,10 +163,15 @@ export function auditListColumns({
 		width: 90,
 		fixed: "right",
 		render: (_, row) => (
-			<Button type="primary" size="small" onClick={() => onOpen(row.id)}>
+			<Button type="primary" size="small" onClick={() => onOpen(row.dataset_id)}>
 				Open
 			</Button>
 		),
 	});
-	return columns;
+	// the server sorts: each sortable column says whether it is the sorted one
+	return columns.map((column) =>
+		column.key && isSortable(String(column.key))
+			? { ...column, sorter: true, sortOrder: column.key === sort.key ? (sort.ascending ? "ascend" : "descend") : null }
+			: column,
+	);
 }

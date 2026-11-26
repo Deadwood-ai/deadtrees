@@ -29,6 +29,10 @@ describe("the dataset page's audit rows", () => {
   it("says how far the image is off and how many sample crops a prediction gets wrong", () => {
     expect(georefFinding(summary())).toBe("About 2.6 m off");
     expect(georefFinding(summary({ georef_status: "no_reference", georef_offset_m: null }))).toBe("No reference imagery");
+    // not run yet, or waiting for a person: nothing to show, the page says pending
+    expect(georefFinding(summary({ georef_status: null }))).toBeNull();
+    expect(georefFinding(summary({ review_required: ["georef"] }))).toBeNull();
+    expect(georefFinding(null)).toBeNull();
     expect(predictionFinding(16, 0, 14)).toBe("0/16 major, 14 minor");
     expect(predictionFinding(16, 3, 0)).toBe("3/16 major, 0 minor");
     expect(predictionFinding(null, null, null)).toBeNull();

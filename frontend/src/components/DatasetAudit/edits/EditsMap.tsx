@@ -13,6 +13,7 @@ import { useDatasetDetailsMap } from "../../../hooks/useDatasetDetailsMapProvide
 import { useDatasetLabelTypes } from "../../../hooks/useDatasetLabelTypes";
 import { useApproveCorrection, useRevertCorrection } from "../../../hooks/useSaveCorrections";
 import { useCorrectionStats, useCorrectionContributors, usePendingCorrectionLocations } from "../../../hooks/usePendingCorrections";
+import { REVIEW_LIST_KEY } from "../../../hooks/useAuditReviewList";
 import { useAuth } from "../../../hooks/useAuthProvider";
 import { useDatasetEditing } from "../../../hooks/useDatasetEditing";
 import { mapColors } from "../../../theme/mapColors";
@@ -64,8 +65,8 @@ export default function EditsMap({ dataset, onEditingStateChange }: EditsMapProp
 			}
 			trackAppEvent(action === "approve" ? "correction_approved" : "correction_reverted", { dataset_id: dataset.id });
 			message.success(`Correction ${done}`);
-			for (const key of ["pendingCorrections", ["correctionStats", dataset.id], ["correctionContributors", dataset.id], ["pendingCorrectionLocations", dataset.id]]) {
-				queryClient.invalidateQueries({ queryKey: Array.isArray(key) ? key : [key] });
+			for (const key of [REVIEW_LIST_KEY, ["correctionStats", dataset.id], ["correctionContributors", dataset.id], ["pendingCorrectionLocations", dataset.id]]) {
+				queryClient.invalidateQueries({ queryKey: key });
 			}
 			mapRef.current?.refreshVectorLayers();
 		} catch (error) {

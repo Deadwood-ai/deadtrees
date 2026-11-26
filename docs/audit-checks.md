@@ -49,6 +49,7 @@ review counts while the run judged the same prediction label.
 | `current_dataset_human_reviews` | dataset and check | the newest review and whether it is `stale` |
 | `evaluation_decisions` | dataset | the keep or exclude that counts, first that exists: a non-stale review, the old audit's keep, the check's call, the old audit's exclude (an old exclusion holds only until the check decides). Columns `decision`, `source` (`reviewer`, `legacy`, `check`), `verdict`, `output`, `decided_at` |
 | `dataset_outcomes` | dataset (any processing stage) | what the Audit Review and the dataset page show: the decision and its source, COG and thumbnail issues, the AOI, the georeferencing status (a non-stale review replaces the check's), the date (`date_replace`, `date_new`, a non-stale reviewer's answer included), phenology, Major/Minor/OK tile counts per layer, `in_benchmark`, and `review_required` |
+| `review_list` | dataset that is not archived | the Audit Review list: `outcome` (the dataset's `dataset_outcomes` row), the columns its tabs and filters use, the processing stages (`failed_stage` named as the factory does), user reports, pending edits, the segmentation benchmark selection and the reviewers |
 
 `review_required`, in step order: `evaluation` (the check is unsure and no review
 counts), `aoi` (processing done, no AOI), `georef` (`needs_review` and no review counts),
@@ -199,7 +200,13 @@ work without it through `/api/v1/`; only the log hygiene is missing.
 
 ## Audit Review page
 
-The list (`/dataset-audit`) reads `audit.dataset_outcomes`; the detail page
+The list (`/dataset-audit`) reads `audit.review_list`, one row per dataset that is not
+archived: the server pages, filters and sorts it, and each tab's count is a count request.
+Its `outcome` column is the dataset's `dataset_outcomes` row, worked out only for the rows of
+the page; the columns the filters use (`review_required`, `major_share`, the processing
+stages, user reports, edits, reviewers) cost only when a filter uses them.
+`audit.review_list_options()` gives the filters' choices. Save & Next asks the same list,
+with the tab and filters it was opened from, for the next older dataset. The detail page
 (`/dataset-audit/<id>`, `frontend/src/components/DatasetAudit/`) reads the current runs,
 their images and judgements, `tile_calls` and `current_dataset_human_reviews`, and saves
 reviews into the two human review tables. Images come from

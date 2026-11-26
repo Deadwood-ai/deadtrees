@@ -1,33 +1,30 @@
 import { describe, expect, it } from "vitest";
-import type { IAuditDatasetResult } from "../types/auditChecks";
-import { NO_FILTERS, TABS, activeFilterCount, filterRows, filtersFromParams, listParams, nextInList, stagesOf, tabOf, type IAuditListRow } from "./auditReviewList";
-
-const row = (id: number, result: Partial<IAuditDatasetResult> | null, over: Partial<IAuditListRow> = {}): IAuditListRow => ({
-	id,
-	dataset: { id, admin_level_1: "Germany" } as IAuditListRow["dataset"],
-	result: result && ({ dataset_id: id, review_required: [], is_processing_done: true, current_status: "idle", ...result } as IAuditDatasetResult),
-	reviewers: [],
-	flags: 0,
-	edits: 0,
-	reference: false,
-	...over,
-});
-
-const rows = [
-	row(1, { evaluation_decision: "keep", georef_status: "estimated", date_replace: false, deadwood_total: 10, deadwood_major: 0 }),
-	row(2, { review_required: ["evaluation", "georef"], georef_status: "needs_review", deadwood_total: 10, deadwood_major: 5, in_benchmark: true }, { reviewers: ["a@x.org"] }),
-	row(3, { evaluation_decision: "exclude", date_replace: true, is_processing_done: false, current_status: "cog_processing" }, { flags: 1 }),
-	row(4, null, { reference: true, dataset: { id: 4, admin_level_1: "Spain" } as IAuditListRow["dataset"] }),
-];
-const ids = (list: IAuditListRow[]) => list.map((r) => r.id);
+import {
+	COUNTED_TABS,
+	NEWEST_FIRST,
+	NO_FILTERS,
+	PROCESSING_STAGES,
+	TABS,
+	activeFilterCount,
+	filtersFromParams,
+	listConditions,
+	listOfPath,
+	listOrder,
+	listParams,
+	stageState,
+	tabOf,
+	type IAuditListRow,
+} from "./auditReviewList";
 
 describe("tabs", () => {
-	it("are the whole list with one fixed chip each, newest first", () => {
-		expect(ids(filterRows(rows, "all", NO_FILTERS))).toEqual([4, 3, 2, 1]);
-		expect(ids(filterRows(rows, "pending", NO_FILTERS))).toEqual([2]);
-		expect(ids(filterRows(rows, "benchmark", NO_FILTERS))).toEqual([]);
-		expect(ids(filterRows(rows, "edits-flags", NO_FILTERS))).toEqual([3]);
-		expect(ids(filterRows(rows, "reference", NO_FILTERS))).toEqual([4]);
+	it("are the whole list with one fixed condition each", () => {
+		expect(listConditions("all", NO_FILTERS)).toEqual([]);
+		expect(listConditions("pending", NO_FILTERS)).toEqual([["review_required", "neq", "{}"]]);
+		expect(listConditions("edits-flags", NO_FILTERS)).toEqual([{ or: "flags.gt.0,edits.gt.0" }]);
+		expect(listConditions("reference", NO_FILTERS)).toEqual([["reference", "is", "true"]]);
+		// the benchmark tab lists no datasets: no query, no count
+		expect(listConditions("benchmark", NO_FILTERS)).toBeNull();
+		expect(COUNTED_TABS).toEqual(["all", "pending", "edits-flags", "reference"]);
 		expect(TABS.slice(0, 3).map((t) => [t.label, t.chip])).toEqual([
 			["All audits", null],
 			["Pending audit reviews", "Review required"],
@@ -42,36 +39,49 @@ describe("tabs", () => {
 });
 
 describe("filters", () => {
-	const only = (patch: Partial<typeof NO_FILTERS>) => ids(filterRows(rows, "all", { ...NO_FILTERS, ...patch }));
+	const only = (patch: Partial<typeof NO_FILTERS>) => listConditions("all", { ...NO_FILTERS, ...patch });
 
 	it("filter by each check's output", () => {
-		expect(only({ decision: "exclude" })).toEqual([3]);
-		expect(only({ decision: "none" })).toEqual([4, 2]);
-		expect(only({ georef: "needs_review" })).toEqual([2]);
-		expect(only({ dateReplaced: "yes" })).toEqual([3]);
-		expect(only({ dateReplaced: "no" })).toEqual([1]);
-		expect(only({ majorShare: 25 })).toEqual([2]);
+		expect(only({ decision: "exclude" })).toEqual([["evaluation_decision", "eq", "exclude"]]);
+		expect(only({ decision: "none" })).toEqual([["evaluation_decision", "is", "null"]]);
+		expect(only({ georef: "needs_review" })).toEqual([["georef_status", "eq", "needs_review"]]);
+		expect(only({ georef: "none" })).toEqual([["georef_status", "is", "null"]]);
+		expect(only({ dateReplaced: "yes" })).toEqual([["date_replace", "is", "true"]]);
+		expect(only({ dateReplaced: "no" })).toEqual([["date_replace", "is", "false"]]);
+		expect(only({ majorShare: 25 })).toEqual([["major_share", "gte", "25"]]);
 	});
 
-	it("filter by the review and the dataset", () => {
-		expect(only({ review: "any" })).toEqual([2]);
-		expect(only({ review: "georef" })).toEqual([2]);
-		expect(only({ review: "aoi" })).toEqual([]);
-		expect(only({ inBenchmark: true })).toEqual([2]);
-		expect(only({ reviewedBy: "a@x.org" })).toEqual([2]);
-		expect(only({ id: " 3 " })).toEqual([3]);
-		expect(only({ country: "Spain" })).toEqual([4]);
-		expect(only({ stage: "finished" })).toEqual([2, 1]);
-		expect(only({ stage: "unfinished" })).toEqual([4, 3]);
-		expect(only({ stage: "cog_processing" })).toEqual([3]);
-		expect(stagesOf(rows)).toEqual(["cog_processing"]);
+	it("filter by the review, the dataset and its processing", () => {
+		expect(only({ review: "any" })).toEqual([["review_required", "neq", "{}"]]);
+		expect(only({ review: "georef" })).toEqual([["review_required", "cs", "{georef}"]]);
+		expect(only({ inBenchmark: true })).toEqual([["in_benchmark", "is", "true"]]);
+		expect(only({ reviewedBy: "u-1" })).toEqual([["reviewers", "cs", "{u-1}"]]);
+		expect(only({ id: " 3 " })).toEqual([["dataset_id", "eq", "3"]]);
+		// not a number: no dataset, not a failed request
+		expect(only({ id: "abc" })).toEqual([["dataset_id", "eq", "0"]]);
+		expect(only({ country: "Spain" })).toEqual([["admin_level_1", "eq", "Spain"]]);
+		expect(only({ stage: "finished" })).toEqual([["is_processing_done", "is", "true"]]);
+		// not finished leaves the failed datasets to their own choice
+		expect(only({ stage: "unfinished" })).toEqual([
+			["is_processing_done", "is", "false"],
+			["has_error", "is", "false"],
+		]);
+		expect(only({ stage: "failed" })).toEqual([["has_error", "is", "true"]]);
+		expect(only({ stage: "cog_processing" })).toEqual([["current_status", "eq", "cog_processing"]]);
+		// a tab's condition and the filters together
+		expect(listConditions("pending", { ...NO_FILTERS, country: "Spain" })).toEqual([
+			["review_required", "neq", "{}"],
+			["admin_level_1", "eq", "Spain"],
+		]);
 	});
 
 	it("round-trip through the URL and count what is set", () => {
-		const filters = { ...NO_FILTERS, decision: "exclude" as const, majorShare: 10, review: "georef" as const, reviewedBy: "a@x.org" };
+		const filters = { ...NO_FILTERS, decision: "exclude" as const, majorShare: 10, review: "georef" as const, reviewedBy: "u-1" };
 		const params = listParams("pending", filters);
-		expect(params.toString()).toBe("tab=pending&decision=exclude&major=10&review=georef&reviewer=a%40x.org");
+		expect(params.toString()).toBe("tab=pending&decision=exclude&major=10&review=georef&reviewer=u-1");
 		expect(filtersFromParams(params)).toEqual(filters);
+		expect(listOfPath(`/dataset-audit?${params}`)).toEqual({ tab: "pending", filters });
+		expect(listOfPath("/dataset-audit")).toEqual({ tab: "all", filters: NO_FILTERS });
 		expect(activeFilterCount(filters)).toBe(4);
 		expect(activeFilterCount(NO_FILTERS)).toBe(0);
 		// an unknown reason in an old link is no filter, not an empty list
@@ -79,16 +89,29 @@ describe("filters", () => {
 	});
 });
 
-describe("Save & Next", () => {
-	it("goes on to the next row of the list it was opened from, with its tab and filters", () => {
-		expect(nextInList(rows, "/dataset-audit?tab=all", 4)).toBe(3);
-		// excluded datasets only: 3 is the one, and after it the list ends
-		expect(nextInList(rows, "/dataset-audit?tab=all&decision=exclude", 4)).toBe(3);
-		expect(nextInList(rows, "/dataset-audit?tab=all&decision=exclude", 3)).toBeNull();
-		// the pending tab, even after saving took the current dataset out of it
-		expect(nextInList(rows, "/dataset-audit?tab=pending", 3)).toBe(2);
-		expect(nextInList(rows, "/dataset-audit?tab=pending", 2)).toBeNull();
-		// opened without a list: the whole list
-		expect(nextInList(rows, "/dataset-audit", 2)).toBe(1);
+describe("sort", () => {
+	it("is newest first by default; a missing value is the smallest and ties go newest first", () => {
+		expect(listOrder(NEWEST_FIRST)).toEqual([{ column: "dataset_id", ascending: false }]);
+		expect(listOrder({ key: "id", ascending: true })).toEqual([{ column: "dataset_id", ascending: true }]);
+		expect(listOrder({ key: "phenology", ascending: true })).toEqual([
+			{ column: "phenology_probability", ascending: true, nullsFirst: true },
+			{ column: "dataset_id", ascending: false },
+		]);
+		expect(listOrder({ key: "date", ascending: false }).map((o) => o.column)).toEqual(["aquisition_year", "aquisition_month", "aquisition_day", "dataset_id"]);
+	});
+});
+
+describe("processing stages", () => {
+	const row = (over: Partial<IAuditListRow>) =>
+		({ ...Object.fromEntries(PROCESSING_STAGES.map((s) => [s.done, false])), current_status: "idle", has_error: false, failed_stage: null, ...over }) as IAuditListRow;
+	const cog = PROCESSING_STAGES.find((s) => s.done === "is_cog_done")!;
+
+	it("each stage succeeded, failed, runs or has not run", () => {
+		expect(stageState(row({ is_cog_done: true }), cog)).toBe("succeeded");
+		expect(stageState(row({}), cog)).toBe("not_run");
+		expect(stageState(row({ current_status: "cog_processing", is_cog_done: true }), cog)).toBe("running");
+		expect(stageState(row({ has_error: true, failed_stage: "cog_processing" }), cog)).toBe("failed");
+		// a failure with an unknown stage is no stage's
+		expect(stageState(row({ has_error: true, failed_stage: "unknown" }), cog)).toBe("not_run");
 	});
 });

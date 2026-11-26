@@ -115,7 +115,7 @@ function tileColumns(onOpen: (t: ITileTarget) => void): ColumnsType<ITileTarget>
 				return (
 					<span className="flex flex-wrap items-center gap-1.5">
 						<Tag color={VERDICT_COLOR[t.label.verdict]} className="m-0">
-							{t.label.verdict === "not_assessable" ? "Can't tell what it shows" : VERDICT_WORD[t.label.verdict]}
+							{VERDICT_WORD[t.label.verdict]}
 						</Tag>
 						{seen.length > 0 && <span className="text-xs text-gray-600">{seen.join(", ")}</span>}
 					</span>

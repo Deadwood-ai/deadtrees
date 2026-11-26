@@ -44,7 +44,7 @@ describe("suggestedLayer", () => {
 
 describe("editing a layer answer", () => {
 	it("reads a saved review back", () => {
-		expect(savedLayer({ verdict: "major", problems: { m1_dead_missed: true, m7_dw_artifact: "unsure" } })).toEqual({
+		expect(savedLayer({ verdict: "major", problems: { m1_dead_missed: true, m7_dw_artifact: "unsure" } }, "deadwood")).toEqual({
 			verdict: "major",
 			problems: { m1_dead_missed: "yes", m7_dw_artifact: "unsure" },
 		});
@@ -53,9 +53,18 @@ describe("editing a layer answer", () => {
 	it("makes an ok tile minor when you see a problem, and ok clears the problems you saw", () => {
 		const minor = withProblem({ verdict: "ok", problems: {} }, "m1_dead_missed", "yes");
 		expect(minor).toEqual({ verdict: "minor", problems: { m1_dead_missed: "yes" } });
-		expect(withVerdict({ ...minor, problems: { m1_dead_missed: "yes", m7_dw_artifact: "unsure" } }, "ok")).toEqual({
+		expect(withVerdict({ ...minor, problems: { m1_dead_missed: "yes", m7_dw_artifact: "unsure" } }, "ok", "deadwood")).toEqual({
 			verdict: "ok",
 			problems: { m1_dead_missed: "no", m7_dw_artifact: "unsure" },
 		});
+	});
+
+	it("puts every error type to unsure on an ambiguous tile and keeps yes or no off it", () => {
+		const ambiguous = withVerdict({ verdict: "minor", problems: { m1_dead_missed: "yes" } }, "ambiguous", "deadwood");
+		expect(ambiguous.verdict).toBe("ambiguous");
+		expect(Object.values(ambiguous.problems).every((a) => a === "unsure")).toBe(true);
+		expect(Object.keys(ambiguous.problems)).toContain("m1_dead_missed");
+		expect(withProblem(ambiguous, "m1_dead_missed", "yes")).toBe(ambiguous);
+		expect(withProblem(ambiguous, "m1_dead_missed", "unsure").problems.m1_dead_missed).toBe("unsure");
 	});
 });

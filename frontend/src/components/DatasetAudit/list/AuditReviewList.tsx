@@ -1,29 +1,48 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Alert, Button, Collapse, Segmented, Select, Table, Tag, Typography } from "antd";
+import { Button, Collapse, Segmented, Select, Switch, Table, Tag, Typography } from "antd";
 import { FilterOutlined } from "@ant-design/icons";
 import { useAuditNavigation } from "../../../hooks/useAuditNavigation";
 import { useAnalytics } from "../../../hooks/useAnalytics";
 import { useIsMobile } from "../../../hooks/useIsMobile";
+import { useAuditListOptions, useAuditListPage, useAuditTabCounts } from "../../../hooks/useAuditReviewList";
 import {
+	NEWEST_FIRST,
 	TABS,
 	activeFilterCount,
-	filterRows,
 	filtersFromParams,
 	listParams,
-	stagesOf,
 	tabOf,
 	type AuditListTab,
 	type IAuditListFilters,
+	type IListSort,
 } from "../../../utils/auditReviewList";
 import StatusPage from "../../StatusPage";
 import BenchmarkTab from "../benchmark/BenchmarkTab";
 import AuditListFilters from "./AuditListFilters";
 import LegacyAuditList from "./LegacyAuditList";
 import { auditListColumns } from "./auditListColumns";
-import { useAuditListRows } from "./useAuditListRows";
 
 const { Title, Text } = Typography;
+
+const PAGE_SIZE = 50;
+
+/** The processing stage columns are shown or not, as each auditor last left them. */
+const STAGES_KEY = "audit-review-processing-stages";
+function storedShowStages(): boolean {
+	try {
+		return localStorage.getItem(STAGES_KEY) === "1";
+	} catch {
+		return false;
+	}
+}
+function storeShowStages(show: boolean) {
+	try {
+		localStorage.setItem(STAGES_KEY, show ? "1" : "0");
+	} catch {
+		// the switch still works for this page
+	}
+}
 
 /** The legacy manual audits: a list of its own in the other group, ?view=legacy. */
 const LEGACY = "legacy";
@@ -63,7 +82,14 @@ export default function AuditReviewList({ notice }: { notice?: ReactNode }) {
 	const [tab, setTab] = useState<AuditListTab>(() => tabOf(searchParams.get("tab")));
 	const [filters, setFilters] = useState<IAuditListFilters>(() => filtersFromParams(searchParams));
 	const [filtersOpen, setFiltersOpen] = useState(() => activeFilterCount(filtersFromParams(searchParams)) > 0);
-	const { rows, isLoading, isError, refetch, resultsUnavailable } = useAuditListRows();
+	const [sort, setSort] = useState<IListSort>(NEWEST_FIRST);
+	const [paging, setPaging] = useState({ page: 1, size: PAGE_SIZE });
+	const [showStages, setShowStages] = useState(storedShowStages);
+	const list = useAuditListPage(tab, filters, sort, paging.page, paging.size);
+	const { data: counts = {} } = useAuditTabCounts();
+	const { data: options } = useAuditListOptions();
+	// another tab, filter or sort starts again on the first page
+	const firstPage = () => setPaging((p) => ({ ...p, page: 1 }));
 
 	useEffect(() => {
 		if (legacy) return;
@@ -76,27 +102,19 @@ export default function AuditReviewList({ notice }: { notice?: ReactNode }) {
 		track("audit_queue_viewed", { audit_tab: legacy ? "legacy" : tab });
 	}, [legacy, tab, track]);
 
-	const shown = useMemo(() => filterRows(rows, tab, filters), [rows, tab, filters]);
-
-	const options = useMemo(
-		() => ({
-			countries: [...new Set(rows.map((r) => r.dataset.admin_level_1).filter((c): c is string => !!c))].sort(),
-			stages: stagesOf(rows),
-			reviewers: [...new Set(rows.flatMap((r) => r.reviewers))].sort(),
-		}),
-		[rows],
-	);
-	const counts = useMemo(() => Object.fromEntries(TABS.map((t) => [t.key, rows.filter(t.test).length])) as Record<AuditListTab, number>, [rows]);
 	const current = TABS.find((t) => t.key === tab)!;
 	const choice: ListChoice = legacy ? LEGACY : tab;
 	const choose = (value: ListChoice) => {
 		if (value === LEGACY) return setSearchParams({ view: LEGACY });
 		setTab(value);
+		firstPage();
 		// leaving the legacy list: the effect above writes the tab's params from here on
 		if (legacy) setSearchParams(listParams(value, filters), { replace: true });
 	};
 	const columns = auditListColumns({
 		tab,
+		sort,
+		showStages,
 		// the edits and user reports have their own page; they are not part of the audit
 		onOpen:
 			tab === "edits-flags"
@@ -108,14 +126,14 @@ export default function AuditReviewList({ notice }: { notice?: ReactNode }) {
 		onReferencePatches: tab === "reference" ? (id) => navigate(`/dataset-audit/${id}/reference-patches`) : undefined,
 	});
 
-	if (isError) {
+	if (list.isError) {
 		return (
 			<StatusPage
 				kind="offline"
 				title="The Audit Review list couldn’t load"
 				description="DeadTrees didn’t respond. Check your connection and try again in a moment."
 				actions={
-					<Button type="primary" onClick={() => refetch()}>
+					<Button type="primary" onClick={() => list.refetch()}>
 						Try again
 					</Button>
 				}
@@ -123,7 +141,10 @@ export default function AuditReviewList({ notice }: { notice?: ReactNode }) {
 		);
 	}
 
-	const choiceLabel = (c: (typeof GROUPS)[number]["choices"][number]) => (c.chip ? `${c.label} (${counts[c.value as AuditListTab]})` : c.label);
+	const choiceLabel = (c: (typeof GROUPS)[number]["choices"][number]) => {
+		const count = counts[c.value as AuditListTab];
+		return c.chip && count !== undefined ? `${c.label} (${count})` : c.label;
+	};
 	const filterCount = activeFilterCount(filters);
 
 	return (
@@ -170,18 +191,29 @@ export default function AuditReviewList({ notice }: { notice?: ReactNode }) {
 								<BenchmarkTab />
 							) : (
 								<>
-									{resultsUnavailable && (
-										<Alert type="info" showIcon className="mb-4" message="The check results can’t be read here yet, so the list shows the datasets only." />
-									)}
-									<div className="mb-3 flex flex-wrap items-center gap-2" data-testid="audit-list-count">
-										{current.chip && (
-											<Tag color="blue" className="m-0">
-												{current.chip}
-											</Tag>
-										)}
-										<Text className="text-sm">
-											{shown.length} of {rows.length} datasets
-										</Text>
+									<div className="mb-3 flex flex-wrap items-center gap-2">
+										<span className="flex flex-wrap items-center gap-2" data-testid="audit-list-count">
+											{current.chip && (
+												<Tag color="blue" className="m-0">
+													{current.chip}
+												</Tag>
+											)}
+											<Text className="text-sm">
+												{list.data?.total ?? "…"} of {counts.all ?? "…"} datasets
+											</Text>
+										</span>
+										<span className="ml-auto flex items-center gap-2 text-sm">
+											<Switch
+												size="small"
+												checked={showStages}
+												onChange={(show) => {
+													setShowStages(show);
+													storeShowStages(show);
+												}}
+												aria-label="Processing stages"
+											/>
+											Processing stages
+										</span>
 									</div>
 									<Collapse
 										className="mb-4"
@@ -195,18 +227,42 @@ export default function AuditReviewList({ notice }: { notice?: ReactNode }) {
 														<FilterOutlined /> Filters{filterCount ? ` (${filterCount})` : ""}
 													</span>
 												),
-												children: <AuditListFilters filters={filters} onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))} {...options} />,
+												children: (
+													<AuditListFilters
+														filters={filters}
+														onChange={(patch) => {
+															setFilters((f) => ({ ...f, ...patch }));
+															firstPage();
+														}}
+														countries={options?.countries ?? []}
+														stages={options?.stages ?? []}
+														reviewers={options?.reviewers ?? []}
+													/>
+												),
 											},
 										]}
 									/>
 									<Table
-										dataSource={shown}
+										dataSource={list.data?.rows}
 										columns={columns}
-										rowKey="id"
+										rowKey="dataset_id"
 										size="small"
-										loading={isLoading}
-										pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} datasets` }}
-										scroll={{ x: 1500 }}
+										loading={list.isFetching}
+										pagination={{
+											current: paging.page,
+											pageSize: paging.size,
+											total: list.data?.total ?? 0,
+											showSizeChanger: true,
+											showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} datasets`,
+										}}
+										onChange={(pagination, _filters, sorter, { action }) => {
+											if (action === "sort") {
+												const sorted = Array.isArray(sorter) ? sorter[0] : sorter;
+												setSort(sorted?.order && sorted.columnKey ? { key: String(sorted.columnKey), ascending: sorted.order === "ascend" } : NEWEST_FIRST);
+												firstPage();
+											} else setPaging({ page: pagination.current ?? 1, size: pagination.pageSize ?? PAGE_SIZE });
+										}}
+										scroll={{ x: showStages ? 2700 : 1500 }}
 										data-testid="audit-review-table"
 									/>
 								</>

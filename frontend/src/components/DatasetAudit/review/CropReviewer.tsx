@@ -89,7 +89,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 	/** Your answer on a tile as it stands: what you changed, else what was saved, else the suggestion. */
 	const draftOf = (id: number): ILayerDraft => {
 		const saved = mine(id);
-		return edits.get(id) ?? (saved ? savedLayer(saved) : suggested(id));
+		return edits.get(id) ?? (saved ? savedLayer(saved, layer) : suggested(id));
 	};
 	const draft = crop ? draftOf(crop.id) : null;
 	const layerDraft: ILayerDraft = draft ?? { verdict: "ok", problems: {} };
@@ -159,7 +159,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 	const several = crops.length > 1;
 	const benchmarkName = `${LAYER_LABELS[layer].toLowerCase()} benchmark`;
 	/** A verdict saves the crop. */
-	const verdictKey = (verdict: AuditVerdict) => () => void save(edit((d) => withVerdict(d, verdict)));
+	const verdictKey = (verdict: AuditVerdict) => () => void save(edit((d) => withVerdict(d, verdict, layer)));
 	const problemKey = (answer: ProblemAnswer) => () => {
 		edit((d) => withProblem(d, focus, answer));
 		setFocusIndex((i) => Math.min(i + 1, problems.length - 1));
@@ -306,15 +306,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 				</div>
 			</div>
 			<aside className="flex w-80 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-gray-100 pl-3">
-				{crop && draft?.verdict === "not_assessable" && (
-					<div className="rounded bg-amber-50 p-2 text-xs text-amber-900">
-						You said you can't tell what this crop shows. It does not count for the layer.{" "}
-						<Button size="small" type="link" className="!p-0" onClick={() => setEdits((m) => new Map(m).set(crop.id, suggested(crop.id)))}>
-							Answer it after all
-						</Button>
-					</div>
-				)}
-				{crop && draft && draft.verdict !== "not_assessable" && (
+				{crop && draft && (
 					<CropAnswerPanel
 						layer={layer}
 						findings={cropFindings(judgements, crop.id, layer, decidingJudgement?.(crop.id) ?? null)}
@@ -322,7 +314,7 @@ export default function CropReviewer(props: CropReviewerProps) {
 						focus={focus}
 						onFocus={(mode) => setFocusIndex(problems.indexOf(mode))}
 						onProblem={(mode, answer) => edit((d) => withProblem(d, mode, answer))}
-						onVerdict={(verdict) => edit((d) => withVerdict(d, verdict))}
+						onVerdict={(verdict) => edit((d) => withVerdict(d, verdict, layer))}
 						disabled={disabled || saving}
 						blind={blind}
 						benchmark={{

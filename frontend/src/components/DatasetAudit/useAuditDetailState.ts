@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, message, notification } from "antd";
 import confetti from "canvas-confetti";
@@ -13,8 +13,7 @@ import { useAcquisitionDateEstimate, useGeorefCheck } from "../../hooks/useAcqui
 import { useAuditChecks, useAuditReviews, useSaveDatasetReviews } from "../../hooks/useAuditChecks";
 import { useAuditDatasetResult } from "../../hooks/useAuditDatasetResults";
 import { initialDraft, reviewAnswers, type IReviewDraft } from "../../utils/auditReview";
-import { nextInList } from "../../utils/auditReviewList";
-import { useAuditListRows } from "./list/useAuditListRows";
+import { useNextInList } from "../../hooks/useAuditReviewList";
 import { trackAppEvent } from "../../utils/analytics";
 import { useAuditAOIState } from "./useAuditAOIState";
 
@@ -75,8 +74,7 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 
 	const { listPath } = useAuditNavigation();
 	// Save & Next goes on to the next dataset of the list this was opened from, with its filters
-	const { rows: listRows } = useAuditListRows();
-	const nextDatasetId = useMemo(() => nextInList(listRows, listPath, dataset.id), [listRows, listPath, dataset.id]);
+	const { data: nextDatasetId = null } = useNextInList(listPath, dataset.id);
 	const { state: auditLock, continueHere: continueAuditHere } = useAuditLock(dataset.id);
 
 	const [isSubmitting, setIsSubmitting] = useState(false);

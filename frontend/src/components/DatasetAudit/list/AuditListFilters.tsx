@@ -9,9 +9,9 @@ interface AuditListFiltersProps {
 	filters: IAuditListFilters;
 	onChange: (patch: Partial<IAuditListFilters>) => void;
 	countries: string[];
-	/** processing statuses present in the list */
+	/** processing statuses besides idle */
 	stages: string[];
-	reviewers: string[];
+	reviewers: { id: string; email: string | null }[];
 }
 
 const Field = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -50,7 +50,12 @@ export default function AuditListFilters({ filters, onChange, countries, stages,
 					{select(
 						"stage",
 						160,
-						[{ label: "Finished", value: "finished" }, { label: "Not finished", value: "unfinished" }, ...stages.map((s) => ({ label: words(s), value: s }))],
+						[
+							{ label: "Finished", value: "finished" },
+							{ label: "Not finished", value: "unfinished" },
+							{ label: "Failed", value: "failed" },
+							...stages.map((s) => ({ label: words(s), value: s })),
+						],
 						"Any stage",
 					)}
 				</Field>
@@ -79,7 +84,7 @@ export default function AuditListFilters({ filters, onChange, countries, stages,
 				<Field label="Review required">
 					{select("review", 170, [{ label: "For any reason", value: "any" }, ...REVIEW_ITEMS.map((i) => ({ label: REVIEW_ITEM_LABELS[i], value: i }))], "Either")}
 				</Field>
-				<Field label="Reviewed by">{select("reviewedBy", 180, reviewers.map((r) => ({ label: r, value: r })), "Anyone")}</Field>
+				<Field label="Reviewed by">{select("reviewedBy", 180, reviewers.map((r) => ({ label: r.email ?? r.id, value: r.id })), "Anyone")}</Field>
 			</div>
 			<div className="flex flex-wrap items-center gap-4">
 				<Checkbox checked={filters.inBenchmark} onChange={(e) => onChange({ inBenchmark: e.target.checked })}>
