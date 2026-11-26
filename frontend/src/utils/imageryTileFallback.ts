@@ -105,15 +105,17 @@ export const createImageryFallbackTileLoadFunction = (urlTemplate: string) => {
       return;
     }
     // Nothing anywhere up the pyramid: let OpenLayers treat it as an error.
-    tile.getImage().dispatchEvent(new Event("error"));
+    failTile(tile);
   };
 
   return (tile: Tile, src: string) => {
-    void load(tile as ImageTile, src).catch(() =>
-      (tile as ImageTile).getImage().dispatchEvent(new Event("error")),
-    );
+    void load(tile as ImageTile, src).catch(() => failTile(tile as ImageTile));
   };
 };
+
+// ImageTile listens for the image element's error event while loading.
+const failTile = (tile: ImageTile) =>
+  tile.getImage()?.dispatchEvent(new Event("error"));
 
 const drawTile = (
   image: ImageBitmap,
