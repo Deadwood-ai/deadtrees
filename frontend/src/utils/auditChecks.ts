@@ -47,15 +47,16 @@ export interface IAuditSectionDef {
   reviewItem: ReviewItem | null;
 }
 
-/** Why a dataset is excluded: the dataset evaluation's fixed reasons, "other" last. */
-export const EXCLUDE_REASONS: IAuditReason[] = [
-  { code: "blurry", label: "Blurry" },
-  { code: "no_trees", label: "No trees" },
-  { code: "artifacts", label: "Artifacts" },
-  { code: "not_rgb", label: "Not RGB" },
-  { code: "broken_ortho", label: "Broken ortho" },
-  { code: "too_dark", label: "Too dark" },
-  { code: "other", label: "Other" },
+/** Why a dataset is excluded: the dataset evaluation's fixed reasons, "other" last. `inText` is
+ * the reason mid-sentence, plain enough for the dataset's owner. */
+export const EXCLUDE_REASONS: (IAuditReason & { inText: string })[] = [
+  { code: "blurry", label: "Blurry", inText: "blurry" },
+  { code: "no_trees", label: "No trees", inText: "no trees" },
+  { code: "artifacts", label: "Artifacts", inText: "artifacts" },
+  { code: "not_rgb", label: "Not RGB", inText: "not true colour" },
+  { code: "broken_ortho", label: "Broken ortho", inText: "broken or incomplete image" },
+  { code: "too_dark", label: "Too dark", inText: "too dark" },
+  { code: "other", label: "Other", inText: "other reason" },
 ];
 
 export const AUDIT_SECTIONS: IAuditSectionDef[] = [
@@ -112,7 +113,8 @@ export const EVALUATION_FLAGS: { flag: EvaluationFlag; label: string; inText: st
   { flag: "thumbnail_issue", label: "Thumbnail issue", inText: "thumbnail issue" },
 ];
 
-const reasonWord = (code: string | null) => EXCLUDE_REASONS.find((r) => r.code === code)?.label.toLowerCase();
+/** An exclusion reason code mid-sentence ("blurry"), undefined for none or an unknown code. */
+export const reasonWord = (code: string | null | undefined) => EXCLUDE_REASONS.find((r) => r.code === code)?.inText;
 
 /** A person's dataset evaluation answer in a few words: "OK", "OK (COG issue)", "Exclude (blurry)". */
 export function evaluationAnswerText(review: Pick<IDatasetReview, "decision" | "exclude_reason" | "cog_issue" | "thumbnail_issue">): string {

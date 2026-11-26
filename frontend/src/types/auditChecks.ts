@@ -219,9 +219,14 @@ export interface ICropReasoning {
 }
 
 /** The audit rows of the dataset page (public.get_dataset_audit_summary): the findings data users
- * judge a dataset by, the deciding model's reasoning per prediction layer, and the suggested
- * date (a reviewer's correction included). */
-export type IDatasetAuditSummary = { deadwood_reasoning?: ICropReasoning[]; forest_cover_reasoning?: ICropReasoning[] } & Pick<
+ * judge a dataset by, the deciding model's reasoning per prediction layer, the suggested date (a
+ * reviewer's correction included) and, for an excluded dataset, the exclusion's reason code. */
+export type IDatasetAuditSummary = {
+  deadwood_reasoning?: ICropReasoning[];
+  forest_cover_reasoning?: ICropReasoning[];
+  /** why an excluded dataset was excluded: a code of the exclude reasons, null otherwise */
+  evaluation_reason?: string | null;
+} & Pick<
   IAuditDatasetResult,
   | "review_required"
   | "evaluation_decision"

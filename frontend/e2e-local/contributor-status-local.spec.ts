@@ -33,17 +33,54 @@ const ready = {
   is_forest_cover_done: true,
   audit_decision: "keep",
   cog_path: "qa/forest.tif",
-  thumbnail_path: "qa/forest.png",
-  has_deadwood_prediction: true,
-  has_forest_cover_prediction: true,
+  aquisition_year: 2024,
+  aquisition_month: 6,
+  aquisition_day: 12,
+  phenology_probability: 0.82,
 };
+// public.get_dataset_audit_summary of a dataset the checks are done on
+const finishedAudit = {
+  review_required: [],
+  evaluation_decision: "keep",
+  georef_status: "estimated",
+  georef_offset_m: 2.6,
+  date_replace: true,
+  date_new: "2024-07-02",
+  deadwood_total: 16,
+  deadwood_major: 1,
+  deadwood_minor: 3,
+  deadwood_reasoning: [
+    { verdict: "major", summary: "Shadows under the canopy are marked as deadwood.", errors: [] },
+  ],
+  forest_cover_total: 16,
+  forest_cover_major: 0,
+  forest_cover_minor: 2,
+  forest_cover_reasoning: [
+    { verdict: "minor", summary: "A small clearing is counted as tree cover.", errors: [] },
+  ],
+};
+const dateEstimate = {
+  dataset_id: 77,
+  model_version: "doy-local",
+  model_type: "s2",
+  suggestion_reason: "mismatch",
+};
+const phenologyCurve = Array.from({ length: 366 }, (_, day) =>
+  Math.round(255 * Math.max(0, Math.sin(((day - 80) / 366) * 2 * Math.PI))),
+);
 const details = (page: Page) =>
   page.getByRole("button", { name: "View status details for dataset 77" });
+
+interface StatusMocks {
+  queueFails?: boolean;
+  /** the audit summary RPC's answer; null before any check ran */
+  audit?: Record<string, unknown> | null;
+}
 
 async function installStatus(
   page: Page,
   changes: Record<string, unknown> = {},
-  queueFails = false,
+  { queueFails = false, audit = finishedAudit }: StatusMocks = {},
 ) {
   const dataset = { ...ready, ...changes };
   await installLocalSession(page, {
@@ -55,6 +92,8 @@ async function installStatus(
   await page.route(`${supabaseUrl}/rest/v1/**`, async (route) => {
     const url = new URL(route.request().url());
     const table = url.pathname.split("/").pop();
+    const wantsObject =
+      route.request().headers()["accept"]?.includes("vnd.pgrst.object") ?? false;
     if (table === "v2_full_dataset_view_owner") {
       const json = url.searchParams.has("id")
         ? dataset
@@ -64,16 +103,22 @@ async function installStatus(
       await route.fulfill({ json });
       return;
     }
-    if (table === "get_dataset_status_details") {
-      await route.fulfill({
-        json: dataset.audit_decision
-          ? {
-              dataset_id: dataset.id,
-              audit_decision: dataset.audit_decision,
-              audit_decided_at: "2026-11-17T10:00:00Z",
-            }
-          : null,
-      });
+    if (table === "get_dataset_audit_summary") {
+      await route.fulfill({ json: audit });
+      return;
+    }
+    if (table === "v2_metadata") {
+      const row = {
+        metadata: {
+          phenology: { phenology_curve: phenologyCurve, source: "local", version: "1" },
+        },
+      };
+      await route.fulfill({ json: wantsObject ? row : [row] });
+      return;
+    }
+    if (table === "v2_acquisition_date_estimates") {
+      const estimate = audit?.date_replace ? dateEstimate : null;
+      await route.fulfill({ json: wantsObject ? estimate : estimate ? [estimate] : [] });
       return;
     }
     if (table === "v2_queue_positions" && queueFails) {
@@ -93,7 +138,7 @@ async function installStatus(
   });
 }
 
-test("desktop shows a stopped run with its map and the prior review side by side", async ({
+test("desktop shows a stopped run with its map and the image check side by side", async ({
   page,
 }) => {
   await installStatus(page, {
@@ -108,8 +153,8 @@ test("desktop shows a stopped run with its map and the prior review side by side
   await expect(page.getByTestId("dataset-processing-77")).toContainText(
     "Stopped · map available",
   );
-  await expect(page.getByTestId("dataset-review-77")).toContainText(
-    "Reviewed · accepted",
+  await expect(page.getByTestId("dataset-image-check-77")).toContainText(
+    "Image accepted",
   );
   await expect(
     page.getByRole("button", { name: "View map for dataset 77" }),
@@ -121,14 +166,12 @@ test("desktop shows a stopped run with its map and the prior review side by side
   await expect(drawer).toContainText(
     "Processing stopped during combined AI analysis.",
   );
-  await expect(drawer).toContainText("A quality review was recorded.");
-  await expect(drawer).toContainText("Deadwood prediction");
-  // the review never hides a prediction
+  // the audit never hides a prediction
   await expect(drawer).not.toContainText("hidden from the public map");
   await expect(
     drawer.getByRole("button", { name: "View map", exact: true }),
   ).toBeVisible();
-  await expect(drawer).toContainText("Ready to use.");
+  await expect(drawer.getByTestId("dataset-image-quality")).toHaveText("Accepted");
   await expect(drawer).not.toContainText(/retry/i);
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page).toHaveURL(/\/profile$/);
@@ -151,9 +194,8 @@ test("desktop tells a contributor when no map exists after an early failure", as
   await expect(page.getByTestId("dataset-processing-77")).toContainText(
     "Processing failed",
   );
-  await expect(page.getByTestId("dataset-review-77")).toContainText(
-    "Not yet reviewed",
-  );
+  // no map image, so nothing was checked and nothing is promised
+  await expect(page.getByTestId("dataset-image-check-77")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "View map for dataset 77" }),
   ).toHaveCount(0);
@@ -165,6 +207,7 @@ test("desktop tells a contributor when no map exists after an early failure", as
   await details(page).click();
   const drawer = page.getByRole("dialog");
   await expect(drawer).toContainText("No map image is available.");
+  await expect(drawer.getByRole("region", { name: "Data quality" })).toHaveCount(0);
   await expect(drawer).toContainText("include dataset 77");
 });
 
@@ -287,21 +330,20 @@ test("mobile owners can inspect excluded datasets without desktop management too
     0,
   );
   await expect(page.getByTestId("mobile-desktop-only-note")).toBeVisible();
-  await expect(page.getByTestId("dataset-review-77")).toContainText(
+  await expect(page.getByTestId("dataset-image-check-77")).toContainText(
     "Excluded from public map",
   );
   const viewMap = page.getByRole("button", { name: "View map for dataset 77" });
   await expect(viewMap.locator(".anticon-environment")).toBeVisible();
   await expect(details(page)).toHaveText("Check details");
   await details(page).click();
-  await expect(
-    page.getByText("Visible to you, excluded from the public map", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Excluded from the public maps and downloads.", { exact: false }),
-  ).toBeVisible();
+  const drawer = page.getByRole("dialog");
+  await expect(drawer).toContainText(
+    "The image did not pass the quality check, so it is not on the public map. It stays in your account.",
+  );
+  await expect(drawer.getByTestId("dataset-image-quality")).toHaveText(
+    "Excluded from public map",
+  );
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -327,11 +369,80 @@ test("an archived dataset opens from an email link without rejoining the active 
 });
 
 test("queue failure is not presented as ready results", async ({ page }) => {
-  await installStatus(page, {}, true);
+  await installStatus(page, {}, { queueFails: true });
   await page.goto("/profile");
   const cell = page.getByTestId("dataset-processing-77");
   await expect(cell).not.toContainText("Results ready");
   await expect(cell).toContainText("Status unavailable", { timeout: 20_000 });
+});
+
+test("the panel shows the dataset page's quality findings", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await installStatus(page);
+  await page.goto("/profile?dataset=77");
+  const drawer = page.getByRole("dialog");
+  await expect(drawer.getByTestId("dataset-image-quality")).toHaveText("Accepted");
+  await expect(drawer.getByTestId("dataset-audit-georef")).toHaveText("About 2.6 m off");
+  await expect(drawer).toContainText("June 12, 2024");
+  await expect(drawer).toContainText("~2 July 2024");
+  await expect(drawer.getByTestId("dataset-phenology-probability")).toHaveText("82%");
+  await expect(drawer.getByTestId("dataset-audit-deadwood")).toContainText("1/16 major, 3 minor");
+  await expect(drawer.getByTestId("dataset-audit-tree-cover")).toContainText("0/16 major, 2 minor");
+  await drawer.getByTestId("dataset-audit-deadwood").getByText("1/16 major, 3 minor").click();
+  await expect(drawer.getByTestId("dataset-audit-deadwood-reasoning")).toContainText(
+    "Shadows under the canopy are marked as deadwood.",
+  );
+  for (const retired of ["Generated results", "Quality review", "Not yet reviewed", "Pending"]) {
+    await expect(drawer).not.toContainText(retired);
+  }
+  await expect(drawer).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: test.info().outputPath("status-panel-finished.png") });
+  // every row explains itself on its label
+  await drawer.getByText("Phenology", { exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toContainText("peak green season");
+});
+
+test("the panel shows every finding as pending before the checks ran", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await installStatus(
+    page,
+    { audit_decision: null },
+    { audit: null },
+  );
+  await page.goto("/profile?dataset=77");
+  const drawer = page.getByRole("dialog");
+  for (const id of [
+    "dataset-image-quality",
+    "dataset-audit-georef",
+    "dataset-audit-deadwood",
+    "dataset-audit-tree-cover",
+  ]) {
+    await expect(drawer.getByTestId(id)).toContainText("Pending");
+  }
+  await expect(drawer).not.toContainText("Not checked");
+  await expect(drawer).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: test.info().outputPath("status-panel-pending.png") });
+});
+
+test("the panel tells the owner an excluded dataset left the public map", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await installStatus(
+    page,
+    { audit_decision: "exclude" },
+    { audit: { ...finishedAudit, evaluation_decision: "exclude", evaluation_reason: "not_rgb" } },
+  );
+  await page.goto("/profile?dataset=77");
+  const drawer = page.getByRole("dialog");
+  await expect(drawer.getByTestId("dataset-image-quality")).toHaveText(
+    "Excluded from public map: not true colour",
+  );
+  await expect(drawer).toContainText("did not pass the quality check");
+  // the other findings stay visible
+  await expect(drawer.getByTestId("dataset-audit-georef")).toHaveText("About 2.6 m off");
+  await expect(drawer).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: test.info().outputPath("status-panel-excluded.png") });
 });
 
 test("status deep link survives the sign-in redirect", async ({ page }) => {

@@ -412,6 +412,7 @@ def test_the_dataset_page_summary_shows_the_outcome_and_the_deciding_models_reas
 	assert summary == {
 		'review_required': [],
 		'evaluation_decision': 'keep',
+		'evaluation_reason': None,
 		'georef_status': None,
 		'georef_offset_m': None,
 		'date_replace': True,
@@ -430,6 +431,27 @@ def test_the_dataset_page_summary_shows_the_outcome_and_the_deciding_models_reas
 	}
 	# a dataset the caller cannot see has no summary
 	assert db.execute('SELECT public.get_dataset_audit_summary(%s)', (private,)).fetchone() == (None,)
+
+
+def test_the_summary_tells_the_owner_why_a_dataset_was_excluded_and_nothing_else(db):
+	auditor, owner = create_user(db, can_audit=True), create_user(db)
+	by_check, by_reviewer, free_text, by_legacy, kept = (create_dataset(db, owner) for _ in range(5))
+	evaluation(db, by_check, 'major')
+	for dataset, reason in ((by_reviewer, 'too_dark'), (free_text, 'Looks like a test flight, ask the uploader')):
+		add_ortho(db, dataset)
+		review(db, auditor, dataset, decision='exclude', exclude_reason=reason, note='internal note')
+	legacy(db, by_legacy, 'exclude')
+	evaluation(db, kept, 'minor')
+
+	act_as(db, owner)
+	reasons = [
+		db.execute("SELECT public.get_dataset_audit_summary(%s) -> 'evaluation_reason'", (d,)).fetchone()[0]
+		for d in (by_check, by_reviewer, free_text, by_legacy, kept)
+	]
+	# the check's and a reviewer's code; free text reads as other; an old exclusion and a keep have none
+	assert reasons == ['blurry', 'too_dark', 'other', None, None]
+	summary = db.execute('SELECT public.get_dataset_audit_summary(%s)', (free_text,)).fetchone()[0]
+	assert 'internal note' not in str(summary) and str(auditor) not in str(summary)
 
 
 def test_only_audit_readers_see_the_results(db):

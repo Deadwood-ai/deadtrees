@@ -8,11 +8,11 @@ export interface ContributorDataset extends DatasetProgress {
   data_access?: "public" | "private" | "viewonly";
   error_stage?: string | null;
   cog_path?: string | null;
-  thumbnail_path?: string | null;
-  has_deadwood_prediction?: boolean | null;
-  has_forest_cover_prediction?: boolean | null;
   archived?: boolean;
-  is_in_audit?: boolean;
+  aquisition_year?: number | null;
+  aquisition_month?: number | null;
+  aquisition_day?: number | null;
+  phenology_probability?: number | null;
 }
 
 export type QueueState =
@@ -47,25 +47,9 @@ export function stageLabel(stage: string | null | undefined): string | undefined
   return stage ? stages[stage] : undefined;
 }
 
-export interface GeneratedOutputs {
-  map: boolean;
-  preview: boolean;
-  deadwood: boolean;
-  treecover: boolean;
-}
-
-// "Generated" means the file or prediction rows exist. It says nothing about quality.
-export function generatedOutputs(dataset: ContributorDataset): GeneratedOutputs {
-  return {
-    map: !!(dataset.is_cog_done && dataset.cog_path),
-    preview: !!dataset.thumbnail_path,
-    deadwood: !!dataset.has_deadwood_prediction,
-    treecover: !!dataset.has_forest_cover_prediction,
-  };
-}
-
+/** The map image exists, so the owner can open the dataset on the map. */
 export function canOpenOwnerMap(dataset: ContributorDataset): boolean {
-  return generatedOutputs(dataset).map;
+  return !!(dataset.is_cog_done && dataset.cog_path);
 }
 
 export type TagColor = "error" | "warning" | "processing" | "success" | "default";
@@ -95,7 +79,7 @@ export function processingStatus(dataset: ContributorDataset, queue: QueueState)
           kind: "failed",
           label: "Stopped · map available",
           color: "warning",
-          detail: `Processing stopped ${place}. The map image was generated before that; the results list shows which analysis layers exist.`,
+          detail: `Processing stopped ${place}. The map image was generated before that.`,
         }
       : {
           kind: "failed",
@@ -156,31 +140,29 @@ const GREEN = "#287254";
 const AMBER = "#b45309";
 const SLATE = "#64748b";
 
-export interface ReviewOutcome {
-  kind: "none" | "in_progress" | "excluded" | "accepted";
+export interface ImageCheck {
+  kind: "pending" | "accepted" | "excluded";
   label: string;
   color: string;
 }
 
-/** The dataset evaluation's decision from the Audit Review (audit_decision). The review never
- * hides a prediction; only an exclusion takes the dataset off the public map. */
-export function reviewStatus(dataset: ContributorDataset): ReviewOutcome {
-  if (dataset.is_in_audit || dataset.current_status === "audit_in_progress") {
-    return { kind: "in_progress", label: "Review in progress", color: SLATE };
-  }
+/** The automated image quality check (the dataset evaluation, audit_decision): an excluded
+ * dataset stays in the owner's account but leaves the public map. Null while there is no
+ * decision and no map image to check. */
+export function imageCheck(dataset: ContributorDataset): ImageCheck | null {
   switch (dataset.audit_decision) {
     case "exclude":
       return { kind: "excluded", label: "Excluded from public map", color: AMBER };
     case "keep":
-      return { kind: "accepted", label: "Reviewed · accepted", color: GREEN };
+      return { kind: "accepted", label: "Image accepted", color: GREEN };
     default:
-      return { kind: "none", label: "Not yet reviewed", color: SLATE };
+      return canOpenOwnerMap(dataset) ? { kind: "pending", label: "Image check pending", color: SLATE } : null;
   }
 }
 
 /** True when the contributor should read the details before relying on this dataset. */
-export function needsAttention(processing: ProcessingOutcome, review: ReviewOutcome): boolean {
-  return processing.kind === "failed" || processing.kind === "incomplete" || review.kind === "excluded";
+export function needsAttention(processing: ProcessingOutcome, check: ImageCheck | null): boolean {
+  return processing.kind === "failed" || processing.kind === "incomplete" || check?.kind === "excluded";
 }
 
 export interface StatusSummary {
@@ -191,36 +173,27 @@ export interface StatusSummary {
 }
 
 // The summary only states what the stored fields prove. It never promises a
-// retry, a follow-up, or that a review covered the current outputs.
+// retry or a follow-up.
 export function statusSummary(dataset: ContributorDataset, queue: QueueState): StatusSummary {
   const processing = processingStatus(dataset, queue);
-  const review = reviewStatus(dataset);
   const contact = `If you need help with this dataset, contact the DeadTrees team and include dataset ${dataset.id}.`;
-  const reviewClause =
-    review.kind === "excluded"
-      ? " A reviewer excluded it from the public map; it stays in your account."
-      : review.kind === "in_progress"
-        ? " A quality review is in progress."
-        : review.kind === "none"
-          ? " No quality review has been recorded yet."
-          : " A quality review was recorded.";
+  const exclusion =
+    dataset.audit_decision === "exclude"
+      ? " The image did not pass the quality check, so it is not on the public map. It stays in your account."
+      : "";
 
   switch (processing.kind) {
     case "failed":
     case "incomplete":
-      return { headline: processing.detail + reviewClause, next: contact };
+      return { headline: processing.detail + exclusion, next: contact };
     case "running":
-      return { headline: processing.detail + reviewClause, next: "Nothing to do while it runs." };
+      return { headline: processing.detail + exclusion, next: "Nothing to do while it runs." };
     case "queued":
-      return { headline: processing.detail + reviewClause, next: "Nothing to do while it waits." };
+      return { headline: processing.detail + exclusion, next: "Nothing to do while it waits." };
     case "checking":
-      return { headline: processing.detail, next: null };
     case "unavailable":
       return { headline: processing.detail, next: null };
     case "complete":
-      return {
-        headline: processing.detail + reviewClause,
-        next: review.kind === "excluded" ? "The review findings below explain what a reviewer flagged." : null,
-      };
+      return { headline: processing.detail + exclusion, next: null };
   }
 }
