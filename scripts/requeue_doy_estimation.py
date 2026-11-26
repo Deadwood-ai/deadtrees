@@ -8,7 +8,8 @@ estimate; the Audit Review computes the date output (replace yes or no, new
 date; audit.acquisition_date_output_v1) from it and never changes the dataset.
 
 Selection (default --stale): every non-archived dataset with a COG whose
-estimate is missing, from another model version, or assessed against a date
+estimate is missing, from another model version than the one the processor
+ships (shared/asset_manifest.py; after an upgrade: the older model's), or assessed against a date
 the dataset no longer has. --retry-s2 also picks no-S2 estimates whose S2
 lookup can succeed later (block not processed yet, flight after the cube end,
 lookup error). --all picks every dataset with a COG.
@@ -28,9 +29,10 @@ from pathlib import Path
 
 from requeue_datasets_via_api import REQUIRED_KEYS, _http_json, _load_env_subset, _login, _parse_dataset_ids, _select_all
 
-TASK_TYPE = 'doy_estimation_v1'
-# keep in sync with shared/asset_manifest.py DOY_ESTIMATION_MODEL_DIR_NAME
-MODEL_VERSION = 'doy_estimation_v1'
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from shared.asset_manifest import DOY_ESTIMATION_MODEL_DIR_NAME as MODEL_VERSION  # noqa: E402
+from shared.asset_manifest import DOY_ESTIMATION_TASK_TYPE as TASK_TYPE  # noqa: E402
+
 RETRYABLE_S2_STATUSES = {'no_block', 'outside_archive', 'no_credentials', 'error'}
 TOKEN_REFRESH_EVERY = 500  # processor JWTs expire after an hour
 
