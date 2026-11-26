@@ -67,7 +67,10 @@ Open the Audit Review. **All audits** lists every dataset, **Pending audit revie
 ones a check asks about, **Benchmark** the three benchmarks. A check asks for a person
 when the dataset evaluation is unsure, processing finished without an AOI, the
 georeferencing needs review, or the date estimate's advice flipped after a reviewer's
-answer. The prediction layers never ask; you can still answer their tiles.
+answer. The prediction layers never ask, and an excluded dataset asks nothing more; you
+can still answer them. The filters narrow either tab, e.g. to one review reason or to the
+excluded datasets, and Save & Next goes on to the next row of the table as you filtered
+it, ending back at the list after the last one.
 
 Each dataset has 7 steps: dataset evaluation, area of interest, georeferencing,
 acquisition date, phenology, tree cover prediction, deadwood prediction. Save stores one

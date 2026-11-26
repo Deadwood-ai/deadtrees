@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { IAuditImage } from "../types/auditChecks";
-import { nextOpen, stratified, targetKey, targetNoun, tileImages } from "./benchmarkLabels";
+import { stratified, targetKey, targetNoun, tileImages } from "./benchmarkLabels";
 
-describe("stepping through a benchmark", () => {
-	const targets = [1, 2, 3].map((id) => ({ id, label: id === 2 ? {} : null }));
-
+describe("naming benchmark targets", () => {
 	it("names a target in the URL by its tile or dataset, and calls them tiles or datasets", () => {
 		expect(targetKey({ dataset_id: 7, tile_id: 70 })).toBe("tile-70");
 		expect(targetKey({ dataset_id: 7, tile_id: null })).toBe("dataset-7");
@@ -12,11 +10,6 @@ describe("stepping through a benchmark", () => {
 		expect(targetNoun(false, 1)).toBe("dataset");
 	});
 
-	it("goes to the next target without a label, wrapping, and stops when none is left", () => {
-		expect(nextOpen(targets, 1)?.id).toBe(3);
-		expect(nextOpen(targets, 3)?.id).toBe(1);
-		expect(nextOpen([targets[1], targets[0]], 1)).toBeNull();
-	});
 });
 
 describe("stratified order", () => {

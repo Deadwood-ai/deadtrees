@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IDatasetAuditSummary } from "../types/auditChecks";
-import { auditSettled, cropReasoning, georefFinding, predictionFinding, readableReason } from "./datasetAuditSummary";
+import { cropReasoning, georefFinding, predictionFinding, readableReason, reviewOpen } from "./datasetAuditSummary";
 
 const summary = (patch: Partial<IDatasetAuditSummary> = {}): IDatasetAuditSummary => ({
   review_required: [],
@@ -19,16 +19,20 @@ const summary = (patch: Partial<IDatasetAuditSummary> = {}): IDatasetAuditSummar
 });
 
 describe("the dataset page's audit rows", () => {
-  it("shows findings only once no review is required", () => {
-    expect(auditSettled(summary())).toBe(true);
-    expect(auditSettled(summary({ review_required: ["georef"] }))).toBe(false);
-    expect(auditSettled(summary({ evaluation_decision: null }))).toBe(false);
-    expect(auditSettled(null)).toBe(false);
+  it("holds a finding back only while its own check waits for a review", () => {
+    expect(reviewOpen(summary(), "georef")).toBe(false);
+    expect(reviewOpen(summary({ review_required: ["georef"] }), "georef")).toBe(true);
+    // an open evaluation review does not hold back the georeferencing
+    expect(reviewOpen(summary({ review_required: ["evaluation"], evaluation_decision: null }), "georef")).toBe(false);
   });
 
   it("says how far the image is off and how many sample crops a prediction gets wrong", () => {
     expect(georefFinding(summary())).toBe("About 2.6 m off");
     expect(georefFinding(summary({ georef_status: "no_reference", georef_offset_m: null }))).toBe("No reference imagery");
+    // not run yet, or waiting for a person: nothing to show, the page says pending
+    expect(georefFinding(summary({ georef_status: null }))).toBeNull();
+    expect(georefFinding(summary({ review_required: ["georef"] }))).toBeNull();
+    expect(georefFinding(null)).toBeNull();
     expect(predictionFinding(16, 0, 14)).toBe("0/16 major, 14 minor");
     expect(predictionFinding(16, 3, 0)).toBe("3/16 major, 0 minor");
     expect(predictionFinding(null, null, null)).toBeNull();

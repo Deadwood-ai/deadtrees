@@ -131,6 +131,15 @@ def test_the_deciding_judge_makes_the_call_and_a_persons_review_of_that_predicti
 	assert outcome(db, dataset, 'deadwood_total', 'deadwood_major', 'deadwood_minor') == (1, 0, 1)
 	tile_review(db, auditor, dataset, tiles[1], labels['deadwood'], 'ok')
 	assert outcome(db, dataset, 'deadwood_total', 'deadwood_ok', 'review_required') == (2, 1, [])
+	# a person who can't tell what a tile shows answers ambiguous; can't assess is a model's answer
+	act_as(db, auditor)
+	raises(
+		db,
+		psycopg.errors.CheckViolation,
+		'INSERT INTO audit.tile_human_reviews(dataset_id,tile_id,layer,prediction_label_id,verdict) VALUES (%s,%s,%s,%s,%s)',
+		(dataset, tiles[2], 'deadwood', labels['deadwood'], 'not_assessable'),
+	)
+	as_admin(db)
 
 	# a new prediction is judged again: the reviews of the old one stop counting, the tiles stay
 	new_labels = add_labels(db, dataset)
@@ -296,6 +305,22 @@ def test_aoi_review_and_benchmark_ticks(db):
 	assert outcome(db, dataset, 'in_benchmark') == (True,)
 
 
+def test_an_excluded_dataset_needs_no_review(db):
+	auditor, dataset = create_user(db, can_audit=True), create_dataset(db, create_user(db))
+	add_ortho(db, dataset)
+	db.execute(
+		'INSERT INTO public.v2_statuses(dataset_id,current_status,is_cog_done,is_combined_model_done) '
+		"VALUES (%s,'idle',true,true)",
+		(dataset,),
+	)
+	assert outcome(db, dataset, 'review_required') == (['aoi'],)
+	# once excluded, the missing AOI no longer matters
+	review(db, auditor, dataset, decision='exclude', exclude_reason='other')
+	assert outcome(db, dataset, 'evaluation_decision', 'review_required') == ('exclude', [])
+	review(db, auditor, dataset, decision='keep')
+	assert outcome(db, dataset, 'review_required') == (['aoi'],)
+
+
 def test_deleting_a_reviewers_account_keeps_their_reviews(db):
 	auditor, dataset = create_user(db, can_audit=True), create_dataset(db, create_user(db))
 	add_ortho(db, dataset)
@@ -415,3 +440,81 @@ def test_only_audit_readers_see_the_results(db):
 	)
 	act_as_anon(db)
 	raises(db, psycopg.errors.InsufficientPrivilege, 'SELECT audit.is_dataset_excluded(%s)', (dataset,))
+
+
+# ---------------------------------------------------------------------------
+# The Audit Review list, paged on the server
+# ---------------------------------------------------------------------------
+
+
+def test_the_review_list_filters_counts_and_pages_on_the_server(db):
+	auditor, user, owner = create_user(db, can_audit=True), create_user(db), create_user(db)
+	excluded, pending, failed, archived = (create_dataset(db, owner) for _ in range(4))
+	ids = [excluded, pending, failed, archived]
+	as_admin(db)
+	db.execute('UPDATE public.v2_datasets SET archived=true WHERE id=%s', (archived,))
+	db.execute(
+		'INSERT INTO public.v2_statuses(dataset_id,current_status,is_cog_done,is_combined_model_done,has_error,error_stage,error_message) VALUES '
+		"(%s,'cog_processing',false,false,false,null,null),(%s,'idle',true,true,false,null,null),(%s,'idle',false,false,true,'cog','gdal broke')",
+		(excluded, pending, failed),
+	)
+	db.execute(
+		'INSERT INTO public.v2_metadata(dataset_id,metadata,version) VALUES (%s,%s,1)',
+		(pending, '{"gadm": {"admin_level_1": "Listland", "admin_level_3": "Listtown"}}'),
+	)
+	db.execute("INSERT INTO public.dataset_flags(dataset_id,created_by,description,status) VALUES (%s,%s,'seam','open')", (pending, user))
+	db.execute('INSERT INTO public.reference_datasets(dataset_id) VALUES (%s)', (failed,))
+	legacy(db, excluded, 'exclude')
+	labels = add_labels(db, pending)
+	pq_run(
+		db,
+		pending,
+		register_version(db, version='pq-list'),
+		labels,
+		[tile_judgement(1, 'deadwood', 'haiku-5.5', 'major'), tile_judgement(2, 'deadwood', 'haiku-5.5', 'ok')],
+	)
+	review(db, auditor, pending, 'georef', georef_status='passed')
+
+	def rows(where='true', columns='dataset_id'):
+		act_as(db, auditor)
+		return db.execute(
+			f'SELECT {columns} FROM audit.review_list WHERE dataset_id = ANY(%s) AND {where} ORDER BY dataset_id DESC', (ids,)
+		).fetchall()
+
+	# archived datasets are not listed; the tabs and filters are plain conditions
+	assert rows() == [(failed,), (pending,), (excluded,)]
+	assert rows("review_required <> '{}'") == rows("review_required @> '{aoi}'") == [(pending,)]
+	assert rows('flags > 0 OR edits > 0') == [(pending,)]
+	assert rows('reference') == [(failed,)]
+	assert rows("evaluation_decision = 'exclude'") == [(excluded,)]
+	assert rows('major_share >= 50') == rows("admin_level_1 = 'Listland'") == [(pending,)]
+	act_as(db, auditor)
+	assert db.execute(
+		'SELECT dataset_id FROM audit.review_list WHERE dataset_id = ANY(%s) AND reviewers @> %s', (ids, [auditor])
+	).fetchall() == [(pending,)]
+	# not finished leaves out the failed one, which names its stage
+	assert rows('NOT is_processing_done AND NOT has_error') == [(excluded,)]
+	assert rows('has_error', 'dataset_id, failed_stage, error_message') == [(failed, 'cog_processing', 'gdal broke')]
+	assert rows(f'dataset_id = {pending}', 'deadwood_major_share, is_cog_done, flags, edits, (outcome).review_required') == [
+		(50, True, 1, 0, ['aoi'])
+	]
+	# the outcome is the dataset's row of dataset_outcomes
+	assert db.execute(
+		'SELECT to_jsonb(l.outcome) = to_jsonb(o) FROM audit.review_list l JOIN audit.dataset_outcomes o USING (dataset_id) WHERE dataset_id=%s',
+		(pending,),
+	).fetchone() == (True,)
+	# Save & Next: the next older row of the same list, none after the last
+	next_in = 'SELECT dataset_id FROM audit.review_list WHERE dataset_id = ANY(%s) AND {} AND dataset_id < %s ORDER BY dataset_id DESC LIMIT 1'
+	assert db.execute(next_in.format('true'), (ids, failed)).fetchone() == (pending,)
+	assert db.execute(next_in.format("review_required <> '{}'"), (ids, failed)).fetchone() == (pending,)
+	assert db.execute(next_in.format("review_required <> '{}'"), (ids, pending)).fetchone() is None
+
+	# the filters' choices; only auditors see who reviewed
+	options = db.execute('SELECT audit.review_list_options()').fetchone()[0]
+	assert 'Listland' in options['countries'] and 'cog_processing' in options['stages'] and 'idle' not in options['stages']
+	assert {'id': str(auditor), 'email': f'{auditor}@example.invalid'} in options['reviewers']
+	act_as(db, user)
+	assert db.execute('SELECT audit.review_list_options()').fetchone()[0]['reviewers'] == []
+	assert db.execute(
+		'SELECT reviewers, evaluation_decision FROM audit.review_list WHERE dataset_id IN (%s,%s) ORDER BY dataset_id', (excluded, pending)
+	).fetchall() == [([], None), ([], None)]

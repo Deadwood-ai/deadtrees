@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { installLocalSession } from "./support/localAuth";
+import { fulfillReviewList } from "./support/reviewListMock";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rgbGeoTiffFixture = path.resolve(
@@ -155,6 +156,16 @@ const datasetResults = [
   }),
   datasetResult(incompleteDataset.id, { is_processing_done: false, current_status: "cog" }),
 ];
+
+/** audit.review_list: each dataset with its outcome, processing, user reports, edits and the
+ * segmentation benchmark selection. */
+const reviewList = () =>
+  datasets.map(({ id, ...dataset }) => {
+    const result = datasetResults.find((r) => r.dataset_id === id)!;
+    const { review_required, evaluation_decision } = result;
+    const reports = { flags: flags.filter((f) => f.dataset_id === id).length, edits: id === completeDataset.id ? 2 : 0 };
+    return { ...dataset, dataset_id: id, result, review_required, evaluation_decision, failed_stage: null, reviewers: [], ...reports, reference: id === auditedDataset.id };
+  });
 
 const audits = [
   {
@@ -360,46 +371,13 @@ const fulfillSupabaseRequest = async (
       return;
     }
 
-    const selectedColumns = url.searchParams.get("select");
-    if (
-      options.auditDatasetRequestFails &&
-      selectedColumns?.split(",").includes("file_name")
-    ) {
-      await route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        json: {
-          code: "57014",
-          message: "canceling statement due to statement timeout",
-        },
-      });
-      return;
-    }
-
-    const pendingCorrectionFilter = url.searchParams.get(
-      "pending_corrections_count",
-    );
-    if (pendingCorrectionFilter?.startsWith("gt.")) {
-      await fulfillJson(route, [
-        {
-          id: completeDataset.id,
-          pending_corrections_count: 2,
-        },
-      ]);
-      return;
-    }
-
     await fulfillJson(route, datasets);
     return;
   }
 
-  if (resource === "dataset_flags") {
-    await fulfillJson(route, flags);
-    return;
-  }
-
-  if (resource === "reference_datasets") {
-    await fulfillJson(route, [{ dataset_id: auditedDataset.id }]);
+  if (resource === "review_list") {
+    const timeout = { code: "57014", message: "canceling statement due to statement timeout" };
+    await (options.auditDatasetRequestFails ? route.fulfill({ status: 500, json: timeout }) : fulfillReviewList(route, reviewList()));
     return;
   }
 
@@ -496,6 +474,15 @@ const fulfillSupabaseRequest = async (
 };
 
 const fulfillRpc = async (route: Route, rpcName: string | undefined) => {
+  if (rpcName === "review_list_options") {
+    await fulfillJson(route, {
+      countries: ["Germany"],
+      stages: ["cog"],
+      reviewers: [{ id: reporter.id, email: reporter.email }],
+    });
+    return;
+  }
+
   if (rpcName === "factory_overview") {
     await fulfillJson(route, {
       as_of: "2026-01-06T00:00:00Z",
@@ -664,26 +651,43 @@ test.describe("auditor local e2e", () => {
     await expect(page.getByText("⚙️ Processing")).toHaveCount(0);
   });
 
-  test("the list uses an explicit lightweight dataset projection", async ({
-    page,
-  }) => {
+  test("the processing stages show behind a switch, and failed datasets have their own filter", async ({ page }) => {
     await installAuthenticatedUser(page, { canAudit: true });
-
-    const datasetRequest = page.waitForRequest((request) => {
-      const url = new URL(request.url());
-      return url.pathname.endsWith("/v2_full_dataset_view") && !url.searchParams.has("id") && !url.searchParams.has("pending_corrections_count");
-    });
 
     await page.goto("/dataset-audit");
     await dismissCookieBanner(page);
-    const request = await datasetRequest;
-    const selectedColumns = new URL(request.url()).searchParams
-      .get("select")
-      ?.split(",");
+    const table = page.getByTestId("audit-review-table");
+    await expect(table.getByText("Local Forest").first()).toBeVisible();
+    const combined = table.getByRole("columnheader", { name: "Combined model" });
+    await expect(combined).toHaveCount(0);
 
-    expect(selectedColumns).toBeDefined();
-    expect(selectedColumns).not.toContain("*");
-    expect(selectedColumns).toEqual(expect.arrayContaining(["id", "file_name", "admin_level_1", "has_ml_tiles"]));
+    await page.getByRole("switch", { name: "Processing stages" }).click();
+    await expect(combined).toBeVisible();
+    await expect(table.getByTestId("stage-cog_processing-succeeded")).toHaveCount(2);
+    await expect(table.getByTestId("stage-cog_processing-not_run")).toHaveCount(1);
+    // the switch stays as the auditor left it
+    await page.reload();
+    await expect(combined).toBeVisible();
+
+    const failedRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.get("has_error") === "is.true");
+    await page.getByText("Filters").click();
+    await page.getByRole("combobox", { name: "Processing Any stage" }).click();
+    await page.getByTitle("Failed", { exact: true }).click();
+    await failedRequest;
+    await expect(page).toHaveURL(/stage=failed/);
+    await expect(page.getByTestId("audit-list-count")).toHaveText("0 of 3 datasets");
+  });
+
+  test("the list asks the server for one page of its rows", async ({ page }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+    const pageRequest = page.waitForRequest((request) => request.url().includes("/review_list?") && request.method() === "GET");
+    await page.goto("/dataset-audit");
+    await dismissCookieBanner(page);
+    const url = new URL((await pageRequest).url());
+
+    expect(url.searchParams.get("select")?.split(",")).toEqual(expect.arrayContaining(["dataset_id", "admin_level_1", "result:outcome", "has_error"]));
+    expect(url.searchParams.get("order")).toBe("dataset_id.desc");
+    expect([url.searchParams.get("offset"), url.searchParams.get("limit")]).toEqual(["0", "50"]);
     await expect(page.getByText("Local Forest").first()).toBeVisible();
   });
 
@@ -743,7 +747,13 @@ test.describe("auditor local e2e", () => {
     // a filtered list: leaving the review returns to it
     await page.goto(`/dataset-audit?tab=pending&id=${completeDataset.id}`);
     await dismissCookieBanner(page);
+    // Save & Next asks for the next older row of that list, with its tab and filters
+    const nextRequest = page.waitForRequest((request) => new URL(request.url()).searchParams.getAll("dataset_id").includes(`lt.${completeDataset.id}`));
     await page.getByRole("button", { name: "Open" }).click();
+    const next = new URL((await nextRequest).url()).searchParams;
+    expect(next.get("review_required")).toBe("neq.{}");
+    expect(next.getAll("dataset_id")).toEqual([`eq.${completeDataset.id}`, `lt.${completeDataset.id}`]);
+    expect([next.get("order"), next.get("limit")]).toEqual(["dataset_id.desc", "1"]);
 
     await expect(page).toHaveURL(
       new RegExp(`/dataset-audit/${completeDataset.id}(?:\\?.*)?$`),

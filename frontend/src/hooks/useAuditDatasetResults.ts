@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
-import { AUDIT_RESULTS_KEY, SCHEMA_NOT_EXPOSED, allRows, audit, withEmails } from "./useAuditChecks";
+import { AUDIT_RESULTS_KEY, audit } from "./useAuditChecks";
 import type { IAuditDatasetResult } from "../types/auditChecks";
 
 /** The columns of audit.dataset_outcomes the page reads (all of them, named so a renamed column fails loudly). */
@@ -41,8 +41,6 @@ const RESULT_COLUMNS = [
 
 export const datasetResultKey = (datasetId: number | undefined) => [...AUDIT_RESULTS_KEY, datasetId];
 
-const RESULTS_STALE_MS = 60 * 1000;
-
 /** One dataset's check outputs and what still needs a person (auditors only); null when the view has no row. */
 export function useAuditDatasetResult(datasetId: number | undefined) {
   const { user } = useAuth();
@@ -60,61 +58,5 @@ export function useAuditDatasetResult(datasetId: number | undefined) {
       return data ?? null;
     },
     enabled: !!datasetId && !!user?.id && canAudit,
-  });
-}
-
-export interface IAuditResultsList {
-  /** false while the audit schema cannot be read on this server */
-  available: boolean;
-  rows: IAuditDatasetResult[];
-}
-
-/** Every dataset's row of audit.dataset_outcomes, read page by page (auditors only). */
-export function useAuditDatasetResults() {
-  const { user } = useAuth();
-  const { canAudit } = useCanAudit();
-  return useQuery({
-    queryKey: [...AUDIT_RESULTS_KEY, "all"],
-    queryFn: async (): Promise<IAuditResultsList> => {
-      try {
-        const rows = await allRows<IAuditDatasetResult>((from, to) =>
-          audit()
-            .from("dataset_outcomes")
-            .select(RESULT_COLUMNS)
-            .order("dataset_id", { ascending: false })
-            .range(from, to)
-            .overrideTypes<IAuditDatasetResult[], { merge: false }>(),
-        );
-        return { available: true, rows };
-      } catch (error) {
-        if ((error as { code?: string }).code === SCHEMA_NOT_EXPOSED) return { available: false, rows: [] };
-        throw error;
-      }
-    },
-    enabled: !!user?.id && canAudit,
-    staleTime: RESULTS_STALE_MS,
-  });
-}
-
-/** Who reviewed each dataset (its dataset-level answers), with their emails: the list's
- * "reviewed by" filter. */
-export function useAuditReviewers() {
-  const { user } = useAuth();
-  const { canAudit } = useCanAudit();
-  return useQuery({
-    queryKey: [...AUDIT_RESULTS_KEY, "reviewers"],
-    queryFn: async () => {
-      const rows = await allRows<{ id: number; dataset_id: number; reviewed_by: string | null }>((from, to) =>
-        audit().from("dataset_human_reviews").select("id, dataset_id, reviewed_by").order("id").range(from, to),
-      );
-      const byDataset = new Map<number, Set<string>>();
-      for (const row of await withEmails(rows)) {
-        const who = row.reviewer_email ?? row.reviewed_by;
-        if (who) byDataset.set(row.dataset_id, (byDataset.get(row.dataset_id) ?? new Set()).add(who));
-      }
-      return byDataset;
-    },
-    enabled: !!user?.id && canAudit,
-    staleTime: RESULTS_STALE_MS,
   });
 }

@@ -1,16 +1,19 @@
 /** The dataset page's audit rows in words, for data users: the decision, the georeferencing and
  * how many of the sample crops each prediction gets wrong. */
 
-import type { IDatasetAuditSummary } from "../types/auditChecks";
+import type { IDatasetAuditSummary, ReviewItem } from "../types/auditChecks";
 import { GEOREF_PASS_M } from "./auditReview";
 
 const metres = (m: number) => `${m < 10 ? m.toFixed(1) : Math.round(m)} m`;
 
-/** The rows show findings once the audit needs no person any more. */
-export const auditSettled = (summary: IDatasetAuditSummary | null | undefined): summary is IDatasetAuditSummary =>
-  !!summary?.evaluation_decision && summary.review_required.length === 0;
+/** A finding waits while a person still has to review its check, and only then: an open
+ * evaluation review does not hide the georeferencing. */
+export const reviewOpen = (summary: IDatasetAuditSummary, item: ReviewItem) => summary.review_required.includes(item);
 
-export function georefFinding(summary: IDatasetAuditSummary): string {
+/** The georeferencing in words; null while there is none to show (not run, or waiting for a
+ * person), which the page shows as pending. */
+export function georefFinding(summary: IDatasetAuditSummary | null | undefined): string | null {
+  if (!summary || reviewOpen(summary, "georef")) return null;
   const offset = summary.georef_offset_m;
   switch (summary.georef_status) {
     case "estimated":
@@ -22,7 +25,7 @@ export function georefFinding(summary: IDatasetAuditSummary): string {
     case "no_reference":
       return "No reference imagery";
     default:
-      return "Not checked";
+      return null;
   }
 }
 

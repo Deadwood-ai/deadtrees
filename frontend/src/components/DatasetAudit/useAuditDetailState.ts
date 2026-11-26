@@ -11,9 +11,9 @@ import { describeAuditLockDenial, isAuditLeaseConflict, useAuditLock } from "../
 import { useAuditNavigation } from "../../hooks/useAuditNavigation";
 import { useAcquisitionDateEstimate, useGeorefCheck } from "../../hooks/useAcquisitionDateEstimate";
 import { useAuditChecks, useAuditReviews, useSaveDatasetReviews } from "../../hooks/useAuditChecks";
-import { useAuditDatasetResult, useAuditDatasetResults } from "../../hooks/useAuditDatasetResults";
+import { useAuditDatasetResult } from "../../hooks/useAuditDatasetResults";
 import { initialDraft, reviewAnswers, type IReviewDraft } from "../../utils/auditReview";
-import { nextPendingReview } from "../../utils/auditReviewList";
+import { useNextInList } from "../../hooks/useAuditReviewList";
 import { trackAppEvent } from "../../utils/analytics";
 import { useAuditAOIState } from "./useAuditAOIState";
 
@@ -73,9 +73,8 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 	const result = resultQuery.data;
 
 	const { listPath } = useAuditNavigation();
-	// Save & Next goes on to the next dataset that needs review, whichever list this was opened from
-	const { data: allResults } = useAuditDatasetResults();
-	const nextDatasetId = nextPendingReview(allResults?.rows ?? [], dataset.id);
+	// Save & Next goes on to the next dataset of the list this was opened from, with its filters
+	const { data: nextDatasetId = null } = useNextInList(listPath, dataset.id);
 	const { state: auditLock, continueHere: continueAuditHere } = useAuditLock(dataset.id);
 
 	const [isSubmitting, setIsSubmitting] = useState(false);
