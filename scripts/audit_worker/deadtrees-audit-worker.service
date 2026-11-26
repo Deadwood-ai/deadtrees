@@ -1,0 +1,19 @@
+# The audit worker as a user service on its own code copy (docs/audit-checks.md, DT-1619).
+# Installed and (re)started by scripts/audit_worker/start.sh. With lingering on for the
+# account it starts at boot; after a crash or a stuck run (exit 3) it starts again.
+[Unit]
+Description=DeadTrees audit worker
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/.local/share/deadtrees-audit-worker/code
+# host, accounts, key paths and PATH of this server; not tracked
+EnvironmentFile=%h/.local/share/deadtrees-audit-worker/worker.env
+ExecStart=%h/.local/share/deadtrees-audit-worker/venv/bin/python -m processor.src.audit_worker run
+# production ODM runs on the same host
+MemoryMax=10G
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

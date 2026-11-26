@@ -6,24 +6,22 @@ A check plugs in with a handler module listed in HANDLERS:
 	                         registered once with the version, inactive
 	handle(ctx) -> dict      uploads the run's images and returns the p_result of
 	                         audit.finish_run: inputs, evidence, tiles, images, judgements
-	ready(status) -> bool    optional: whether a dataset's status row lets the check run
-	inputs(client, dataset_id) -> dict
-	                         optional: the evidence a run judges (ortho sha256, prediction label
-	                         ids); a dataset gets a new run when the latest run of the version
-	                         judged other inputs. Without it, one run per version and dataset.
 CONFIG['models'] names the judges ({"haiku-5.5": {"transport": "claude", "model": ...}}).
+The worker queues nothing itself: operators queue runs with audit.queue_runs (DT-1619).
 """
 
 from __future__ import annotations
 
+import faulthandler
 import importlib
 import json
 import logging
 import os
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -41,9 +39,13 @@ STATUS_FILE = Path(
 )
 MEMORY_LIMIT = 10 * 1024**3  # production ODM runs on this host too
 IDLE_SECONDS = 60
-ENQUEUE_SECONDS = 5 * 60
 LIMIT_PAUSE_SECONDS = 30 * 60
 LOGIN_PROBE_SECONDS = 5 * 60
+# The longest run until Nov 2026 took 75 minutes; one still going after this is stuck (DT-1619).
+RUN_DEADLINE_SECONDS = 3 * 60 * 60
+# While a run lasts, where every thread is goes to the log this often, so a slow run shows where.
+STACK_SECONDS = 30 * 60
+TIMEOUT_EXIT = 3  # the worker's exit code after a stuck run; its service starts it again
 
 
 class Paused(Exception):
@@ -95,28 +97,6 @@ def read_status(path: Path | None = None) -> dict | None:
 		return None
 
 
-def watermark_file() -> Path:
-	return STATUS_FILE.with_name('discovered-until')
-
-
-def read_watermark() -> str | None:
-	"""Up to when finished datasets were queued; kept across restarts so an outage leaves no gap."""
-	try:
-		value = watermark_file().read_text().strip()
-		datetime.fromisoformat(value)
-		return value
-	except (OSError, ValueError):
-		return None
-
-
-def write_watermark(value: str) -> None:
-	path = watermark_file()
-	path.parent.mkdir(parents=True, exist_ok=True)
-	with tempfile.NamedTemporaryFile('w', dir=path.parent, delete=False) as out:
-		out.write(value)
-	os.replace(out.name, path)
-
-
 def memory_limit(
 	cgroup_root: Path = Path('/sys/fs/cgroup'), proc_cgroup: Path = Path('/proc/self/cgroup')
 ) -> int | None:
@@ -142,6 +122,35 @@ def memory_limit(
 	return min(limits) if limits else None
 
 
+@contextmanager
+def deadline(run: dict, client, refresh=None, seconds: float = RUN_DEADLINE_SECONDS, stop=os._exit):
+	"""Bounds one run. Every STACK_SECONDS the stacks of all threads go to stderr (the journal).
+	Past `seconds` the run fails as stuck and the worker stops with TIMEOUT_EXIT: a thread stuck in
+	a C call or a network read cannot be stopped from inside, so the process ends and its service
+	starts it again. A stuck run fails at once, since a retry would most likely get stuck again."""
+
+	def give_up():
+		log.error('Run %s is still going after %.1f h; it fails and the worker stops', run['id'], seconds / 3600)
+		faulthandler.dump_traceback(all_threads=True)
+		try:
+			if refresh:
+				refresh(client)
+			runs.fail(client, run, f'timed out: still running after {seconds / 3600:g} h; its stacks are in the worker log')
+			write_status('stopped', reason=f'run {run["id"]} timed out', run_id=run['id'])
+		finally:
+			stop(TIMEOUT_EXIT)
+
+	timer = threading.Timer(seconds, give_up)
+	timer.daemon = True
+	faulthandler.dump_traceback_later(STACK_SECONDS, repeat=True)
+	timer.start()
+	try:
+		yield
+	finally:
+		timer.cancel()
+		faulthandler.cancel_dump_traceback_later()
+
+
 def process(run: dict, *, client, handler, version_row: dict, put_image, token='', refresh=None) -> str:
 	"""One claimed run to its end state; a pause puts it back and raises Paused.
 
@@ -150,12 +159,13 @@ def process(run: dict, *, client, handler, version_row: dict, put_image, token='
 	if refresh:
 		ctx.refresh = lambda: refresh(client)
 	try:
-		try:
-			ctx.judges = models.judges(version_row['config'].get('models', {}))
-			result = handler.handle(ctx)
-		finally:
-			ctx.refresh()  # the run may have outlived its login; every outcome below is written with a valid one
-		runs.finish(client, run, result)
+		with deadline(run, client, refresh):
+			try:
+				ctx.judges = models.judges(version_row['config'].get('models', {}))
+				result = handler.handle(ctx)
+			finally:
+				ctx.refresh()  # the run may have outlived its login; every outcome below is written with a valid one
+			runs.finish(client, run, result)
 	except models.LoginExpired as exc:
 		runs.release(client, run)
 		raise Paused(str(exc), exc.transport, LOGIN_PROBE_SECONDS) from exc
@@ -185,50 +195,6 @@ def tick(*, client, handlers: dict, put_image, token='', refresh=None) -> str | 
 	)
 
 
-def judged_inputs(handler, client, dataset_ids: list[int]) -> tuple[list[int], dict | None]:
-	"""What each dataset's run would judge (handler.inputs), and the datasets it could be read for.
-
-	A dataset whose inputs cannot be read yet (a ValueError: no ortho hash, say) is left out
-	and logged. One such dataset must not stop the worker or block the datasets after it.
-	"""
-	evidence = getattr(handler, 'inputs', None)
-	if not evidence:
-		return dataset_ids, None
-	inputs = {}
-	for dataset_id in dataset_ids:
-		try:
-			inputs[dataset_id] = evidence(client, dataset_id)
-		except ValueError as exc:
-			log.warning('Audit worker leaves dataset %s out: %s', dataset_id, exc)
-	return list(inputs), inputs
-
-
-def enqueue_ready(client, handlers: dict, since: str, until: str, done=lambda at: None) -> dict[str, int]:
-	"""Upload-queue runs of each active version for datasets that finished processing in [since, until).
-
-	done(updated_at) is called after each page with its last row's time, so a stop between
-	pages resumes there (repeating a page only finds its runs already queued).
-	"""
-	active = runs.active_versions(client, handlers)
-	added = dict.fromkeys(active, 0)
-	for statuses in runs.processed_pages(client, since, until):
-		for check, version_row in active.items():
-			handler = handlers[check]
-			ready = getattr(handler, 'ready', default_ready)
-			ids = [s['dataset_id'] for s in statuses if ready(s)]
-			ids, inputs = judged_inputs(handler, client, ids)
-			added[check] += len(runs.enqueue(client, version_row, ids, 'upload', inputs=inputs))
-		done(statuses[-1]['updated_at'])
-	return added
-
-
-def default_ready(status: dict) -> bool:
-	predictions = status.get('is_combined_model_done') or (
-		status.get('is_deadwood_done') and status.get('is_forest_cover_done')
-	)
-	return bool(status.get('is_cog_done') and predictions)
-
-
 def register(client, handlers: dict) -> dict[str, dict]:
 	"""Each handler's version and its rules, inactive until an operator activates them."""
 	registered = {}
@@ -240,14 +206,7 @@ def register(client, handlers: dict) -> dict[str, dict]:
 
 def run_forever(*, connect, handlers: dict, put_image, once: bool = False, sleep=time.sleep, refresh=None):
 	"""connect() -> (client, token), called every tick so the processor login stays fresh;
-	refresh(client) renews it in place during and after a long run.
-
-	Finished datasets are queued from the persisted watermark on, so datasets that finished
-	while the worker was down are still found. The very first start looks back one hour:
-	older datasets are backfill, queued explicitly.
-	"""
-	since = read_watermark() or (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-	next_enqueue = 0.0
+	refresh(client) renews it in place during and after a long run."""
 	client, _ = connect()
 	runs.recover(client, runs.versions(client, handlers))
 	while True:
@@ -259,11 +218,6 @@ def run_forever(*, connect, handlers: dict, put_image, once: bool = False, sleep
 				if once:
 					return status
 				continue
-		if time.monotonic() >= next_enqueue:
-			started = runs.now()
-			enqueue_ready(client, handlers, since, started, done=write_watermark)
-			write_watermark(started)
-			since, next_enqueue = started, time.monotonic() + ENQUEUE_SECONDS
 		try:
 			result = tick(
 				client=client,

@@ -148,27 +148,41 @@ in the request, so a model cannot read files of the account.
   [{tile_index, layer, judge, verdict, likelihood, problems, summary, raw}]}`. Image files
   are uploaded before the call. Which run counts is `audit.current_runs`: the worker
   points nothing.
-- Queues: new uploads first, then manual runs, then the backfill. Every five minutes,
-  datasets that finished processing get an upload run of each active version unless a run
-  of that version already judged the same inputs. The backfill is queued explicitly with
-  `enqueue` and needs approval.
+- Queues: uploads first, then manual runs, then the backfill. The worker queues nothing
+  itself while the checks are tested: an operator queues datasets with
+  `select audit.queue_runs('<check>', array[<dataset ids>])` (the manual queue by default).
+  It queues a run of the check's active version for each dataset that has no open run of
+  it, and no finished one unless `p_again => true`. Queueing spends model calls on the
+  subscription logins.
 - A worker that cannot reach a model (expired login, usage limit, a rate limit that
   outlasts its waits) puts the run back without spending an attempt and pauses; its status
   file (`~/.local/state/deadtrees-audit-worker/status.json`) shows it and the platform
   monitor reports it. Other errors are retried up to three times, then the run fails with
   its error. At start, runs left `running` by a stopped worker go back to the queue.
+- A run still going after 3 hours is stuck: it fails at once ("timed out") and the worker
+  exits with code 3, because a thread stuck in a C call or a network read cannot be
+  stopped from inside. Its service starts it again a minute later. While a run lasts, the
+  stacks of all threads go to the journal every 30 minutes, so a slow run shows where it is.
 - Calls are paced per login (`models.paced`): one call at a time on the Codex login.
 - The worker refuses to start without a memory cap of at most 10 GB, because production
   ODM runs on this host.
 
+The worker runs as the user service `deadtrees-audit-worker` on its own code copy in
+`~/.local/share/deadtrees-audit-worker` (`code/`, `venv/`, and the untracked `worker.env`
+with the host's settings). `scripts/audit_worker/start.sh` brings the copy to the newest
+main, installs `scripts/audit_worker/deadtrees-audit-worker.service` (10 GB memory cap,
+restart on failure, enabled at boot with lingering on) and restarts it. Switching a check
+version on stays an operator's step: the worker refuses runs queued for a version its code
+does not run.
+
 ```bash
 python -m processor.src.audit_worker probe            # logins only, no model call
-systemd-run --user --scope -p MemoryMax=10G -- python -m processor.src.audit_worker run
-python -m processor.src.audit_worker enqueue --check prediction_quality --queue backfill --file ids.txt
+~/.local/share/deadtrees-audit-worker/code/scripts/audit_worker/start.sh
+journalctl --user -u deadtrees-audit-worker -f
 python -m processor.src.audit_worker status
 ```
 
-Starting the worker for real, and any backfill, needs approval.
+Starting the worker for real, and queueing runs, needs approval.
 
 ## API exposure
 

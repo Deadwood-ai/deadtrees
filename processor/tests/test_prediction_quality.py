@@ -145,21 +145,6 @@ def test_render_crop_warps_the_square_and_rasterises_overlays():
 	assert np.asarray(dw)[-10, 10, 2] > np.asarray(raw)[-10, 10, 2], 'deadwood fill tints blue'
 
 
-def test_attach_cover_measures_shares_on_the_tile_square():
-	from pyproj import Transformer
-
-	to_wgs = Transformer.from_crs(EPSG, 4326, always_xy=True)
-	sq = (X0, Y0, X0 + tiles.TILE_M, Y0 + tiles.TILE_M)
-	lon0, lat0 = to_wgs.transform(sq[0], sq[1])
-	lon1, lat1 = to_wgs.transform(sq[2], sq[3])
-	t = tiles.Tile(tile_id=1, pixel_window=(0, 0, 512, 512), bbox_4326=(lon0, lat0, lon1, lat1))
-	half = box(*to_wgs.transform(sq[0], sq[1]), *to_wgs.transform(sq[0] + tiles.TILE_M / 2, sq[3]))
-	to_utm = Transformer.from_crs(4326, EPSG, always_xy=True)
-	tiles.attach_cover([t], to_utm, tiles.utm_layer([half, None], to_utm), tiles.utm_layer([], to_utm))
-	assert t.square_utm[0] == pytest.approx(sq[0], abs=0.5)
-	assert t.deadwood_share == pytest.approx(0.5, abs=0.05) and t.forest_share == 0
-
-
 def test_the_payload_follows_the_audit_tables():
 	from processor.src.prediction_quality_v1 import payload
 	from processor.src.prediction_quality_v1.check import CheckResult, TileResult
@@ -178,7 +163,7 @@ def test_the_payload_follows_the_audit_tables():
 		judge.parse('haiku-5.5', json.dumps(blind)),
 	]
 	result = CheckResult(
-		dataset_id=42, epsg=EPSG, tiles=[TileResult(tile=t, crop=crop, answers=answers)], tiles_total=9, seconds=1
+		dataset_id=42, epsg=EPSG, tiles=[TileResult(tile=t, crop=crop, answers=answers)], tiles_total=9, candidates=4, seconds=1
 	)
 	footprint = {'type': 'Polygon', 'coordinates': []}
 	judged = {'ortho_sha256': 'a' * 64, 'aoi': None, 'label_ids': {'deadwood': 11, 'forest_cover': 12}}
@@ -208,7 +193,15 @@ def test_the_payload_follows_the_audit_tables():
 	assert rows[2]['raw'] == {'assessable': False, 'verdict': 'ok', 'errors': []}
 	assert set(rows[0]) == {'tile_index', 'layer', 'judge', 'verdict', 'likelihood', 'problems', 'summary', 'raw'}
 	evidence = out['evidence']
-	assert evidence['coverage'] == {'mode': 'sampled', 'tiles_total': 9, 'tiles': 1, 'exclude_set': 1, 'training_set': 1}
+	assert evidence['coverage'] == {
+		'mode': 'sampled',
+		'tiles_total': 9,
+		'candidates': 4,
+		'tiles': 1,
+		'exclude_set': 1,
+		'training_set': 1,
+	}
+	assert evidence['tiles'][0]['picker'] == 'windowed-v1'
 	assert evidence['tiles'][0]['sets'] == ['exclude', 'training'] and evidence['tiles'][0]['weight'] == 0.2
 	assert evidence['failed_calls'] == 0 and 'rule' not in evidence['versions']
 	assert not any('a' * 64 in json.dumps(row) for row in out['tiles'] + out['images'])
@@ -260,12 +253,67 @@ class _FakeTable:
 		return SimpleNamespace(data=found[: self.cap])
 
 
+def _label_polygons(db, label_id):
+	from shapely.geometry import shape
+
+	rows = db.get('v2_deadwood_geometries', []) + db.get('v2_forest_cover_geometries', [])
+	return [shape(r['geometry']) for r in rows if r['label_id'] == label_id and not r['is_deleted']]
+
+
+def _fake_candidates(db, p):
+	"""audit.prediction_quality_candidates on the fake tables (the database test checks the real one)."""
+	from shapely.geometry import shape
+
+	rows = [r for r in db.get('v2_tile_embeddings', []) if r['dataset_id'] == p['p_dataset_id']]
+	aoi = shape(p['p_aoi']) if p['p_aoi'] else None
+
+	def cover(footprint, polygons):
+		return sum(g.intersection(footprint).area for g in polygons) / footprint.area
+
+	share = {r['id']: 1.0 if aoi is None else cover(shape(r['geometry']), [aoi]) for r in rows}
+	inside = [r for r in rows if share[r['id']] >= p['p_inside']] or [r for r in rows if share[r['id']] > 0]
+	deadwood, forest = (_label_polygons(db, p[key]) for key in ('p_deadwood_label_id', 'p_forest_label_id'))
+	candidates = [
+		{
+			'id': r['id'],
+			'pixel_window': [r['pixel_x0'], r['pixel_y0'], r['pixel_x1'], r['pixel_y1']],
+			'geometry': r['geometry'],
+			'deadwood': cover(shape(r['geometry']), deadwood),
+			'forest': cover(shape(r['geometry']), forest),
+			'aoi': share[r['id']],
+		}
+		for r in inside[: p['p_limit']]
+	]
+	return {'tiles': len(rows), 'tiles_inside': len(inside), 'candidates': candidates}
+
+
+def _fake_polygons(db, p):
+	"""audit.prediction_quality_polygons on the fake tables."""
+	from shapely.geometry import box, mapping
+
+	polygons = _label_polygons(db, p['p_label_id'])
+	return [[mapping(g.intersection(box(*b))) for g in polygons if g.intersects(box(*b))] for b in p['p_boxes']]
+
+
 class _FakeClient:
 	def __init__(self, db=None):
 		self.db = db or {}
+		self.calls = []  # (audit function, params)
 
 	def table(self, name):
 		return _FakeTable(self.db, name)
+
+	def schema(self, name):
+		assert name == 'audit'
+		return self
+
+	def rpc(self, function, params):
+		from types import SimpleNamespace
+
+		self.calls.append((function, params))
+		fake = {'prediction_quality_candidates': _fake_candidates, 'prediction_quality_polygons': _fake_polygons}[function]
+		data = fake(self.db, json.loads(json.dumps(params)))  # as PostgREST would receive them
+		return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
 
 
 # ---------------------------------------------------------------------------
@@ -300,25 +348,40 @@ def ortho_file(tmp_path):
 	return str(path)
 
 
-def test_a_dataset_without_an_aoi_is_judged_on_all_its_tiles(ortho_file):
+def _polygons(by_layer):
+	"""polygons(layer, boxes) of the check: the layer's WGS84 polygons that touch each box, recorded."""
+	asked = []
+
+	def polygons(layer, boxes):
+		asked.append((layer, list(boxes)))
+		return [[g for g in by_layer[layer] if g.intersects(box(*b))] for b in boxes]
+
+	polygons.asked = asked
+	return polygons
+
+
+def test_the_check_judges_the_candidates_and_reads_polygons_only_for_the_picked_tiles(ortho_file):
 	from processor.src.prediction_quality_v1.check import run_prediction_quality
 
 	judges = {'luna-medium': lambda prompt, images: _answer(dw_major=80), 'haiku-5.5': lambda *_: _answer()}
 	dead = _to_wgs(box(*_squares()[0]))
-	predictions = lambda: {'deadwood': [dead], 'forest': []}  # noqa: E731 (the check empties the dict)
-	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, predictions(), judges)
-	assert result.tiles_total == 4 and len(result.tiles) == 4
+	polygons = _polygons({'deadwood': [dead], 'forest': []})
+	result = run_prediction_quality(42, ortho_file, _check_tiles(), 900, None, polygons, judges)
+	assert result.tiles_total == 900 and result.candidates == 4 and len(result.tiles) == 4
 	assert all(r.crop.in_aoi is None and len(r.answers) == 2 for r in result.tiles)
 	assert result.cost['haiku-5.5']['calls'] == 4 and result.cost['luna-medium']['cost_usd'] is None
-	# an AOI limits the check to the tiles inside it
-	inside = run_prediction_quality(42, ortho_file, _check_tiles(), _to_wgs(box(*_squares()[0])), predictions(), judges)
-	assert inside.tiles_total == 1 and [r.tile.tile_id for r in inside.tiles] == [1]
-	# an AOI smaller than a tile is judged on the tile it touches, not left without tiles
-	corner = box(*_squares()[1]).centroid.buffer(5)
-	small = run_prediction_quality(
-		42, ortho_file, _check_tiles(), _to_wgs(corner), {'deadwood': [], 'forest': []}, judges
-	)
-	assert [r.tile.tile_id for r in small.tiles] == [2]
+	# one read per layer, one box per picked tile, each around the tile's square
+	assert [layer for layer, _ in polygons.asked] == ['deadwood', 'forest']
+	boxes = polygons.asked[0][1]
+	assert len(boxes) == 4
+	for r, b in zip(result.tiles, boxes):
+		assert box(*b).contains(_to_wgs(box(*r.tile.square_utm)))
+	cover = {r.tile.tile_id: r.crop.cover('deadwood') for r in result.tiles}
+	assert cover[1] == pytest.approx(1, abs=0.05) and cover[2] == pytest.approx(0, abs=0.05)
+	# an AOI is drawn on the crops; the database keeps the tiles outside it from the candidates
+	none = _polygons({'deadwood': [], 'forest': []})
+	inside = run_prediction_quality(42, ortho_file, _check_tiles()[:1], 1, dead, none, judges)
+	assert [r.tile.tile_id for r in inside.tiles] == [1] and inside.tiles[0].crop.in_aoi is not None
 
 
 def test_login_and_limit_errors_reach_the_worker_and_other_errors_stay_with_the_tile(ortho_file):
@@ -343,16 +406,16 @@ def test_login_and_limit_errors_reach_the_worker_and_other_errors_stay_with_the_
 		return _answer()
 
 	good = lambda prompt, images: _answer()  # noqa: E731
-	none = lambda: {'deadwood': [], 'forest': []}  # noqa: E731
+	none = _polygons({'deadwood': [], 'forest': []})
 	for failing, error in ((expired, LoginExpired), (limited, LimitReached)):
 		with pytest.raises(error):
-			run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': failing})
-	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': flaky})
+			run_prediction_quality(42, ortho_file, _check_tiles(), 4, None, none, {'a': good, 'b': failing})
+	result = run_prediction_quality(42, ortho_file, _check_tiles(), 4, None, none, {'a': good, 'b': flaky})
 	failed = [r for r in result.tiles if r.failures]
 	assert len(failed) == 1 and 'boom' in failed[0].failures['b'] and len(failed[0].answers) == 1
 	# a judge that answers no tile fails the run
 	with pytest.raises(RuntimeError, match='b answered no tile: RuntimeError: boom'):
-		run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': broken})
+		run_prediction_quality(42, ortho_file, _check_tiles(), 4, None, none, {'a': good, 'b': broken})
 
 
 def _dataset(aois=()):
@@ -428,10 +491,11 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 	)
 	out = handler.handle(ctx)
 	labels = {'deadwood': 11, 'forest_cover': 12}
-	assert out['inputs'] == handler.inputs(client, 42) == {'ortho_sha256': SHA, 'aoi': None, 'label_ids': labels}
+	assert out['inputs'] == {'ortho_sha256': SHA, 'aoi': None, 'label_ids': labels}
 	assert out['evidence']['coverage'] == {
 		'mode': 'sampled',
 		'tiles_total': 4,
+		'candidates': 4,
 		'tiles': 4,
 		'exclude_set': 4,
 		'training_set': 4,
@@ -449,28 +513,38 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 	covered = {t['pixel_window'][0]: t['predicted']['deadwood'] for t in out['evidence']['tiles']}
 	assert covered[0] == pytest.approx(1, abs=0.05) and covered[512] == covered[1024] == 0
 	assert out['tiles'][0]['geometry']['type'] == 'Polygon'
+	# the sample with its cover first, then the polygons of the picked tiles, once per layer
+	(first, sample), *reads = client.calls
+	assert first == 'prediction_quality_candidates'
+	assert sample == {
+		'p_dataset_id': 42,
+		'p_deadwood_label_id': 11,
+		'p_forest_label_id': 12,
+		'p_aoi': None,
+		'p_limit': 2000,
+		'p_inside': 0.9,
+	}
+	assert [(f, p['p_label_id'], len(p['p_boxes'])) for f, p in reads] == [
+		('prediction_quality_polygons', 11, 4),
+		('prediction_quality_polygons', 12, 4),
+	]
+	assert handler.CONFIG['tiles']['picker'] == 'windowed-v1' and handler.CONFIG['tiles']['candidates'] == 2000
 	assert worker.HANDLERS['prediction_quality'] == handler.__name__
 	assert handler.CONFIG['models'].keys() == judges.keys()
 	assert (handler.RULES, handler.RULES_CONFIG) == ('rules-v1', {'decider': 'haiku'})
 	assert not {'rule', 'rule_config'} & set(handler.CONFIG)
 
 
-def test_the_handler_waits_for_its_inputs(monkeypatch):
+def test_a_run_needs_the_preferred_predictions_and_a_new_aoi_is_other_inputs():
 	from processor.src.prediction_quality_v1 import handler
 
-	done = {'is_cog_done': True, 'is_embeddings_done': True, 'is_deadwood_done': True, 'is_forest_cover_done': True}
-	assert handler.ready(done) and handler.ready({**done, 'is_deadwood_done': False, 'is_combined_model_done': True})
-	assert not handler.ready({**done, 'is_embeddings_done': False})
-	assert not handler.ready({**done, 'is_forest_cover_done': False})
-	# a dataset without a prediction of the preferred model is left out of the queue (a ValueError)
 	tables = _dataset()
 	tables['v2_labels'] = [row for row in tables['v2_labels'] if row['id'] != 12]
 	with pytest.raises(ValueError, match='no forest_cover prediction'):
-		handler.inputs(_FakeClient(tables), 42)
-	# a new AOI is a new run
+		handler.prediction_labels(_FakeClient(tables), 42)
 	aoi = {'geometry': {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 0]]]}, 'source': 'manual'}
-	with_aoi = handler.inputs(_FakeClient(_dataset([{**aoi, 'dataset_id': 42}])), 42)
-	assert with_aoi['aoi'] and with_aoi != handler.inputs(_FakeClient(_dataset()), 42)
+	labels = {'deadwood': 11, 'forest': 12}
+	assert handler.identity(SHA, aoi, labels)['aoi'] and handler.identity(SHA, aoi, labels) != handler.identity(SHA, None, labels)
 
 
 def test_a_forest_that_fills_the_crop_is_framed_and_its_share_is_in_the_prompt():

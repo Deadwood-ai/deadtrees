@@ -1,39 +1,30 @@
 """The prediction quality check as an audit worker handler (audit_worker.worker.HANDLERS).
 
-handle(ctx) reads the stored COG (private datasets too), the dataset's CLIP tiles, its AOI
-and the preferred deadwood and forest predictions, asks the version's judges per tile, uploads
-the images they saw and returns the run's p_result (payload.build), which the worker stores
-with audit.finish_run. Which judge decides is the rules' (RULES_CONFIG), applied in the
-database (audit.tile_calls).
+handle(ctx) reads the stored COG (private datasets too), the dataset's AOI, a sample of its
+CLIP tiles with their predicted cover and, for the picked tiles only, the polygons of the
+preferred deadwood and forest predictions (the audit.prediction_quality_* reads), asks the
+version's judges per tile, uploads the images they saw and returns the run's p_result
+(payload.build), which the worker stores with audit.finish_run. Which judge decides is the
+rules' (RULES_CONFIG), applied in the database (audit.tile_calls).
 """
 
 import tempfile
 from pathlib import Path
 
-from shapely.geometry import mapping, shape
+from shapely.geometry import shape
 
 from shared.labels import read_model_preferences
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
 from shared.models import LabelDataEnum, LabelSourceEnum
-from shared.pagination import iter_pages_by_creation
 from shared.settings import settings
 
-from ..audit_worker.worker import default_ready
-from ..utils.stored_inputs import (
-	aoi_key,
-	readable_cog,
-	ortho_sha256,
-	read_geometry,
-	stored_aoi,
-	stored_cog,
-	tile_rows,
-)
+from ..utils.stored_inputs import aoi_key, ortho_sha256, readable_cog, stored_aoi, stored_cog
 from . import payload
 from .check import run_prediction_quality
 from .judge import PROMPT_VERSION
 from .render import CROP_PX, RENDER_VERSION
-from .tiles import EXCLUDE_SET_SIZE, TILE_M, Tile
+from .tiles import CANDIDATES, EXCLUDE_SET_SIZE, INSIDE_AOI, TILE_M, Tile
 
 VERSION = 'v2'
 CONFIG = {
@@ -43,36 +34,26 @@ CONFIG = {
 	},
 	'prompt_version': PROMPT_VERSION,
 	'render': RENDER_VERSION,
-	'tiles': {'picker': payload.PICKER, 'exclude_set': EXCLUDE_SET_SIZE, 'tile_m': TILE_M, 'crop_px': CROP_PX},
+	'tiles': {
+		'picker': payload.PICKER,
+		'candidates': CANDIDATES,
+		'exclude_set': EXCLUDE_SET_SIZE,
+		'tile_m': TILE_M,
+		'crop_px': CROP_PX,
+	},
 }
 # audit.check_rules of the version: a tile's call is the deciding judge's verdict (by name prefix);
 # the other judges are stored and shown, not counted
 RULES = 'rules-v1'
 RULES_CONFIG = {'decider': 'haiku'}
-# The check's layer names and where each layer's prediction lives.
-LAYERS = {
-	'deadwood': (LabelDataEnum.deadwood, settings.deadwood_geometries_table),
-	'forest': (LabelDataEnum.forest_cover, settings.forest_cover_geometries_table),
-}
+# The check's layer names and the prediction each judges.
+LAYERS = {'deadwood': LabelDataEnum.deadwood, 'forest': LabelDataEnum.forest_cover}
 
-__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
-
-
-def ready(status: dict) -> bool:
-	"""After the COG and both predictions exist (the worker's default), and the CLIP tiles."""
-	return bool(default_ready(status) and status.get('is_embeddings_done'))
-
-
-def inputs(client, dataset_id: int) -> dict:
-	"""What a run judges: a new ortho, AOI or prediction makes a new run (and reopens a review)."""
-	return identity(
-		ortho_sha256(client, dataset_id), stored_aoi(client, dataset_id), prediction_labels(client, dataset_id)
-	)
+__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle']
 
 
 def identity(sha256: str, aoi: dict | None, label_ids: dict) -> dict:
-	"""The one shape of a run's inputs. The worker compares it with the stored run to tell
-	whether a dataset was already judged, so the queueing and the run must build it alike."""
+	"""What a run judged, stored with it (audit.runs.inputs)."""
 	return {
 		'ortho_sha256': sha256,
 		'aoi': aoi_key(aoi),
@@ -83,7 +64,7 @@ def identity(sha256: str, aoi: dict | None, label_ids: dict) -> dict:
 def handle(ctx) -> dict:
 	# The code is the version: a run queued for an earlier version would be judged with this
 	# drawing and prompt but stored under the earlier name. Such a run fails; an operator
-	# activates this version and the worker queues its own runs.
+	# activates this version and queues runs of it.
 	queued_for = (getattr(ctx, 'version', None) or {}).get('version', VERSION)
 	if queued_for != VERSION:
 		raise ValueError(f'the run is of version {queued_for}; this code judges {VERSION}')
@@ -96,24 +77,20 @@ def handle(ctx) -> dict:
 	sha256 = ortho_sha256(client, dataset_id)
 	aoi = stored_aoi(client, dataset_id)
 	label_ids = prediction_labels(client, dataset_id)
-	rows = tile_rows(client, dataset_id)
-	if not rows:
-		raise ValueError('dataset has no CLIP tiles; run the embedding stage first')
-	tiles = [
-		Tile(
-			tile_id=r['id'],
-			pixel_window=(r['pixel_x0'], r['pixel_y0'], r['pixel_x1'], r['pixel_y1']),
-			bbox_4326=r['geometry'].bounds,
-		)
-		for r in rows
-	]
-	predictions = {layer: prediction_polygons(client, table, label_ids[layer]) for layer, (_, table) in LAYERS.items()}
+	rpc = audit_rpc(client)
+	candidates, tiles_total, footprints = read_candidates(rpc, dataset_id, aoi, label_ids)
 	with (
 		tempfile.TemporaryDirectory(prefix='prediction-quality-') as folder,
 		readable_cog(cog, Path(folder), ctx.token, dataset_id, log) as cog_source,
 	):
 		result = run_prediction_quality(
-			dataset_id, cog_source, tiles, shape(aoi) if aoi else None, predictions, ctx.judges
+			dataset_id,
+			cog_source,
+			candidates,
+			tiles_total,
+			shape(aoi) if aoi else None,
+			polygons_near(rpc, label_ids),
+			ctx.judges,
 		)
 	ctx.refresh()  # the judges can take longer than the login lasts
 	p_result, files = payload.build(
@@ -122,7 +99,7 @@ def handle(ctx) -> dict:
 		# what was judged, read at run time: the ortho, AOI or predictions may have changed since queueing
 		inputs=identity(sha256, aoi, label_ids),
 		label_ids=label_ids,
-		footprints={r['id']: mapping(r['geometry']) for r in rows},
+		footprints=footprints,
 	)
 	# Files first, rows second: a stored row always points at an uploaded image.
 	for path, data in files:
@@ -156,7 +133,7 @@ def prediction_labels(client, dataset_id: int) -> dict:
 		.data
 	)
 	found = {}
-	for layer, (label_data, _) in LAYERS.items():
+	for layer, label_data in LAYERS.items():
 		ids = [
 			r['id']
 			for r in rows
@@ -168,10 +145,49 @@ def prediction_labels(client, dataset_id: int) -> dict:
 	return found
 
 
-def prediction_polygons(client, table: str, label_id: int) -> list:
-	"""Every polygon of one prediction, as shapely in WGS84. Large predictions hold a few
-	hundred thousand polygons, so the read continues after the last row instead of an offset."""
-	pages = iter_pages_by_creation(
-		lambda: client.table(table).select('id,created_at,geometry').eq('label_id', label_id).eq('is_deleted', False)
+def audit_rpc(client):
+	"""rpc(function, params) -> the result of an audit.* function, through PostgREST."""
+	return lambda function, params: client.schema('audit').rpc(function, params).execute().data
+
+
+def read_candidates(rpc, dataset_id: int, aoi: dict | None, label_ids: dict) -> tuple[list[Tile], int, dict]:
+	"""The tiles the sets are picked from: CANDIDATES of the dataset's CLIP tiles inside the AOI,
+	drawn in a fixed order, with their predicted cover (audit.prediction_quality_candidates).
+	Returns them, how many tiles lie inside the AOI, and each one's footprint (GeoJSON) by id."""
+	found = rpc(
+		'prediction_quality_candidates',
+		{
+			'p_dataset_id': dataset_id,
+			'p_deadwood_label_id': label_ids['deadwood'],
+			'p_forest_label_id': label_ids['forest'],
+			'p_aoi': aoi,
+			'p_limit': CANDIDATES,
+			'p_inside': INSIDE_AOI,
+		},
 	)
-	return [read_geometry(row['geometry']) for page in pages for row in page]
+	if not found['tiles']:
+		raise ValueError('dataset has no CLIP tiles; run the embedding stage first')
+	tiles = [
+		Tile(
+			tile_id=c['id'],
+			pixel_window=tuple(c['pixel_window']),
+			bbox_4326=shape(c['geometry']).bounds,
+			deadwood_share=c['deadwood'],
+			forest_share=c['forest'],
+		)
+		for c in found['candidates']
+	]
+	return tiles, found['tiles_inside'], {c['id']: c['geometry'] for c in found['candidates']}
+
+
+def polygons_near(rpc, label_ids: dict):
+	"""polygons(layer, boxes) for the check: per WGS84 box, the layer's prediction cut to it
+	(audit.prediction_quality_polygons), as shapely."""
+
+	def polygons(layer: str, boxes: list) -> list:
+		found = rpc(
+			'prediction_quality_polygons', {'p_label_id': label_ids[layer], 'p_boxes': [list(b) for b in boxes]}
+		)
+		return [[shape(g) for g in cut] for cut in found]
+
+	return polygons

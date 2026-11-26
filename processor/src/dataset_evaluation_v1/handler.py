@@ -18,7 +18,6 @@ from shared.settings import settings
 from ..utils.ssh import pull_file_from_storage_server
 from ..utils.stored_inputs import (
 	NO_ORTHO_HASH,
-	ortho_sha256,
 	readable_cog,
 	stored_cog,
 	tile_rows,
@@ -35,23 +34,11 @@ VERSION = 'v3'
 RULES = 'rules-v1'
 RULES_CONFIG = {'decider': 'haiku', 'band_major_at': 90}
 
-__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
-
-
-def ready(status: dict) -> bool:
-	"""After the COG, thumbnail and CLIP tiles exist; predictions are not needed."""
-	return bool(status.get('is_cog_done') and status.get('is_thumbnail_done') and status.get('is_embeddings_done'))
-
-
-def inputs(client, dataset_id: int) -> dict:
-	"""What a run judges: a new ortho makes a new run (and reopens a review). The AOI and the
-	predictions play no part, so changing them does not."""
-	return identity(ortho_sha256(client, dataset_id))
+__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle']
 
 
 def identity(sha256: str) -> dict:
-	"""The one shape of a run's inputs. The worker compares it with the stored run to tell
-	whether a dataset was already judged, so the queueing and the run must build it alike."""
+	"""What a run judged, stored with it (audit.runs.inputs)."""
 	return {'ortho_sha256': sha256}
 
 
