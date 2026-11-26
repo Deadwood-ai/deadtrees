@@ -598,48 +598,72 @@ def pq_inputs(db, tiles=5):
 	return dataset, labels
 
 
-def candidates(db, dataset, labels, aoi=None, limit=2000):
+def candidates(db, dataset, aoi=None, limit=500):
 	return db.execute(
-		'SELECT audit.prediction_quality_candidates(%s,%s,%s,%s,%s,0.9)',
-		(dataset, labels['deadwood'], labels['forest_cover'], json.dumps(aoi) if aoi else None, limit),
+		'SELECT audit.prediction_quality_candidates(%s,%s,%s,0.9)', (dataset, json.dumps(aoi) if aoi else None, limit)
 	).fetchone()[0]
+
+
+def pq_cover(db, label, boxes):
+	return db.execute('SELECT audit.prediction_quality_cover(%s,%s)', (label, json.dumps(boxes))).fetchone()[0]
 
 
 def pq_polygons(db, label, boxes):
 	return db.execute('SELECT audit.prediction_quality_polygons(%s,%s)', (label, json.dumps(boxes))).fetchone()[0]
 
 
-def test_the_check_draws_a_fixed_sample_of_tiles_with_their_predicted_cover(db):
-	dataset, labels = pq_inputs(db)
+def test_the_check_draws_a_fixed_sample_of_tiles(db):
+	dataset, _ = pq_inputs(db)
 	as_worker(db)
-	drawn = candidates(db, dataset, labels, limit=3)
+	drawn = candidates(db, dataset, limit=3)
 	assert (drawn['tiles'], drawn['tiles_inside'], len(drawn['candidates'])) == (5, 5, 3)
 	# the same data draws the same tiles, a larger sample draws more in the same order
-	assert candidates(db, dataset, labels, limit=3) == drawn
-	everything = candidates(db, dataset, labels)['candidates']
+	assert candidates(db, dataset, limit=3) == drawn
+	everything = candidates(db, dataset)['candidates']
 	assert everything[:3] == drawn['candidates'] and len(everything) == 5
-	cover = {c['pixel_window'][0]: (round(c['deadwood'], 6), round(c['forest'], 6), c['aoi']) for c in everything}
-	# deleted polygons and other labels do not count; overlapping polygons are clamped to the tile
-	assert cover == {0: (0.5, 0, 1), 512: (0, 1, 1), 1024: (0, 0, 1), 1536: (0, 0, 1), 2048: (0, 0, 1)}
 	tile = everything[0]
+	assert set(tile) == {'id', 'pixel_window', 'geometry', 'aoi'} and tile['aoi'] == 1
 	assert tile['geometry']['type'] == 'Polygon' and tile['pixel_window'][2] - tile['pixel_window'][0] == 512
+
+
+def test_the_cover_of_a_prediction_is_its_share_of_each_box(db):
+	_, labels = pq_inputs(db)
+	as_worker(db)
+	tiles = [[7.8 + n * TILE_DEG, 48.0, 7.8 + (n + 1) * TILE_DEG, 48.001] for n in range(3)]
+	# deleted polygons and other labels do not count; overlapping polygons are clamped to the box
+	assert [round(c, 6) for c in pq_cover(db, labels['deadwood'], tiles)] == [0.5, 0, 0]
+	assert [round(c, 6) for c in pq_cover(db, labels['forest_cover'], tiles)] == [0, 1, 0]
+	# a box half on the polygon, in the order given
+	straddling = [7.80025, 48.0, 7.80075, 48.001]
+	assert [round(c, 6) for c in pq_cover(db, labels['deadwood'], [tiles[2], straddling])] == [0, 0.5]
+	assert pq_cover(db, labels['deadwood'], []) == []
+	# a big polygon (over 64 KB) is cut once for all its boxes, to the same shares
+	as_admin(db)
+	db.execute(
+		'INSERT INTO public.v2_forest_cover_geometries(label_id,geometry) '
+		'SELECT %s, ST_Segmentize(ST_MakeEnvelope(7.803,48.0,7.8045,48.001,4326), 0.0000002)',
+		(labels['forest_cover'],),
+	)
+	as_worker(db)
+	boxes = [[7.803, 48.0, 7.804, 48.001], [7.804, 48.0, 7.805, 48.001]]
+	assert [round(c, 6) for c in pq_cover(db, labels['forest_cover'], boxes)] == [1, 0.5]
 
 
 def test_the_candidates_lie_inside_the_aoi(db):
 	dataset, labels = pq_inputs(db)
 	as_worker(db)
 	# tiles 0 and 1 lie in the AOI, 30% of tile 2 does: two tiles inside
-	inside = candidates(db, dataset, labels, aoi=polygon(7.8, x1=7.8023))
+	inside = candidates(db, dataset, aoi=polygon(7.8, x1=7.8023))
 	assert inside['tiles_inside'] == 2 and sorted(c['pixel_window'][0] for c in inside['candidates']) == [0, 512]
 	# an AOI smaller than a tile: the tile it touches
-	small = candidates(db, dataset, labels, aoi=polygon(7.8031, 48.0001, 7.8035, 48.0005))
+	small = candidates(db, dataset, aoi=polygon(7.8031, 48.0001, 7.8035, 48.0005))
 	assert small['tiles_inside'] == 1 and [c['pixel_window'][0] for c in small['candidates']] == [1536]
 	assert round(small['candidates'][0]['aoi'], 6) == 0.16
 	# before the embedding stage has finished, the dataset has no tiles to draw
 	as_admin(db)
 	db.execute('UPDATE public.v2_statuses SET is_embeddings_done=false WHERE dataset_id=%s', (dataset,))
 	as_worker(db)
-	assert candidates(db, dataset, labels) == {'tiles': 0, 'tiles_inside': 0, 'candidates': []}
+	assert candidates(db, dataset) == {'tiles': 0, 'tiles_inside': 0, 'candidates': []}
 
 
 def test_the_polygons_of_a_prediction_are_cut_to_each_box(db):
@@ -660,16 +684,19 @@ def test_the_polygons_of_a_prediction_are_cut_to_each_box(db):
 def test_only_the_audit_worker_and_analysts_read_prediction_quality_inputs(db):
 	dataset, labels = pq_inputs(db)
 	box = [[7.8, 48.0, 7.801, 48.001]]
-	sample = 'SELECT audit.prediction_quality_candidates(%s,%s,%s,null,10,0.9)'
-	near = 'SELECT audit.prediction_quality_polygons(%s,%s)'
+	sample = 'SELECT audit.prediction_quality_candidates(%s,null,10,0.9)'
+	reads = ['SELECT audit.prediction_quality_cover(%s,%s)', 'SELECT audit.prediction_quality_polygons(%s,%s)']
 	for user in (create_user(db, can_audit=True), create_operator(db)):
 		act_as(db, user)
-		raises(db, psycopg.errors.InsufficientPrivilege, sample, (dataset, labels['deadwood'], labels['forest_cover']))
-		raises(db, psycopg.errors.InsufficientPrivilege, near, (labels['deadwood'], json.dumps(box)))
+		raises(db, psycopg.errors.InsufficientPrivilege, sample, (dataset,))
+		for read in reads:
+			raises(db, psycopg.errors.InsufficientPrivilege, read, (labels['deadwood'], json.dumps(box)))
 	act_as_anon(db)
-	raises(db, psycopg.errors.InsufficientPrivilege, near, (labels['deadwood'], json.dumps(box)))
+	for read in reads:
+		raises(db, psycopg.errors.InsufficientPrivilege, read, (labels['deadwood'], json.dumps(box)))
 	# the analyst's benchmark runs of the check read the same way
 	as_admin(db)
 	db.execute('SET SESSION AUTHORIZATION team_analyst')
-	assert candidates(db, dataset, labels)['tiles'] == 5
+	assert candidates(db, dataset)['tiles'] == 5
+	assert [round(c, 6) for c in pq_cover(db, labels['deadwood'], box)] == [0.5]
 	assert len(pq_polygons(db, labels['deadwood'], box)[0]) == 1

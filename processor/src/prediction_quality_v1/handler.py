@@ -17,6 +17,7 @@ from shared.labels import read_model_preferences
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
 from shared.models import LabelDataEnum, LabelSourceEnum
+from shared.retry import is_statement_timeout
 from shared.settings import settings
 
 from ..utils.stored_inputs import aoi_key, ortho_sha256, readable_cog, stored_aoi, stored_cog
@@ -42,6 +43,8 @@ CONFIG = {
 		'crop_px': CROP_PX,
 	},
 }
+# boxes per call of the cover and polygon reads to start with (read_boxes)
+BOX_BATCH = 50
 # audit.check_rules of the version: a tile's call is the deciding judge's verdict (by name prefix);
 # the other judges are stored and shown, not counted
 RULES = 'rules-v1'
@@ -152,31 +155,24 @@ def audit_rpc(client):
 
 def read_candidates(rpc, dataset_id: int, aoi: dict | None, label_ids: dict) -> tuple[list[Tile], int, dict]:
 	"""The tiles the sets are picked from: CANDIDATES of the dataset's CLIP tiles inside the AOI,
-	drawn in a fixed order, with their predicted cover (audit.prediction_quality_candidates).
-	Returns them, how many tiles lie inside the AOI, and each one's footprint (GeoJSON) by id."""
+	drawn in a fixed order (audit.prediction_quality_candidates), with their predicted cover
+	(audit.prediction_quality_cover on each footprint). Returns them, how many tiles lie inside
+	the AOI, and each one's footprint (GeoJSON) by id."""
 	found = rpc(
 		'prediction_quality_candidates',
-		{
-			'p_dataset_id': dataset_id,
-			'p_deadwood_label_id': label_ids['deadwood'],
-			'p_forest_label_id': label_ids['forest'],
-			'p_aoi': aoi,
-			'p_limit': CANDIDATES,
-			'p_inside': INSIDE_AOI,
-		},
+		{'p_dataset_id': dataset_id, 'p_aoi': aoi, 'p_limit': CANDIDATES, 'p_inside': INSIDE_AOI},
 	)
 	if not found['tiles']:
 		raise ValueError('dataset has no CLIP tiles; run the embedding stage first')
 	tiles = [
-		Tile(
-			tile_id=c['id'],
-			pixel_window=tuple(c['pixel_window']),
-			bbox_4326=shape(c['geometry']).bounds,
-			deadwood_share=c['deadwood'],
-			forest_share=c['forest'],
-		)
+		Tile(tile_id=c['id'], pixel_window=tuple(c['pixel_window']), bbox_4326=shape(c['geometry']).bounds)
 		for c in found['candidates']
 	]
+	boxes = [t.bbox_4326 for t in tiles]  # the footprints are envelopes
+	deadwood = read_boxes(rpc, 'prediction_quality_cover', label_ids['deadwood'], boxes)
+	forest = read_boxes(rpc, 'prediction_quality_cover', label_ids['forest'], boxes)
+	for t, dw, fc in zip(tiles, deadwood, forest):
+		t.deadwood_share, t.forest_share = dw, fc
 	return tiles, found['tiles_inside'], {c['id']: c['geometry'] for c in found['candidates']}
 
 
@@ -185,9 +181,33 @@ def polygons_near(rpc, label_ids: dict):
 	(audit.prediction_quality_polygons), as shapely."""
 
 	def polygons(layer: str, boxes: list) -> list:
-		found = rpc(
-			'prediction_quality_polygons', {'p_label_id': label_ids[layer], 'p_boxes': [list(b) for b in boxes]}
-		)
+		found = read_boxes(rpc, 'prediction_quality_polygons', label_ids[layer], boxes)
 		return [[shape(g) for g in cut] for cut in found]
 
 	return polygons
+
+
+def read_boxes(rpc, function: str, label_id: int, boxes: list, size: int = BOX_BATCH) -> list:
+	"""function(p_label_id, p_boxes) for every box, one result per box, in calls of at most
+	size boxes. Each call must end within the login's statement timeout (8 s in production),
+	and one box of a large prediction can take a second: a call that times out is made again
+	with half the boxes, and the calls after it keep the smaller size. A single box that
+	still times out fails the run."""
+	found: list = []
+	while len(found) < len(boxes):
+		part = [list(b) for b in boxes[len(found) : len(found) + size]]
+		try:
+			result = rpc(function, {'p_label_id': label_id, 'p_boxes': part})
+		except Exception as e:
+			if not is_statement_timeout(e):
+				raise
+			if size == 1:
+				raise RuntimeError(
+					f'audit.{function} of label {label_id} exceeds the statement timeout on a single box {part[0]}'
+				) from e
+			size //= 2
+			continue
+		if len(result) != len(part):
+			raise RuntimeError(f'audit.{function} answered {len(result)} boxes of {len(part)}')
+		found += result
+	return found
