@@ -11,21 +11,11 @@ const AUDIT_DATASET_FIELDS = [
 	"aquisition_year",
 	"aquisition_month",
 	"aquisition_day",
-	"is_upload_done",
-	"is_odm_done",
-	"is_ortho_done",
-	"is_cog_done",
-	"is_thumbnail_done",
-	"is_deadwood_done",
-	"is_forest_cover_done",
-	"is_metadata_done",
-	"is_audited",
 	"admin_level_1",
 	"admin_level_2",
 	"admin_level_3",
 	"biome_name",
 	"has_ml_tiles",
-	"phenology_probability",
 ] as const satisfies readonly (keyof IDataset)[];
 
 const AUDIT_DATASET_SELECT = AUDIT_DATASET_FIELDS.join(",");
@@ -33,11 +23,12 @@ const AUDIT_DATASET_SELECT = AUDIT_DATASET_FIELDS.join(",");
 export type AuditDataset = Pick<IDataset, (typeof AUDIT_DATASET_FIELDS)[number]>;
 
 /**
- * Lightweight dataset rows for audit queue tabs and filters.
+ * Lightweight dataset rows for the Audit Review list: where and when, the rest comes from
+ * audit.dataset_outcomes.
  *
  * Keep this projection explicit: v2_full_dataset_view contains derived columns
- * that can be expensive or large, and the queue loads every auditor-visible row.
- * Audit detail routes fetch their single full dataset separately.
+ * that can be expensive or large, and the list loads every auditor-visible row.
+ * Review detail routes fetch their single full dataset separately.
  */
 export function useAuditDatasets() {
 	const { status, user } = useAuth();

@@ -167,8 +167,9 @@ function AppWithTracking() {
           <Route path="dataset" element={<Dataset />} />
           <Route path="dataset/:id" element={<DatasetDetails />} />
           <Route path="dataset-audit" element={<DatasetAudit />} />
-          <Route path="dataset-audit/benchmark/:check" element={<BenchmarkLabeling />} />
+          <Route path="dataset-audit/benchmark/:benchmark" element={<BenchmarkLabeling />} />
           <Route path="dataset-audit/:id" element={<DatasetAudit />} />
+          <Route path="dataset-audit/:id/edits-flags" element={<DatasetAudit page="edits-flags" />} />
           {/* New route for Reference Patch Editor */}
           <Route
             path="dataset-audit/:id/reference-patches"

@@ -4,12 +4,8 @@ Queue the acquisition-date stage (doy_estimation_v1) for datasets that need it.
 
 The stage reads the stored COG, so it runs on its own (no geotiff) and is
 queued at the lowest priority behind real uploads. A rerun replaces the
-estimate and the stage's audit suggestions. A date decision the new estimate
-contradicts is deactivated (kept, with date and reason) and the dataset shows
-up in `audit_review_queue`; decisions it agrees with stay active.
-To re-check every decision made before a date (e.g. after a model upgrade),
-run `select public.supersede_acquisition_date_decisions_before('<date>')` as
-service role before queueing.
+estimate; the Audit Review computes the date output (replace yes or no, new
+date; audit.acquisition_date_output_v1) from it and never changes the dataset.
 
 Selection (default --stale): every non-archived dataset with a COG whose
 estimate is missing, from another model version, or assessed against a date

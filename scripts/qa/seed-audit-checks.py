@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Seed one local dataset with automated audit check results for the audit review page
-(docs/qa/playbooks/auditor-check-review.md): a poor georeferencing call with match lines,
-a dataset evaluation (keep, fix) with four crops, and prediction quality on ten crops,
-with stored crop images and one answer of another reviewer.
+"""Seed one local dataset with automated audit check results for the Audit Review page
+(docs/qa/playbooks/auditor-check-review.md): a georeferencing check that needs review
+(one qualified reference, 19.8 m) with match lines, a dataset evaluation the deciding model
+could not tell (Luna excludes; COG issue) with four tiles, and prediction quality on ten tiles
+where the judges disagree on one deadwood tile, with stored tile images and one answer of
+another reviewer. The runs are stored through audit.finish_run, as the audit worker does.
 
 Local stack only: it refuses a database that is not on 127.0.0.1 or localhost.
 Usage, after scripts/qa/env.sh up and reset:
@@ -105,96 +107,104 @@ metadata = {'references': {
 	'esri': {'group': 'esri', 'zoom': 19, 'capture_date': None,
 	         'viewer': {'kind': 'xyz', 'url': 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', 'max_zoom': 19, 'attribution': 'Esri'}},
 }}
-# The current-run pointer only follows an active version: register and activate it first.
-psql("""
-insert into audit.check_versions (check_key, version, config, is_active)
-values ('georef', 'georef-rules-v2_romav2.0.1', '{"rules_version": "georef-rules-v2", "model_version": "romav2.0.1"}', true)
-on conflict (check_key, version) do update set is_active = true""")
 psql(f"""
 insert into public.v2_georef_checks (dataset_id, model_version, rules_version, decision, evidence_level, reason, p90_m,
 	evidence_groups, support, edge_support, used_aoi, reference_evidence, reference_errors, metadata)
 values ({ds}, 'romav2.0.1', 'georef-rules-v2', 'poor', 'qualified', 'single_reference', 19.8, 1, 0.9, 0.8, false,
-	'{json.dumps(evidence)}', '{{"dop_bw": "too_few_matches"}}', '{json.dumps(metadata)}');
-select internal.store_georef_audit_run({ds}, 'upload');
-""")
+	'{json.dumps(evidence)}', '{{"dop_bw": "too_few_matches"}}', '{json.dumps(metadata)}')""")
 
-# --- check versions -------------------------------------------------------------------
-def version(check, name, config=None):
+# --- check versions, with their rules, and runs ----------------------------------------
+def version(check, name, rules, config=None):
+	"""The check's active version and rules; a stack seeded with an older version name switches over."""
 	conf = json.dumps(config or {})
-	# one version of a check is active: a stack seeded with an older version name switches over
 	psql(f"update audit.check_versions set is_active = false where check_key = '{check}' and version <> '{name}' and is_active")
-	return int(psql(f"""insert into audit.check_versions (check_key, version, config, is_active) values ('{check}', '{name}', '{conf}', true)
+	vid = int(psql(f"""insert into audit.check_versions (check_key, version, config, is_active, activated_at)
+		values ('{check}', '{name}', '{conf}', true, now())
 		on conflict (check_key, version) do update set is_active = true returning id"""))
+	psql(f"""insert into audit.check_rules (version_id, name, config, is_active, activated_at)
+		values ({vid}, 'rules-v1', '{json.dumps(rules)}', true, now())
+		on conflict (version_id, name) do update set is_active = true""")
+	return vid
 
 
 def run(check, vid):
-	rid = int(psql(f"""insert into audit.runs (check_key, check_version_id, dataset_id, queue, status, inputs, started_at, finished_at)
-		values ('{check}', {vid}, {ds}, 'upload', 'done', '{{"ortho_sha256": "{SHA}"}}', now(), now()) returning id"""))
-	psql(f"insert into audit.current_runs (dataset_id, check_key, run_id) values ({ds}, '{check}', {rid})")
-	return rid
+	return int(psql(f"""insert into audit.runs (check_key, version_id, dataset_id, queue, status, started_at)
+		values ('{check}', {vid}, {ds}, 'upload', 'running', now()) returning id"""))
 
 
-def crop(sets, col, row, size):
+def finish(rid, result):
+	psql(f"select audit.finish_run({rid}, '{json.dumps(result).replace(chr(39), chr(39) * 2)}'::jsonb)")
+
+
+def tile(col, row, size):
 	x0 = X0 + col * SIZE_M / PX
 	y1 = Y1 - row * SIZE_M / PX
 	x1, y0 = x0 + size * SIZE_M / PX, y1 - size * SIZE_M / PX
-	return int(psql(f"""insert into audit.crops (dataset_id, ortho_sha256, crop_sets, pixel_x0, pixel_y0, pixel_x1, pixel_y1, geometry, mpp, size_px)
-		values ({ds}, '{SHA}', array{sets}::text[], {col}, {row}, {col + size}, {row + size}, {envelope_sql(x0, y0, x1, y1)}, 0.05, 1024) returning id"""))
+	geometry = json.loads(psql(f"select st_asgeojson({envelope_sql(x0, y0, x1, y1)})"))
+	return {'pixel_window': [col, row, col + size, row + size], 'geometry': geometry, 'mpp': 0.05, 'size_px': 1024}
 
 
-def image(crop_id, kind, col, row, size, label_id=None, bands=(1, 2, 3)):
-	rel = f"audit/{ds}/{SHA[:16]}/" + (f"crop-{crop_id}/{kind}{'-' + str(label_id) if label_id else ''}.jpg" if crop_id else f"{kind}.jpg")
+def image(check, rid, kind, col, row, size, tile_index=None, label_id=None, bands=(1, 2, 3)):
+	folder = f"audit/{check}/{ds}/run-{rid}/" + (f"tile-{col}-{row}/" if tile_index else '')
+	rel = folder + f"{kind}{'-' + str(label_id) if label_id else ''}.jpg"
 	jpeg(os.path.join(DATA, rel), col, row, size, bands)
-	psql(f"""insert into audit.images (dataset_id, ortho_sha256, crop_id, label_id, kind, storage_path, content_type, width, height)
-		values ({ds}, '{SHA}', {crop_id or 'null'}, {label_id or 'null'}, '{kind}', '{rel}', 'image/jpeg', 512, 512)""")
+	return {'tile_index': tile_index, 'prediction_label_id': label_id, 'kind': kind, 'storage_path': rel,
+	        'content_type': 'image/jpeg', 'width': 512, 'height': 512}
 
 
-def assess(check, rid, layer, kind, model, verdict, crop_id=None, label_id=None, modes=None, details=None, likelihood=None):
-	psql(f"""insert into audit.assessments (check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, model, prompt_version, verdict, major_likelihood, modes, details)
-		values ('{check}', {ds}, {crop_id or 'null'}, {rid}, '{layer}', {label_id or 'null'}, '{kind}', '{model}', 'v1', '{verdict}',
-		{'null' if likelihood is None else likelihood}, '{json.dumps(modes or {})}', '{json.dumps(details or {})}')""")
+# --- dataset evaluation: Haiku cannot tell (unsure), a COG issue, four native tiles -----
+ev_vid = version('dataset_evaluation', 'v3-qa', {'decider': 'haiku', 'band_major_at': 90})
+ev = run('dataset_evaluation', ev_vid)
+spots = [(600, 700), (2600, 500), (900, 2700), (2900, 2900)]
+flags = {'cog_issue': 80, 'thumbnail_issue': 10, 'reprocess': 70, 'blurry': 5}
+finish(ev, {
+	'inputs': {'ortho_sha256': SHA},
+	'evidence': {'empty': False, 'band_check': {'likelihood': 0, 'findings': []}, 'coverage': {'tiles': 4, 'tile_picker': 'kmeans-inside-v1'}},
+	'tiles': [tile(c, r, 512) for c, r in spots],
+	'images': [image('dataset_evaluation', ev, 'overview', 0, 0, PX)]
+	+ [image('dataset_evaluation', ev, 'raw', c, r, 512, n) for n, (c, r) in enumerate(spots, start=1)],
+	'dataset_judgements': [
+		{'judge': 'luna-medium', 'verdict': 'major', 'likelihood': 70, 'cog_issue': True, 'thumbnail_issue': False,
+		 'exclude_reason': 'artifacts', 'summary': 'RGB forest scene, sharp; black edge band in the COG', 'raw': {'flags': flags}},
+		{'judge': 'haiku-5.5', 'verdict': 'not_assessable', 'likelihood': 20, 'cog_issue': True, 'thumbnail_issue': False,
+		 'exclude_reason': None, 'summary': 'Sharp RGB forest image with a COG edge artifact', 'raw': {'flags': flags}},
+	],
+})
 
-
-# --- dataset evaluation: keep, fix (COG issue), four native crops ---------------------
-ev = run('dataset_evaluation', version('dataset_evaluation', 'v1-qa'))
-image(None, 'overview', 0, 0, PX)
-for i, (c, r) in enumerate([(600, 700), (2600, 500), (900, 2700), (2900, 2900)]):
-	cid = crop(['evaluation'], c, r, 512)
-	image(cid, 'raw', c, r, 512)
-modes = {'cog_issue': {'likelihood': 80}, 'thumbnail_issue': {'likelihood': 10}, 'blurry': {'likelihood': 5}}
-assess('dataset_evaluation', ev, 'image', 'rule', 'dataset-evaluation-rule', 'minor', modes=modes,
-       details={'reason': None, 'why': ['fix_flagged'], 'fix_flags': ['cog_issue'], 'models': {'luna': 'minor', 'haiku': 'minor'}})
-assess('dataset_evaluation', ev, 'image', 'model', 'luna', 'minor', modes=modes, details={'summary': 'RGB forest scene, sharp; black edge band in the COG'})
-assess('dataset_evaluation', ev, 'image', 'model', 'haiku', 'minor', modes=modes, details={'summary': 'Sharp RGB forest image with a COG edge artifact'})
-
-# --- prediction quality: deadwood major on 3 of 10 crops ------------------------------
-# the rule's cut-offs, as the version stores them: a crop is major at a mean likelihood of 52 (deadwood).
-# A version's config never changes, so a seed with other cut-offs needs another version name.
-pq = run('prediction_quality', version('prediction_quality', 'pq-v1-qa-rule', {'rule_config': {'crop_major_cut': {'deadwood': 52, 'forest': 69}, 'min_major_crops': 2}}))
+# --- prediction quality: deadwood major on tiles 3 and 4; on tile 8 Luna says major, Haiku decides ok ---
+pq = run('prediction_quality', version('prediction_quality', 'pq-v2-qa', {'decider': 'haiku'}))
 DW, FC = 9001, 9002
 major = {3, 4, 8}
-for n in range(10):
-	c, r = 300 + (n % 5) * 720, 900 + (n // 5) * 1400
-	cid = crop(['exclude'], c, r, 640)
-	image(cid, 'raw', c, r, 640)
-	image(cid, 'deadwood_overlay', c, r, 640, DW, (1, 1, 3))
-	image(cid, 'forest_cover_overlay', c, r, 640, FC, (2, 2, 2))
-	for judge in ('luna', 'haiku'):
-		assess('prediction_quality', pq, 'image', 'model', judge, 'ok', crop_id=cid, modes={'m0_not_assessable': {'likelihood': 0}})
-		# what the model saw: error types with their share of the crop, and its own words
-		dw_modes = {'m1_dead_missed': {'likelihood': 90, 'area_pct': 12}, 'm4_dw_on_lying_wood': {'likelihood': 60, 'area_pct': 3}} if n + 1 in major else {}
-		dw_details = {'errors': ['Several dead crowns in the upper half are not marked blue.'], 'area_pct': 15} if n + 1 in major else {'errors': []}
-		assess('prediction_quality', pq, 'deadwood', 'model', judge, 'major' if n + 1 in major else 'ok', crop_id=cid, label_id=DW,
-		       likelihood=90 if n + 1 in major else 5, modes=dw_modes, details=dw_details)
-		assess('prediction_quality', pq, 'forest_cover', 'model', judge, 'minor' if n == 6 else 'ok', crop_id=cid, label_id=FC,
-		       likelihood=30 if n == 6 else 5)
-assess('prediction_quality', pq, 'deadwood', 'rule', 'pq-rule', 'major', label_id=DW,
-       details={'rule': 'pq-rule-v1', 'verdict': 'bad', 'major_crops': 3, 'judged_crops': 10})
-assess('prediction_quality', pq, 'forest_cover', 'rule', 'pq-rule', 'ok', label_id=FC,
-       details={'rule': 'pq-rule-v1', 'verdict': 'ok', 'major_crops': 0, 'judged_crops': 10})
+tiles, images, judgements = [], [], []
+for n in range(1, 11):
+	c, r = 300 + ((n - 1) % 5) * 720, 900 + ((n - 1) // 5) * 1400
+	tiles.append(tile(c, r, 640))
+	images.append(image('prediction_quality', pq, 'raw', c, r, 640, n))
+	images.append(image('prediction_quality', pq, 'deadwood_overlay', c, r, 640, n, DW, (1, 1, 3)))
+	images.append(image('prediction_quality', pq, 'forest_cover_overlay', c, r, 640, n, FC, (2, 2, 2)))
+	for judge in ('luna-medium', 'haiku-5.5'):
+		disagrees = n == 8 and judge == 'haiku-5.5'
+		# what the model saw: error types with their share of the tile, and its own words
+		bad = n in major and not disagrees
+		judgements.append({
+			'tile_index': n, 'layer': 'deadwood', 'judge': judge, 'verdict': 'major' if bad else 'ok',
+			'likelihood': 90 if bad else 20 if disagrees else 5,
+			'problems': {'m1_dead_missed': {'likelihood': 90, 'area_pct': 12}, 'm4_dw_on_lying_wood': {'likelihood': 60, 'area_pct': 3}} if bad else {},
+			'summary': None, 'raw': {'errors': ['Several dead crowns in the upper half are not marked blue.'] if bad else []},
+		})
+		judgements.append({
+			'tile_index': n, 'layer': 'forest_cover', 'judge': judge, 'verdict': 'minor' if n == 7 else 'ok',
+			'likelihood': 30 if n == 7 else 5, 'problems': {}, 'summary': None, 'raw': {'errors': []},
+		})
+finish(pq, {
+	'inputs': {'ortho_sha256': SHA, 'aoi': None, 'label_ids': {'deadwood': DW, 'forest_cover': FC}},
+	'evidence': {'coverage': {'mode': 'sampled', 'tiles_total': 10, 'tiles': 10, 'exclude_set': 10, 'training_set': 0}},
+	'tiles': tiles,
+	'images': images,
+	'tile_judgements': judgements,
+})
 
-# another reviewer already answered georef (hidden until the auditor answers)
-geo_run = psql(f"select run_id from audit.current_runs where dataset_id = {ds} and check_key = 'georef'")
-psql(f"""insert into audit.assessments (check_key, dataset_id, run_id, layer, assessor_kind, assessor_user_id, verdict)
-	values ('georef', {ds}, {geo_run}, 'georef', 'person', '{OWNER}', 'major')""")
+# another reviewer already answered georef: not passed
+psql(f"""insert into audit.dataset_human_reviews (dataset_id, check_key, georef_status, reviewed_by)
+	values ({ds}, 'georef', 'not_passed', '{OWNER}')""")
 print(ds)

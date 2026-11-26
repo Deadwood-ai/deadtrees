@@ -1,127 +1,44 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useDatasetThumbnailUrl } from "../../hooks/useDatasetAccess";
 import { Form, message, Button, Drawer } from "antd";
+import { useDatasetThumbnailUrl } from "../../hooks/useDatasetAccess";
 import { IDataset } from "../../types/dataset";
-import { DatasetDetailsMapProvider, SATELLITE_MAP_STYLE } from "../../hooks/useDatasetDetailsMapProvider";
+import { AUDIT_MAP_START, DatasetDetailsMapProvider } from "../../hooks/useDatasetDetailsMapProvider";
 import { useAuditDetailState } from "./useAuditDetailState";
-import { Settings } from "../../config";
-import { DatasetSeasonInfo } from "../../hooks/useSeasonPrompt";
-import EditingSidebar from "../DatasetDetailsMap/EditingSidebar";
-import { supabase } from "../../hooks/useSupabase";
-import { useAuth } from "../../hooks/useAuthProvider";
-
-// Sub-components
+import { useOrthoDownload } from "./useOrthoDownload";
 import AuditHeader from "./AuditHeader";
 import { MapPageSkeleton } from "../PageSkeletons";
-import { AuditFooterFormItem } from "./AuditFooter";
-import { UserFlagsCard } from "./AuditStepCards";
-import { AuditReviewNotice } from "./AuditReviewNotice";
+import AuditFooter from "./AuditFooter";
 import AuditSections from "./checks/AuditSections";
 import { INITIAL_CHECK_VIEW, STEP_ORDER, nextStep, openStep, type IAuditCheckView } from "./checks/auditCheckView";
-import { AUDIT_SECTIONS, auditSection, sectionOfField, type AuditSectionId } from "../../utils/auditChecks";
+import { AUDIT_SECTIONS, auditSection, type AuditSectionId } from "../../utils/auditChecks";
 import { AuditLockBlocked, AuditLockLostNotice, AuditOpenElsewhere } from "./AuditLockNotices";
 import AuditMapWithControls, { AuditMapWithControlsHandle } from "./AuditMapWithControls";
 import { MAP_AUDIT_SIDEBAR_WIDTH_CLASS, MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
-import { resolveDownloadUrl } from "../../utils/downloadUrl";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { useAnalytics } from "../../hooks/useAnalytics";
 
 interface DatasetAuditDetailProps {
 	dataset: IDataset;
 }
 
-interface DownloadApiResponse {
-	status?: string;
-	job_id?: string;
-	download_path?: string;
-	message?: string;
-	detail?: string;
-}
-
 /**
- * DatasetAuditDetail - Main audit detail view
- * 
- * - AuditSections: the derived decision and the checks in order, in the sidebar
- * - AuditMapWithControls: map, layer controls, correction review and the open check's map mode
- * - useAuditDetailState: the saved audit, lease and navigation
+ * The Audit Review of one dataset:
+ * - AuditSections: what still needs a person and the seven steps, in the sidebar
+ * - AuditMapWithControls: map, layer controls and the open step's map mode
+ * - useAuditDetailState: the results, the reviewer's draft, the lease and Save
+ * User reports and suggested edits are not part of the audit: they have the Edits & flags page.
  */
 export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps) {
-	const { session } = useAuth();
 	const isMobile = useIsMobile();
-	const { track } = useAnalytics("audit");
-	// Map ref for map controls (zoom, flash, refresh)
 	const mapRef = useRef<AuditMapWithControlsHandle>(null);
-
-	// Editing state (tracked from child map component)
-	const [isPolygonEditing, setIsPolygonEditing] = useState(false);
-	const [editingLayerType, setEditingLayerType] = useState<"deadwood" | "forest_cover" | null>(null);
 	const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-	// Handle editing state changes from map component
-	const handleEditingStateChange = (isEditing: boolean, layerType: "deadwood" | "forest_cover" | null) => {
-		setIsPolygonEditing(isEditing);
-		setEditingLayerType(layerType);
-	};
-
-	// Use the custom hook for all state and logic
-	const {
-		form,
-		handleSubmit,
-		handleSaveAndNext,
-		handleCancel,
-		handleMarkReviewedAndNext,
-		isLoading,
-		isSaving,
-		isPending,
-		isReviewed,
-		auditLockError,
-		isLockingAudit,
-		auditLockLostMessage,
-		auditLeaseId,
-		auditOpenElsewhereMessage,
-		continueAuditHere,
-		navigateToNext,
-		auditData,
-		flags,
-		isFlagsLoading,
-		orthoMetadata,
-		isOrthoLoading,
-		phenologyData,
-		isPhenologyLoading,
-		acquisitionDateEstimate,
-		georefCheck,
-		acquisitionDateDecisions,
-		auditSuggestions,
-		auditReviewItems,
-		auditChecks,
-		auditChecksFailed,
-		retryAuditChecks,
-		prefilledFields,
-		updateFlagStatus,
-		isUpdatingFlag,
-		nextDatasetId,
-		currentDatasetIndex,
-		totalCount,
-		isMarkingReviewed,
-		hasAOI,
-		handleAOIChange,
-		handleSaveAOI,
-		aoiToolbarState,
-		setAoiToolbarState,
-		isAOIDirty,
-		isSavingAOI,
-		isDownloading,
-		startDownload,
-		finishDownload,
-		currentDownloadId,
-		copyPromptWithImage,
-	} = useAuditDetailState({ dataset });
-
-	// Generate thumbnail URL
+	const state = useAuditDetailState({ dataset });
+	const { form, aoi, auditChecks, auditLeaseId, auditLockLostMessage } = state;
+	const startDownload = useOrthoDownload(state);
 	const thumbnailUrl = useDatasetThumbnailUrl(dataset);
 
-	// The open section; ?section= opens one (links from the check queue)
+	// The open step; ?section= opens one
 	const [searchParams] = useSearchParams();
 	const requestedSection = searchParams.get("section");
 	const initialView = useCallback(
@@ -136,305 +53,89 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 	useEffect(() => setCheckView(initialView()), [dataset.id, initialView]);
 	const openSection = checkView.section ? auditSection(checkView.section) : null;
 
-	// Handle season prompt copy
-	const handleCopySeasonPrompt = () => {
-		if (!thumbnailUrl) {
-			message.warning("No thumbnail available for prompt");
-			return;
-		}
-		const seasonInfo: DatasetSeasonInfo = {
-			country: dataset.admin_level_1 || undefined,
-			admin_level_2: dataset.admin_level_2 || undefined,
-			admin_level_3: dataset.admin_level_3 || undefined,
-			biome_name: dataset.biome_name || undefined,
-			acquisition_date: dataset.aquisition_year
-				? `${dataset.aquisition_year}-${dataset.aquisition_month || "01"}-${dataset.aquisition_day || "01"}`
-				: undefined,
-		};
-		copyPromptWithImage(seasonInfo, thumbnailUrl);
-	};
-
-	// Handle orthophoto download
-	const handleStartDownload = (ds: IDataset) => {
-		if (!session) {
-			message.info("Please log in to download datasets.");
-			return;
-		}
-
-		if (ds.data_access === "viewonly") {
-			message.warning("This is a view-only dataset. Orthophoto download is restricted.");
-			return;
-		}
-
-		if (isDownloading) {
-			if (currentDownloadId !== `${ds.id}-ortho`) {
-				message.info("A download is already in progress. Please wait.");
-			}
-			return;
-		}
-
-		const downloadStarted = startDownload(`${ds.id}-ortho`);
-		if (!downloadStarted) return;
-		track("dataset_download_started", {
-			dataset_id: ds.id,
-			download_type: "orthophoto",
-		});
-
-		const baseUrl = `${Settings.API_URL}/download/datasets/${ds.id}/dataset.zip`;
-
-		const downloadMsg = message.loading({
-			content: "Preparing orthophoto for download...",
-			duration: 0,
-		});
-
-		const parseJsonResponse = async (response: Response): Promise<DownloadApiResponse> => {
-			let data: unknown = null;
-			try {
-				data = await response.json();
-			} catch {
-				if (!response.ok) {
-					throw new Error(`Request failed (${response.status})`);
-				}
-				throw new Error("Invalid API response");
-			}
-
-			if (!response.ok) {
-				const parsed = (data && typeof data === "object" ? data : {}) as DownloadApiResponse;
-				const detail = parsed.detail || parsed.message || `Request failed (${response.status})`;
-				throw new Error(detail);
-			}
-
-			return (data && typeof data === "object" ? data : {}) as DownloadApiResponse;
-		};
-
-		supabase.auth
-			.getSession()
-			.then(({ data: authData }) => {
-				const accessToken = authData.session?.access_token;
-				if (!accessToken) {
-					throw new Error("Authentication required for download");
-				}
-				const headers = { Authorization: `Bearer ${accessToken}` };
-				return fetch(baseUrl, { headers })
-					.then(parseJsonResponse)
-					.then((data) => ({ data, headers }));
-			})
-			.then(({ data, headers }) => {
-				const jobId = data.job_id;
-				if (!jobId) {
-					throw new Error("Missing job ID in download response");
-				}
-				const downloadEndpoint = `${Settings.API_URL}/download/datasets/${jobId}/download`;
-
-				const checkStatus = () => {
-					fetch(`${Settings.API_URL}/download/datasets/${jobId}/status`, { headers })
-						.then(parseJsonResponse)
-						.then((statusData) => {
-							if (statusData.status === "completed") {
-								const downloadUrl = resolveDownloadUrl(statusData.download_path, downloadEndpoint);
-								if (!downloadUrl) {
-									throw new Error("Missing download URL in status response");
-								}
-
-								downloadMsg();
-								track("dataset_download_completed", {
-									dataset_id: ds.id,
-									download_type: "orthophoto",
-								});
-								window.location.href = downloadUrl;
-								message.success("Download started!");
-								finishDownload();
-							} else if (statusData.status === "failed") {
-								downloadMsg();
-								track("dataset_download_failed", {
-									dataset_id: ds.id,
-									download_type: "orthophoto",
-									failure_reason: statusData.message || "preparation_failed",
-								});
-								message.error(`Download failed: ${statusData.message || "Unknown error"}`);
-								finishDownload();
-							} else {
-								setTimeout(checkStatus, 2000);
-							}
-						})
-						.catch(() => {
-							downloadMsg();
-							track("dataset_download_failed", {
-								dataset_id: ds.id,
-								download_type: "orthophoto",
-								failure_reason: "status_check_failed",
-							});
-							message.error("Failed to check download status");
-							finishDownload();
-						});
-				};
-
-				checkStatus();
-			})
-			.catch((error: Error) => {
-				downloadMsg();
-				track("dataset_download_failed", {
-					dataset_id: ds.id,
-					download_type: "orthophoto",
-					failure_reason: error?.message || "start_failed",
-				});
-				message.error(error?.message || "Failed to initiate download");
-				finishDownload();
-			});
-	};
-
-	useEffect(() => {
-		track("correction_review_started", {
-			dataset_id: dataset.id,
-			review_scope: "dataset",
-		});
-	}, [dataset.id, track]);
-
-	// Show loading state
-	if (isLoading) {
-		return <MapPageSkeleton label={isLockingAudit ? "Securing the audit lock" : "Loading audit"} />;
+	if (state.isLoading) {
+		return <MapPageSkeleton label={state.isLockingAudit ? "Securing the review lock" : "Loading the review"} />;
 	}
 
-	if (auditLockError) {
+	if (state.auditLockError) {
 		return (
-			<AuditLockBlocked message={auditLockError}>
-				<div className="text-sm text-gray-500">Redirecting to audit list...</div>
+			<AuditLockBlocked message={state.auditLockError}>
+				<div className="text-sm text-gray-500">Redirecting to the Audit Review list...</div>
 			</AuditLockBlocked>
 		);
 	}
 
-	if (auditOpenElsewhereMessage) {
-		return (
-			<AuditOpenElsewhere
-				message={auditOpenElsewhereMessage}
-				onBack={handleCancel}
-				onContinueHere={continueAuditHere}
-			/>
-		);
+	if (state.auditOpenElsewhereMessage) {
+		return <AuditOpenElsewhere message={state.auditOpenElsewhereMessage} onBack={state.handleCancel} onContinueHere={state.continueAuditHere} />;
 	}
 
 	const sidebarContent = (
 		<>
-			{/* Header - hidden when editing */}
-			{!isPolygonEditing && (
-				<AuditHeader dataset={dataset} auditData={auditData} onCancel={handleCancel} />
-			)}
+			<AuditHeader title="Audit Review" dataset={dataset} onCancel={state.handleCancel} />
 
-			{/* Scrollable Content */}
 			<div className="flex-1 overflow-y-auto p-2">
-				{isPolygonEditing && editingLayerType ? (
-					<EditingSidebar layerType={editingLayerType} />
-				) : (
-					<Form
-						form={form}
-						layout="vertical"
-						onFinish={handleSubmit}
-						onFinishFailed={({ errorFields }) => {
-							// closed sections hide their fields: open the first one with a missing answer
-							const missing = errorFields.map((f) => sectionOfField(String(f.name[0]))).find((id) => id !== null);
-							if (missing) updateCheckView({ section: missing });
-							message.error(errorFields[0]?.errors[0] ?? "Some answers are missing");
+				<Form
+					form={form}
+					layout="vertical"
+					onFinish={state.handleSubmit}
+					onFinishFailed={({ errorFields }) => message.error(errorFields[0]?.errors[0] ?? "Some answers are missing")}
+					disabled={!!auditLockLostMessage || !auditLeaseId}
+					size="small"
+				>
+					<AuditSections
+						dataset={dataset}
+						checks={auditChecks}
+						checksFailed={state.auditChecksFailed}
+						onRetryChecks={state.retryChecks}
+						reviews={state.auditReviews}
+						result={state.result}
+						resultFailed={state.resultFailed}
+						hasAOI={aoi.hasAOI && !aoi.isDirty}
+						view={checkView}
+						setView={updateCheckView}
+						panels={{
+							cog: {
+								dataset,
+								cog: state.cogMetadata,
+								isLoading: state.isCogLoading,
+								isDownloading: state.isDownloading,
+								currentDownloadId: state.currentDownloadId,
+								onStartDownload: startDownload,
+							},
+							thumbnailUrl,
+							aoi: {
+								aoiToolbarState: aoi.toolbarState,
+								mapRef,
+								isDirty: aoi.isDirty,
+								isSaving: aoi.isSaving,
+								onSaveAOI: aoi.handleSave,
+							},
+							georefCheck: state.georefCheck,
+							dateEstimate: state.dateEstimate,
 						}}
-						disabled={isLoading || !!auditLockLostMessage}
-						size="small"
-						validateTrigger={["onChange", "onBlur"]}
-					>
-						<AuditReviewNotice items={auditReviewItems} />
+					/>
 
-						<AuditSections
-							datasetId={dataset.id}
-							checks={auditChecks}
-							checksFailed={auditChecksFailed}
-							onRetryChecks={() => void retryAuditChecks()}
-							hasAOI={hasAOI}
-							view={checkView}
-							setView={updateCheckView}
-							disabled={!auditLeaseId}
-							userReports={
-								<UserFlagsCard
-									flags={flags}
-									isFlagsLoading={isFlagsLoading}
-									isUpdatingFlag={isUpdatingFlag}
-									datasetId={dataset.id}
-									onUpdateFlag={updateFlagStatus}
-								/>
-							}
-							prefill={{ suggestions: auditSuggestions, prefilledFields }}
-							panels={{
-								georef: {
-									check: georefCheck,
-									suggestions: auditSuggestions,
-									prefilledFields,
-									reviewItems: auditReviewItems,
-									saved: auditData as Record<string, unknown> | null | undefined,
-								},
-								date: {
-									dataset,
-									estimate: acquisitionDateEstimate,
-									suggestions: auditSuggestions,
-									prefilledFields,
-									decisions: acquisitionDateDecisions,
-									reviewItems: auditReviewItems,
-								},
-								phenology: {
-									dataset,
-									phenologyData,
-									isPhenologyLoading,
-									onCopySeasonPrompt: handleCopySeasonPrompt,
-								},
-								aoi: {
-									aoiToolbarState,
-									mapRef,
-									isDirty: isAOIDirty,
-									isSaving: isSavingAOI,
-									onSaveAOI: handleSaveAOI,
-								},
-								file: {
-									dataset,
-									orthoMetadata,
-									isOrthoLoading,
-									isDownloading,
-									currentDownloadId,
-									onStartDownload: handleStartDownload,
-								},
-								thumbnailUrl,
-							}}
-						/>
-
-						{/* Footer Actions */}
-						<div className="sticky bottom-0 z-10 -mx-2 border-t border-slate-200 bg-white p-3">
-							{auditLockLostMessage ? (
-								<AuditLockLostNotice message={auditLockLostMessage} onBack={handleCancel} />
-							) : (
-								<AuditFooterFormItem
-									hasAOI={hasAOI}
-									isPending={isPending}
-									isReviewed={isReviewed}
-									reviewedByEmail={auditData?.reviewed_by_email}
-									nextDatasetId={nextDatasetId}
-									currentDatasetIndex={currentDatasetIndex}
-									totalCount={totalCount}
-									isSaving={isSaving}
-									navigateToNext={navigateToNext}
-									isMarkingReviewed={isMarkingReviewed}
-									isAOIDirty={isAOIDirty}
-									isSavingAOI={isSavingAOI}
-									onCancel={handleCancel}
-									onSave={() => form.submit()}
-									onSaveAndNext={handleSaveAndNext}
-									onMarkReviewedAndNext={handleMarkReviewedAndNext}
-								/>
-							)}
-						</div>
-					</Form>
-				)}
+					<div className="sticky bottom-0 z-10 -mx-2 border-t border-slate-200 bg-white p-3">
+						{auditLockLostMessage ? (
+							<AuditLockLostNotice message={auditLockLostMessage} onBack={state.handleCancel} />
+						) : (
+							<AuditFooter
+								nextDatasetId={state.nextDatasetId}
+								isSaving={state.isSaving}
+								isAOIBusy={aoi.isDirty || aoi.isSaving}
+								onCancel={state.handleCancel}
+								onSave={() => form.submit()}
+								onSaveAndNext={state.handleSaveAndNext}
+							/>
+						)}
+					</div>
+				</Form>
 			</div>
 		</>
 	);
 
 	return (
 		<div className="relative flex h-screen w-full overflow-hidden bg-slate-50">
-			{/* Sidebar */}
 			{!isMobile && (
 				<div
 					className={`absolute bottom-6 left-4 ${MAP_FLOATING_TOP_CLASS} z-10 flex ${MAP_AUDIT_SIDEBAR_WIDTH_CLASS} flex-shrink-0 flex-col overflow-hidden rounded-2xl border border-gray-200/60 bg-white/95 shadow-xl backdrop-blur-sm pointer-events-auto`}
@@ -443,25 +144,23 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 				</div>
 			)}
 
-			{/* Map - wrapped in provider for layer controls */}
-			<DatasetDetailsMapProvider initialMapStyle={SATELLITE_MAP_STYLE}>
+			<DatasetDetailsMapProvider initial={AUDIT_MAP_START}>
 				<div className="absolute inset-0 z-0">
 					<AuditMapWithControls
 						ref={mapRef}
 						dataset={dataset}
-						onAOIChange={handleAOIChange}
-						onToolbarStateChange={setAoiToolbarState}
-						onEditingStateChange={handleEditingStateChange}
-						auditLeaseId={auditLeaseId}
+						onAOIChange={aoi.handleChange}
+						onToolbarStateChange={aoi.setToolbarState}
 						checkMap={{
 							section: openSection,
-							georefCheck: georefCheck ?? null,
+							georefCheck: state.georefCheck ?? null,
 							evidence: openSection?.checkKey ? auditChecks?.checks[openSection.checkKey] : undefined,
 							cropId: checkView.cropId,
 							onSelectCrop: (cropId) => updateCheckView({ cropId }),
 							cropReview: {
 								datasetId: dataset.id,
-								people: auditChecks?.people ?? [],
+								reviews: state.auditReviews,
+								judgements: auditChecks?.tileJudgements ?? [],
 								disabled: !auditLeaseId,
 								mapOnly: checkView.mapOnly,
 								setMapOnly: (mapOnly) => updateCheckView({ mapOnly }),
@@ -476,16 +175,10 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 				<>
 					<div className="absolute left-2 top-20 z-20">
 						<Button type="primary" onClick={() => setIsMobileSidebarOpen(true)}>
-							Audit Form
+							Audit Review
 						</Button>
 					</div>
-					<Drawer
-						title="Audit form"
-						placement="left"
-						width="92vw"
-						open={isMobileSidebarOpen}
-						onClose={() => setIsMobileSidebarOpen(false)}
-					>
+					<Drawer title="Audit Review" placement="left" width="92vw" open={isMobileSidebarOpen} onClose={() => setIsMobileSidebarOpen(false)}>
 						<div className="flex h-full flex-col">{sidebarContent}</div>
 					</Drawer>
 				</>

@@ -31,22 +31,25 @@ def test_excluded_owner_can_read_review_but_other_users_cannot(status_db, archiv
 		(owner, access, archived),
 	).fetchone()[0]
 	db.execute("INSERT INTO public.v2_statuses(dataset_id,has_error,error_message,error_stage) VALUES (%s,true,'PRIVATE DIAGNOSTIC','cog_processing')", (dataset,))
+	# a reviewer's evaluation decision: exclude, with a note and the COG issue
 	db.execute(
-		"INSERT INTO public.dataset_audit(dataset_id,audited_by,final_assessment,notes,has_cog_issue,cog_issue_notes) VALUES (%s,%s,'exclude_completely','Image is not georeferenced',true,'Map image has missing pixels')",
+		'INSERT INTO audit.dataset_human_reviews(check_key,dataset_id,reviewed_by,decision,exclude_reason,note) '
+		"VALUES ('dataset_evaluation',%s,%s,'exclude','not_georeferenced','Image is not georeferenced')",
 		(dataset, other),
 	)
 	db.execute('SET LOCAL ROLE authenticated')
 	db.execute("SELECT set_config('request.jwt.claims',%s,true)", (json.dumps({'sub': str(owner), 'role': 'authenticated'}),))
 	row = db.execute('SELECT to_jsonb(v) FROM public.v2_full_dataset_view_owner v WHERE id=%s', (dataset,)).fetchone()[0]
 	assert row['archived'] is archived
-	assert row['final_assessment'] == 'exclude_completely'
+	assert row['audit_decision'] == 'exclude' and row['is_audited'] is True
 	assert row['error_stage'] == 'cog_processing'
 	assert 'error_message' not in row
 	assert 'PRIVATE DIAGNOSTIC' not in json.dumps(row)
 	details = db.execute('SELECT public.get_dataset_status_details(%s)', (dataset,)).fetchone()[0]
-	assert details['notes'] == 'Image is not georeferenced'
-	assert details['cog_issue_notes'] == 'Map image has missing pixels'
-	assert not {'audited_by', 'audited_by_email', 'uploaded_by_email'} & details.keys()
+	# the owner learns the decision, not who made it, their note or the check outputs
+	assert details['audit_decision'] == 'exclude'
+	assert set(details) == {'dataset_id', 'audit_decision', 'audit_decided_at'}
+	assert 'Image is not georeferenced' not in json.dumps(row) + json.dumps(details)
 	db.execute("SELECT set_config('request.jwt.claims',%s,true)", (json.dumps({'sub': str(other), 'role': 'authenticated'}),))
 	assert db.execute('SELECT id FROM public.v2_full_dataset_view_owner WHERE id=%s', (dataset,)).fetchall() == []
 	assert db.execute('SELECT public.get_dataset_status_details(%s)', (dataset,)).fetchone()[0] is None

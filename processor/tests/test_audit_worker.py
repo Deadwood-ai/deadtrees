@@ -118,7 +118,8 @@ class Table:
 
 class Client:
 	def __init__(self):
-		self.tables = {'check_versions': Table(), 'runs': Table(), 'current_runs': Table(), 'v2_statuses': Table()}
+		self.tables = {'check_versions': Table(), 'check_rules': Table(), 'runs': Table(), 'v2_statuses': Table()}
+		self.finished, self.finish_error = [], None
 
 	def schema(self, name):
 		assert name == 'audit'
@@ -127,24 +128,34 @@ class Client:
 	def table(self, name):
 		return self.tables[name]
 
+	def rpc(self, name, args):
+		"""audit.finish_run: the run's rows and its end state in one transaction."""
+		assert name == 'finish_run'
+
+		def execute():
+			if self.finish_error:
+				raise self.finish_error
+			run = next(r for r in self.tables['runs'].rows if r['id'] == args['p_run_id'])
+			assert run['status'] == 'running'
+			self.finished.append(args)
+			result = args['p_result']
+			run.update(status='done', finished_at=runs.now(), inputs=result.get('inputs', run.get('inputs')))
+			run['evidence'] = result.get('evidence', {})
+			return SimpleNamespace(data=None)
+
+		return SimpleNamespace(execute=execute)
+
 
 def version(client, check='prediction_quality', name='v1', active=True, **config):
 	return client.tables['check_versions'].add(
-		{
-			'check_key': check,
-			'version': name,
-			'is_active': active,
-			'mode': 'review_all',
-			'config': {'models': {}, **config},
-		}
+		{'check_key': check, 'version': name, 'is_active': active, 'config': {'models': {}, **config}}
 	)
 
 
 def queued(client, version_row, dataset, queue='upload', created='2026-11-02T08:00', **extra):
 	return client.tables['runs'].add(
 		{
-			'check_key': version_row['check_key'],
-			'check_version_id': version_row['id'],
+			'version_id': version_row['id'],
 			'dataset_id': dataset,
 			'queue': queue,
 			'status': 'queued',
@@ -155,7 +166,7 @@ def queued(client, version_row, dataset, queue='upload', created='2026-11-02T08:
 	)
 
 
-def handler(result=None, error=None, recompute=None):
+def handler(result=None, error=None):
 	calls = []
 
 	def handle(ctx):
@@ -164,10 +175,14 @@ def handler(result=None, error=None, recompute=None):
 			raise error
 		return result or {}
 
-	module = SimpleNamespace(VERSION='v1', CONFIG={'models': {}}, handle=handle, calls=calls)
-	if recompute:
-		module.recompute = lambda ctx: calls.append(('recompute', ctx.run['id'], sorted(ctx.judges))) or recompute
-	return module
+	return SimpleNamespace(
+		VERSION='v1',
+		CONFIG={'models': {}},
+		RULES='rules-v1',
+		RULES_CONFIG={'decider': 'haiku'},
+		handle=handle,
+		calls=calls,
+	)
 
 
 def run_row(client, run_id):
@@ -181,28 +196,49 @@ def test_new_uploads_go_before_manual_runs_and_the_backfill():
 	backfill = queued(client, v, 1, 'backfill', created='2026-11-01T00:00')
 	manual = queued(client, v, 2, 'manual', created='2026-11-02T09:00')
 	upload = queued(client, v, 3, 'upload', created='2026-11-02T10:00')
-	queued(client, v, 4, 'benchmark')
-	order = [runs.claim_next(client, ['prediction_quality'])['id'] for _ in range(3)]
+	other = version(client, check='dataset_evaluation')
+	queued(client, other, 4, 'upload', created='2026-11-01T00:00')
+	order = [runs.claim_next(client, [v['id']])['id'] for _ in range(3)]
 	assert order == [upload['id'], manual['id'], backfill['id']]
-	assert runs.claim_next(client, ['prediction_quality']) is None  # benchmark runs only in a benchmark session
-	assert runs.claim_next(client, ['prediction_quality'], benchmark=True)['dataset_id'] == 4
+	assert runs.claim_next(client, [v['id']]) is None  # another check's run is not this worker's
 	assert run_row(client, upload['id'])['status'] == 'running' and run_row(client, upload['id'])['attempts'] == 1
 
 
 @pytest.mark.unit
-def test_a_finished_run_of_the_active_version_becomes_current():
+def test_a_run_of_any_version_is_finished_through_finish_run():
+	"""Which run counts is the database's view (audit.current_runs); the worker points nothing."""
 	client = Client()
 	active, candidate = version(client), version(client, name='v2', active=False)
 	first, second = queued(client, active, 1), queued(client, candidate, 2, 'manual')
-	h = handler(result={'coverage': {'crops': 10}})
+	result = {'inputs': {'ortho_sha256': 'a'}, 'evidence': {'coverage': {'tiles': 10}}, 'tiles': [], 'images': []}
+	h = handler(result=result)
 	assert worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None) == 'done'
 	assert worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None) == 'done'
-	assert run_row(client, first['id'])['status'] == 'done' and run_row(client, first['id'])['coverage'] == {
-		'crops': 10
-	}
-	# only the active version's result counts for its dataset
-	assert [(r['dataset_id'], r['run_id']) for r in client.tables['current_runs'].rows] == [(1, first['id'])]
-	assert run_row(client, second['id'])['status'] == 'done'
+	assert [args['p_run_id'] for args in client.finished] == [first['id'], second['id']]
+	assert client.finished[0]['p_result'] == result
+	assert run_row(client, first['id'])['status'] == 'done' and run_row(client, second['id'])['status'] == 'done'
+
+
+@pytest.mark.unit
+def test_a_run_whose_rows_cannot_be_stored_counts_as_an_attempt():
+	client = Client()
+	run = queued(client, version(client), 1)
+	client.finish_error = RuntimeError('tile_index 3 out of range')
+	assert worker.tick(client=client, handlers={'prediction_quality': handler()}, put_image=None) == 'queued'
+	row = run_row(client, run['id'])
+	assert row['status'] == 'queued' and row['attempts'] == 1 and 'tile_index 3' in row['error']
+
+
+@pytest.mark.unit
+def test_the_worker_registers_each_version_with_its_rules_once():
+	client = Client()
+	handlers = {'prediction_quality': handler()}
+	registered = worker.register(client, handlers)
+	worker.register(client, handlers)
+	(row,) = client.tables['check_versions'].rows
+	assert registered['prediction_quality']['id'] == row['id'] and 'is_active' not in row  # inactive by default
+	(rules,) = client.tables['check_rules'].rows
+	assert (rules['version_id'], rules['name'], rules['config']) == (row['id'], 'rules-v1', {'decider': 'haiku'})
 
 
 @pytest.mark.unit
@@ -254,7 +290,7 @@ def test_the_login_is_renewed_before_a_run_is_written_to_its_end_state(error):
 		seen.append((renewed is client, run_row(client, run['id'])['status']))
 
 	def handle(ctx):
-		ctx.refresh()  # a handler renews before its own writes
+		ctx.refresh()  # a handler renews before its own uploads
 		if error:
 			raise error
 		return {}
@@ -264,7 +300,7 @@ def test_the_login_is_renewed_before_a_run_is_written_to_its_end_state(error):
 		worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None, refresh=refresh)
 	except worker.Paused:
 		pass
-	# once from the handler, once by the worker after it, both while the run is still running
+	# once from the handler, once by the worker before finish_run or the retry, both while the run is running
 	assert seen == [(True, 'running')] * 2
 	assert run_row(client, run['id'])['status'] in ('done', 'queued')
 
@@ -280,25 +316,7 @@ def test_other_errors_are_retried_then_the_run_fails_with_its_error():
 	assert results == ['queued'] * (runs.MAX_ATTEMPTS - 1) + ['failed']
 	row = run_row(client, run['id'])
 	assert row['status'] == 'failed' and row['error'] == 'ValueError: bad answer' and row['finished_at']
-	assert client.tables['current_runs'].rows == []
-
-
-@pytest.mark.unit
-def test_a_rule_only_run_recomputes_without_judges():
-	client = Client()
-	v1 = version(client, active=False, models={'haiku-5.5': {'transport': 'claude', 'model': 'claude-haiku-5-5'}})
-	source = queued(client, v1, 1)
-	client.tables['runs'].rows[-1]['status'] = 'done'
-	v2 = version(client, name='v2', models={'haiku-5.5': {'transport': 'claude', 'model': 'claude-haiku-5-5'}})
-	rerun = queued(client, v2, 1, source_run_id=source['id'])
-	h = handler(recompute={'evidence': {'rule': 'pq-dataset-rule/v2'}})
-	assert worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None) == 'done'
-	assert h.calls == [('recompute', rerun['id'], [])]
-	assert run_row(client, rerun['id'])['evidence'] == {'rule': 'pq-dataset-rule/v2'}
-	# a check that cannot recompute is not handed a rule-only run as a normal one
-	other = queued(client, v2, 2, source_run_id=source['id'])
-	assert worker.tick(client=client, handlers={'prediction_quality': handler()}, put_image=None) == 'queued'
-	assert 'cannot recompute' in run_row(client, other['id'])['error']
+	assert client.finished == []
 
 
 @pytest.mark.unit
@@ -445,9 +463,9 @@ def test_a_run_left_running_by_a_stopped_worker_goes_back_to_the_queue():
 	client = Client()
 	v = version(client)
 	stranded = queued(client, v, 1)
-	runs.claim_next(client, ['prediction_quality'])
+	runs.claim_next(client, [v['id']])
 	last = queued(client, v, 2, attempts=runs.MAX_ATTEMPTS, status='running')
-	assert runs.recover(client, ['prediction_quality']) == 2
+	assert runs.recover(client, [v['id']]) == 2
 	assert (
 		run_row(client, stranded['id'])['status'] == 'queued'
 		and 'interrupted' in run_row(client, stranded['id'])['error']
@@ -455,119 +473,22 @@ def test_a_run_left_running_by_a_stopped_worker_goes_back_to_the_queue():
 	assert run_row(client, last['id'])['status'] == 'failed'
 
 
-def pointer(client, dataset):
-	return next((r['run_id'] for r in client.tables['current_runs'].rows if r['dataset_id'] == dataset), None)
-
-
 @pytest.mark.unit
-def test_the_sweep_points_datasets_at_their_newest_finished_run():
-	client = Client()
-	v = version(client)
-	older = queued(client, v, 1, status='done', finished_at='2026-11-02T08:00')
-	newer = queued(client, v, 1, status='done', finished_at='2026-11-02T09:00')
-	unpointed = queued(client, v, 2, status='done', finished_at='2026-11-02T09:00')
-	queued(client, v, 3, 'benchmark', status='done', finished_at='2026-11-02T09:00')
-	runs.point(client, older)  # the pointer to the newer run never landed
-	assert worker.sweep(client, {'prediction_quality': handler()}) == 2
-	assert (pointer(client, 1), pointer(client, 2), pointer(client, 3)) == (newer['id'], unpointed['id'], None)
-	assert worker.sweep(client, {'prediction_quality': handler()}) == 0
-
-
-@pytest.mark.unit
-def test_an_older_backfill_finishing_after_a_newer_upload_leaves_the_pointer():
-	client = Client()
-	v = version(client)
-	backfill = queued(client, v, 1, 'backfill', created='2026-11-01T00:00')
-	upload = queued(client, v, 1, 'upload', created='2026-11-02T09:00')
-	h = {'prediction_quality': handler()}
-	assert worker.tick(client=client, handlers=h, put_image=None) == 'done'  # the upload goes first
-	assert worker.tick(client=client, handlers=h, put_image=None) == 'done'
-	assert run_row(client, backfill['id'])['status'] == 'done'
-	assert pointer(client, 1) == upload['id']
-	assert worker.sweep(client, h) == 0 and pointer(client, 1) == upload['id']
-
-
-@pytest.mark.unit
-def test_promotion_moves_pointers_from_the_old_version_whatever_the_ids():
-	client = Client()
-	old = version(client)
-	candidate = version(client, name='v2', active=False)
-	shadow = queued(client, candidate, 1, 'manual')  # the candidate ran first: lower id
-	current = queued(client, old, 1)
-	h = {'prediction_quality': handler()}
-	worker.tick(client=client, handlers=h, put_image=None)
-	worker.tick(client=client, handlers=h, put_image=None)
-	# a run of an inactive version never moves the pointer
-	assert pointer(client, 1) == current['id']
-	assert worker.sweep(client, h) == 0
-	# the operator activates the candidate; the sweep promotes its earlier run
-	for row in client.tables['check_versions'].rows:
-		row['is_active'] = row['id'] == candidate['id']
-	assert shadow['id'] < current['id']
-	assert worker.sweep(client, h) == 1 and pointer(client, 1) == shadow['id']
-
-
-@pytest.mark.unit
-def test_the_sweep_reconciles_every_dataset_beyond_one_page_of_runs():
-	client = Client()
-	v = version(client)
-	newest = {}
-	# 1,050 done runs over 700 datasets, some datasets with several runs across page edges
-	for n in range(1050):
-		dataset = n % 700
-		newest[dataset] = queued(client, v, dataset, status='done', finished_at='2026-01-01T00:00')['id']
-	assert len(client.tables['runs'].rows) > runs.PAGE  # more than a page of the discovery query too
-	assert worker.sweep(client, {'prediction_quality': handler()}) == 700
-	assert {r['dataset_id']: r['run_id'] for r in client.tables['current_runs'].rows} == newest
-	assert worker.sweep(client, {'prediction_quality': handler()}) == 0
-
-
-@pytest.mark.unit
-def test_promotion_takes_over_a_candidate_run_that_finished_long_ago():
-	client = Client()
-	old = version(client)
-	candidate = version(client, name='v2', active=False)
-	shadow = queued(client, candidate, 1, 'manual', status='done', finished_at='2026-09-01T00:00')
-	current = queued(client, old, 1, status='done', finished_at='2026-11-02T09:00')
-	runs.point(client, current)
-	for row in client.tables['check_versions'].rows:
-		row['is_active'] = row['id'] == candidate['id']
-	assert worker.sweep(client, {'prediction_quality': handler()}) == 1 and pointer(client, 1) == shadow['id']
-
-
-@pytest.mark.unit
-def test_a_pointer_moved_by_someone_else_meanwhile_is_decided_again():
-	client = Client()
-	v = version(client)
-	first, second, third = (queued(client, v, 1, status='done') for _ in range(3))
-	runs.point(client, first)
-	original_update = client.tables['current_runs'].update
-
-	def racing_update(payload):
-		# another writer points at the third run between our read and our write
-		client.tables['current_runs'].rows[0]['run_id'] = third['id']
-		client.tables['current_runs'].update = original_update
-		return original_update(payload)
-
-	client.tables['current_runs'].update = racing_update
-	assert runs.point(client, second) is False
-	assert pointer(client, 1) == third['id']
-
-
-@pytest.mark.unit
-def test_new_evidence_gets_a_new_run_and_benchmarks_are_scheduled_apart():
+def test_a_dataset_is_queued_again_when_the_latest_run_of_the_version_judged_other_inputs():
 	client = Client()
 	v = version(client)
 	first = {'ortho_sha256': 'a' * 64, 'label_ids': {'deadwood': 1}}
+	rerun = {**first, 'label_ids': {'deadwood': 2}}
 	queued(client, v, 1, inputs=first)
-	queued(client, v, 2, 'benchmark', inputs={})
 	assert runs.enqueue(client, v, [1], 'upload', inputs={1: first}) == []
 	# predictions were rerun: same version, new labels, new run
-	assert runs.enqueue(client, v, [1], 'upload', inputs={1: {**first, 'label_ids': {'deadwood': 2}}}) == [1]
-	# a benchmark run does not stand in for a production one
-	assert runs.enqueue(client, v, [2], 'backfill') == [2]
-	assert runs.enqueue(client, v, [2], 'manual') == []
-	assert runs.enqueue(client, v, [2], 'manual', force=True) == [2]
+	assert runs.enqueue(client, v, [1], 'upload', inputs={1: rerun}) == [1]
+	assert runs.enqueue(client, v, [1], 'upload', inputs={1: rerun}) == []
+	# back to the first inputs: the latest run judged others, so it is judged again
+	assert runs.enqueue(client, v, [1], 'upload', inputs={1: first}) == [1]
+	# another version's run does not stand in, and force always queues
+	assert runs.enqueue(client, version(client, name='v2'), [1], 'backfill', inputs={1: first}) == [1]
+	assert runs.enqueue(client, v, [1], 'manual', inputs={1: first}, force=True) == [1]
 
 
 class FakeAppServer:
@@ -710,9 +631,9 @@ def test_one_call_at_a_time_on_the_codex_login():
 def test_a_run_records_the_inputs_its_handler_read_again():
 	"""The AOI can change between queueing and running: the run then says what it judged."""
 	client = Client()
-	run = queued(client, version(client), 1)
+	run = queued(client, version(client), 1, inputs={'ortho_sha256': 'a' * 64, 'aoi': 'old-aoi'})
 	judged = {'ortho_sha256': 'a' * 64, 'aoi': 'new-aoi'}
-	h = handler(result={'inputs': judged, 'coverage': {'crops': 4}})
+	h = handler(result={'inputs': judged, 'evidence': {}})
 	assert worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None) == 'done'
 	assert run_row(client, run['id'])['inputs'] == judged
 

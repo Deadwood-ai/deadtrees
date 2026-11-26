@@ -126,7 +126,7 @@ export const PRIVATE_PAGE_TITLES: Record<string, string> = {
   "/reset-password": "Reset password",
   "/profile": "Your account",
   "/factory": "Data factory",
-  "/dataset-audit": "Dataset audit",
+  "/dataset-audit": "Audit Review",
   "/priwa-field": "PRIWA field map",
   "/releases/disturbance-benchmark": "Disturbance benchmark",
 };

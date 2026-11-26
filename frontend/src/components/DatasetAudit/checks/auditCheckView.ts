@@ -18,13 +18,13 @@ export const cropReviewOpen = (view: Pick<IAuditCheckView, "mapOnly">, section: 
 
 /** The open step answers per crop and its check stored crops: the crop review can show them. */
 export const canReviewCrops = (section: IAuditSectionDef | null, evidence: IAuditCheckEvidence | undefined) =>
-	!!section?.cropAnswers && !!evidence?.crops.length;
+	!!section?.layer && !!evidence?.tiles.length;
 
 /** The stored image the model saw: the selected crop's (falling back to its raw image), else the dataset overview. */
 export function modelViewImage(evidence: IAuditCheckEvidence | undefined, cropId: number | null, kind: CropImageKind): IAuditImage | null {
 	const images = evidence?.images ?? [];
 	if (cropId !== null) {
-		return images.find((i) => i.crop_id === cropId && i.kind === kind) ?? images.find((i) => i.crop_id === cropId && i.kind === "raw") ?? null;
+		return images.find((i) => i.tile_id === cropId && i.kind === kind) ?? images.find((i) => i.tile_id === cropId && i.kind === "raw") ?? null;
 	}
 	return images.find((i) => i.kind === "overview") ?? images.find((i) => i.kind === "thumbnail") ?? null;
 }
@@ -32,10 +32,10 @@ export function modelViewImage(evidence: IAuditCheckEvidence | undefined, cropId
 /** The audit's steps in order. */
 export const STEP_ORDER: AuditSectionId[] = AUDIT_SECTIONS.map((s) => s.id);
 
-/** Opens a step, or past the last one goes back to the decision at the top, where the audit is saved. */
+/** Opens a step, or past the last one closes the steps and shows the review line at the top. */
 export function openStep(setView: (patch: Partial<IAuditCheckView>) => void, id: AuditSectionId | null) {
 	setView({ section: id, cropId: null, mapOnly: false });
-	if (id === null) document.querySelector('[data-testid="audit-decision"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+	if (id === null) document.querySelector('[data-testid="audit-review-required"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /** The step after `current`, or null after the last one. The audit goes through every step

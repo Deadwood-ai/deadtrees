@@ -1,9 +1,8 @@
 """What the dataset evaluation looks at, read straight from the COG at run time.
 
 One read at most `overview_px` on the long side through the COG overviews gives the
-overview, its valid-data mask, per-band statistics and the perceptual hash. Four
-crops spread over the data show sharpness and
-artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
+overview, its valid-data mask and per-band statistics. Four crops spread over the data
+show sharpness and artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
 windows on the 10 cm UTM grid of the embedding stage), rendered at 5 cm or native
 when coarser, so the prediction quality check judges the same crops. A dataset
 without tiles gets native-resolution windows instead. Either way the crops are the
@@ -37,7 +36,7 @@ CROP_MPP = 0.05  # grid crops render at 5 cm, or native when coarser
 # The crop centres are found on a sample of the eligible overview pixels.
 MAX_CANDIDATES = 4000
 KMEANS_ROUNDS = 10
-# Below this share of valid overview pixels the COG holds no usable image (empty_cog rule).
+# Below this share of valid overview pixels the COG holds no usable image: no model is asked.
 MIN_VALID_SHARE = 0.005
 # Footprint padding without a mask: solid white or black (the thresholds of utils/nodata.py)
 WHITE_FILL_MIN = 250

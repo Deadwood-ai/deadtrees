@@ -1,7 +1,6 @@
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from shared.asset_manifest import GEOREF_CHECK_TASK_TYPE
 from shared.db import login, login_verified, use_client
 from shared.logger import logger
 from shared.logging import LogCategory, LogContext
@@ -13,19 +12,14 @@ from .exceptions import AuthenticationError, DatasetError, ProcessingError
 from .utils.stored_inputs import local_cog as _local_cog
 from .utils.stored_inputs import select_aoi
 
-# the audit form field this stage prefills (dataset_audit_suggestions.field)
-SUGGESTED_FIELD = 'is_georeferenced'
-
 
 def process_georef_check(task: QueueTask, token: str, temp_dir: Path):
-	"""Measure the georeferencing offset and prefill the georeferencing audit item.
+	"""Measure the georeferencing offset for the audit's georeferencing check.
 
 	Matches the dataset's COG (inside its AOI) against Esri World Imagery, its
 	dated Wayback captures and any keyed provider, and stores the per-reference
-	evidence and the Good/Poor/uncertain call in v2_georef_checks. A Good or Poor
-	call becomes the is_georeferenced audit suggestion; when it disagrees with a
-	saved audit, the dataset appears in audit_review_queue (the Re-review tab).
-	An uncertain call leaves no suggestion. Saved audits are never modified.
+	evidence and the Good/Poor/uncertain call in v2_georef_checks. The audit
+	reads its georeferencing output from that row; this stage writes nothing else.
 	"""
 	import torch
 
@@ -126,42 +120,6 @@ def check_row(dataset_id: int, check) -> dict:
 	}
 
 
-def suggestion_row(dataset_id: int, check) -> dict | None:
-	"""Good/Poor prefill of the georeferencing audit item; none when uncertain."""
-	a = check.assessment
-	if a.decision not in ('good', 'poor'):
-		return None
-	deciding = [e for e in check.references if e.decides]
-	return {
-		'dataset_id': dataset_id,
-		'field': SUGGESTED_FIELD,
-		'value': a.decision == 'good',
-		'reason': a.evidence_level,  # strong / qualified / gross
-		'details': {
-			'p90_m': a.p90_m,
-			'evidence_groups': a.groups,
-			'references': [e.provider for e in deciding],
-			'rules_version': check.details['rules_version'],
-		},
-		'updated_at': datetime.now(timezone.utc).isoformat(),
-	}
-
-
 def _store(token: str, task: QueueTask, check) -> None:
-	"""Check row, audit run with its model assessment, and audit suggestion in one
-	transaction (store_georef_check)."""
 	with use_client(token) as client:
-		client.rpc(
-			'store_georef_check',
-			{
-				'p_check': check_row(task.dataset_id, check),
-				'p_suggestion': suggestion_row(task.dataset_id, check),
-				'p_queue': audit_queue(task),
-			},
-		).execute()
-
-
-def audit_queue(task: QueueTask) -> str:
-	"""The audit run's queue: a task that runs only this check is a (re)check of a
-	stored dataset, anything else is part of processing an upload."""
-	return 'backfill' if list(task.task_types) == [GEOREF_CHECK_TASK_TYPE] else 'upload'
+		client.rpc('store_georef_check', {'p_check': check_row(task.dataset_id, check)}).execute()

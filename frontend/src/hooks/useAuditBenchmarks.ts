@@ -1,50 +1,39 @@
+import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
-import { ASSESSMENT_COLUMNS, audit, useSaveAuditAnswers, withEmails } from "./useAuditChecks";
+import {
+  AUDIT_RESULTS_KEY,
+  CURRENT_REVIEW_COLUMNS,
+  CURRENT_RUN_COLUMNS,
+  DATASET_JUDGEMENT_COLUMNS,
+  IMAGE_COLUMNS,
+  TILE_JUDGEMENT_COLUMNS,
+  TILE_REVIEW_COLUMNS,
+  allRows,
+  audit,
+  benchmarkMembershipKey,
+  unwrap,
+  useSaveDatasetReviews,
+  useSaveTileReview,
+  withEmails,
+  type Rows,
+} from "./useAuditChecks";
 import type {
-  AuditCheckKey,
-  IAuditAnswerInput,
-  IAuditAssessment,
-  IAuditBenchmark,
-  IAuditCrop,
+  DatasetReviewInput,
   IAuditImage,
-  IAuditRun,
-  IBenchmarkData,
-  IBenchmarkTarget,
+  ICurrentRun,
+  IDatasetJudgement,
+  IDatasetReview,
+  ITileJudgement,
+  ITileReview,
+  PredictionLayer,
+  TileReviewInput,
 } from "../types/auditChecks";
-import { mergeAnswers, runEvidence } from "../utils/auditChecks";
+import { BENCHMARKS, stratified, tileImages, type BenchmarkKey, type IBenchmarkTarget, type IDatasetTarget, type ITileTarget } from "../utils/benchmarkLabels";
 
-/** The checks with a benchmark people label, in the order the tab lists them. */
-export const BENCHMARK_CHECKS: { checkKey: AuditCheckKey; title: string }[] = [
-  { checkKey: "prediction_quality", title: "Prediction quality" },
-  { checkKey: "dataset_evaluation", title: "Dataset evaluation" },
-];
-
-const CROP_COLUMNS = "id, dataset_id, crop_sets, ortho_sha256, geometry";
-type CropRow = IAuditCrop & { dataset_id: number };
-const IMAGE_COLUMNS = "id, crop_id, label_id, kind, storage_path, width, height, ortho_sha256, dataset_id";
 // a list filter travels in the URL; 100 ids stay well under its limit
 const CHUNK = 100;
-// the server answers at most this many rows per request (max_rows, supabase/config.toml)
-const PAGE = 1000;
-
-type Rows<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
-
-function unwrap<T>(result: { data: T[] | null; error: { message: string } | null }): T[] {
-  if (result.error) throw result.error;
-  return result.data ?? [];
-}
-
-/** Every row of a query, page after page; `page` orders the query and asks for rows from..to. */
-async function allRows<T>(page: (from: number, to: number) => Rows<T>): Promise<T[]> {
-  const rows: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const part = unwrap(await page(from, from + PAGE - 1));
-    rows.push(...part);
-    if (part.length < PAGE) return rows;
-  }
-}
 
 /** Every row for many ids: a chunk of ids per query, each read to the end. */
 async function byIds<T>(ids: number[], page: (chunk: number[], from: number, to: number) => Rows<T>): Promise<T[]> {
@@ -53,246 +42,218 @@ async function byIds<T>(ids: number[], page: (chunk: number[], from: number, to:
   return parts.flat();
 }
 
-/** The newest row per assessor and layer (assessments are append-only; ids grow). */
-const latestPerAssessor = (rows: IAuditAssessment[]) => {
-  const latest = new Map<string, IAuditAssessment>();
-  for (const row of [...rows].sort((a, b) => a.id - b.id)) latest.set(`${row.dataset_id}:${row.crop_id}:${row.layer}:${row.assessor}`, row);
-  return [...latest.values()];
-};
+const unique = (ids: number[]) => [...new Set(ids)];
+const layerOf = (key: BenchmarkKey) => BENCHMARKS.find((b) => b.key === key)!.layer;
 
-type TargetRef = { dataset_id: number; crop_id: number | null };
-/** A row about the target: its crop, or for a dataset target the dataset itself. */
-const isOnTarget = (target: TargetRef, row: TargetRef) =>
-  target.crop_id === null ? row.dataset_id === target.dataset_id && row.crop_id === null : row.crop_id === target.crop_id;
-
-/** The images a labeler sees: per crop the newest image of each kind; per dataset the newest
- * overview and thumbnail and the newest raw image of each evaluation crop, of the overview's ortho. */
-function targetImages(target: TargetRef, images: IAuditImage[]): IAuditImage[] {
-  const newest = new Map<string, IAuditImage>();
-  const own = images.filter((i) => (target.crop_id === null ? i.dataset_id === target.dataset_id : i.crop_id === target.crop_id));
-  for (const image of [...own].sort((a, b) => a.id - b.id)) newest.set(image.crop_id !== null && target.crop_id === null ? `crop:${image.crop_id}` : image.kind, image);
-  const chosen = [...newest.values()];
-  const ortho = chosen.find((i) => i.kind === "overview")?.ortho_sha256;
-  return target.crop_id !== null || !ortho ? chosen : chosen.filter((i) => i.ortho_sha256 === ortho);
-}
-
-/** The run a label on the target carries, so it stays the labeler's review answer too: the check's
- * current run on the dataset when that run judged the target (for a crop: has model rows on it).
- * audit.latest_assessments keeps one row per person and target across runs, so a label without
- * that run would hide the person's review of the current run. Gold crops no run judged get none. */
-function labelRun(target: TargetRef, current: Map<number, number>, models: IAuditAssessment[]): number | null {
-  const run = current.get(target.dataset_id) ?? null;
-  if (run === null || target.crop_id === null) return run;
-  return models.some((m) => m.crop_id === target.crop_id && m.run_id === run) ? run : null;
-}
-
-/** The images of a target as the run that judged it saw them, picked by the review page's own
- * rule (runEvidence): the run's crops, and its own file where it differs from the stored row (a
- * rerun keeps the first overview row, so the stored one may show an older AOI). */
-function runImages(target: TargetRef, run: IAuditRun, loaded: { models: IAuditAssessment[]; crops: (CropRow)[]; images: IAuditImage[] }) {
-  const evidence = runEvidence(run, {
-    automated: loaded.models.filter((m) => m.run_id === run.id),
-    queue: [],
-    crops: loaded.crops.filter((c) => c.dataset_id === target.dataset_id),
-    images: loaded.images.filter((i) => i.dataset_id === target.dataset_id),
-  });
-  return target.crop_id === null ? evidence.images.filter((i) => i.crop_id === null || i.kind === "raw") : evidence.images.filter((i) => i.crop_id === target.crop_id);
-}
-
-/** Datasets the dataset evaluation excludes (latest verdict "major"): by a person, which includes
- * the imported audit calls, or else only by a model or rule. */
-async function excludedDatasets(datasetIds: number[]): Promise<Map<number, IBenchmarkTarget["excludedBy"]>> {
-  const rows = await byIds<{ dataset_id: number; assessor_kind: string }>(datasetIds, (chunk, from, to) =>
-    audit()
-      .from("latest_assessments")
-      .select("dataset_id, assessor_kind")
-      .eq("check_key", "dataset_evaluation")
-      .eq("layer", "image")
-      .is("crop_id", null)
-      .eq("verdict", "major")
-      .in("dataset_id", chunk)
-      .order("id")
-      .range(from, to),
+/** Datasets whose audit decision is exclude (audit.dataset_outcomes). Their tiles leave the tile
+ * benchmarks while the decision stands; their labels stay. */
+async function excludedDatasets(datasetIds: number[]): Promise<Set<number>> {
+  const rows = await byIds<{ dataset_id: number }>(datasetIds, (chunk, from, to) =>
+    audit().from("dataset_outcomes").select("dataset_id").eq("evaluation_decision", "exclude").in("dataset_id", chunk).order("dataset_id").range(from, to),
   );
-  const excluded = new Map<number, IBenchmarkTarget["excludedBy"]>();
-  for (const row of rows) {
-    if (row.assessor_kind === "person") excluded.set(row.dataset_id, "person");
-    else if (!excluded.has(row.dataset_id)) excluded.set(row.dataset_id, "model");
-  }
-  return excluded;
+  return new Set(rows.map((r) => r.dataset_id));
 }
 
-async function loadBenchmark(benchmark: IAuditBenchmark): Promise<IBenchmarkData> {
-  const members = await allRows<Pick<IBenchmarkTarget, "id" | "dataset_id" | "crop_id" | "split">>((from, to) =>
-    audit().from("benchmark_members").select("id, dataset_id, crop_id, split").eq("benchmark_id", benchmark.id).order("id").range(from, to),
-  );
-  const cropIds = members.map((m) => m.crop_id).filter((id): id is number => id !== null);
-  const datasetIds = [...new Set(members.map((m) => m.dataset_id))];
-  const onCrops = cropIds.length > 0;
-  const ids = onCrops ? cropIds : datasetIds;
-  const column = onCrops ? "crop_id" : "dataset_id";
-  const assessments = (view: "latest_assessments" | "assessments", kinds: string[]) =>
-    byIds<IAuditAssessment>(ids, (chunk, from, to) => {
-      // imported old audits are no benchmark truth (docs/audit-checks.md); models never set it
-      const query = audit()
-        .from(view)
-        .select(ASSESSMENT_COLUMNS)
-        .eq("check_key", benchmark.check_key)
-        .in("assessor_kind", kinds)
-        .is("imported_from", null)
-        .in(column, chunk);
-      return (onCrops ? query : query.is("crop_id", null)).order("id").range(from, to);
-    });
-  // the target crops; a dataset target shows its evaluation crops only, not the prediction check's many crops
-  const crops = await byIds<CropRow>(ids, (chunk, from, to) =>
-    (onCrops
-      ? audit().from("crops").select(CROP_COLUMNS).in("id", chunk)
-      : audit().from("crops").select(CROP_COLUMNS).in("dataset_id", chunk).contains("crop_sets", ["evaluation"])
-    )
-      .order("id")
-      .range(from, to),
-  );
-  const [images, people, models, current, exclusions] = await Promise.all([
-    onCrops
-      ? byIds<IAuditImage>(cropIds, (chunk, from, to) => audit().from("images").select(IMAGE_COLUMNS).in("crop_id", chunk).order("id").range(from, to))
-      : Promise.all([
-          byIds<IAuditImage>(datasetIds, (chunk, from, to) =>
-            audit().from("images").select(IMAGE_COLUMNS).in("dataset_id", chunk).is("crop_id", null).order("id").range(from, to),
-          ),
-          byIds<IAuditImage>(
-            crops.map((c) => c.id),
-            (chunk, from, to) => audit().from("images").select(IMAGE_COLUMNS).in("crop_id", chunk).eq("kind", "raw").order("id").range(from, to),
-          ),
-        ]).then((parts) => parts.flat()),
-    assessments("latest_assessments", ["person"]),
-    assessments("assessments", ["model", "rule"]),
-    byIds<{ dataset_id: number; run_id: number }>(datasetIds, (chunk, from, to) =>
-      audit().from("current_runs").select("dataset_id, run_id").eq("check_key", benchmark.check_key).in("dataset_id", chunk).order("dataset_id").range(from, to),
+/** Datasets with their newest dataset evaluation review as label, and the current dataset
+ * evaluation run's images and model answers. */
+async function loadDatasetTargets(datasetIds: number[]): Promise<IDatasetTarget[]> {
+  if (!datasetIds.length) return [];
+  const [labels, runs] = await Promise.all([
+    byIds<IDatasetReview>(datasetIds, (chunk, from, to) =>
+      audit().from("current_dataset_human_reviews").select(CURRENT_REVIEW_COLUMNS).eq("check_key", "dataset_evaluation").in("dataset_id", chunk).order("dataset_id").range(from, to),
     ),
-    // who calls a crop's dataset excluded; the dataset evaluation benchmark labels that blind
-    onCrops ? excludedDatasets(datasetIds) : Promise.resolve(new Map<number, IBenchmarkTarget["excludedBy"]>()),
+    byIds<ICurrentRun>(datasetIds, (chunk, from, to) =>
+      audit().from("current_runs").select(CURRENT_RUN_COLUMNS).eq("check_key", "dataset_evaluation").in("dataset_id", chunk).order("dataset_id").range(from, to),
+    ),
   ]);
-  const currentRuns = new Map(current.map((c) => [c.dataset_id, c.run_id]));
-  const labelRuns = new Map(members.map((m) => [m.id, labelRun(m, currentRuns, models)]));
-  const runIds = [...new Set([...labelRuns.values()].filter((id): id is number => id !== null))];
-  const [named, runs] = await Promise.all([
-    withEmails(people),
-    byIds<IAuditRun>(runIds, (chunk, from, to) => audit().from("runs").select("id, check_key, inputs, evidence").in("id", chunk).order("id").range(from, to)),
+  const runIds = runs.map((r) => r.run_id);
+  const [images, models, named] = await Promise.all([
+    byIds<IAuditImage>(runIds, (chunk, from, to) => audit().from("images").select(IMAGE_COLUMNS).in("run_id", chunk).order("id").range(from, to)),
+    byIds<IDatasetJudgement>(runIds, (chunk, from, to) => audit().from("dataset_vlm_judgements").select(DATASET_JUDGEMENT_COLUMNS).in("run_id", chunk).order("id").range(from, to)),
+    withEmails(labels),
   ]);
-  const runById = new Map(runs.map((r) => [r.id, r]));
-  const latestModels = latestPerAssessor(models);
-  return {
-    benchmark,
-    targets: members.map((m) => {
-      const run = runById.get(labelRuns.get(m.id) ?? -1);
-      return {
-        ...m,
-        run_id: run?.id ?? null,
-        images: run ? runImages(m, run, { models, crops, images }) : targetImages(m, images),
-        people: named.filter((r) => isOnTarget(m, r)),
-        models: latestModels.filter((r) => isOnTarget(m, r)),
-        excludedBy: exclusions.get(m.dataset_id) ?? null,
-      };
-    }),
-  };
+  return datasetIds.map((id) => {
+    const run = runs.find((r) => r.dataset_id === id)?.run_id;
+    return {
+      id,
+      dataset_id: id,
+      tile_id: null,
+      label: named.find((l) => l.dataset_id === id) ?? null,
+      images: images.filter((i) => i.run_id === run),
+      models: models.filter((m) => m.run_id === run),
+    };
+  });
 }
 
-const benchmarksKey = ["audit-benchmarks"];
-export const benchmarkKey = (id: number | undefined) => ["audit-benchmark", id];
+/** Tiles with their newest review on the layer as label, the images of the newest run that judged
+ * them, and that run's model answers. */
+async function loadTileTargets(layer: PredictionLayer, refs: { dataset_id: number; tile_id: number }[]): Promise<ITileTarget[]> {
+  if (!refs.length) return [];
+  const tileIds = refs.map((r) => r.tile_id);
+  const [reviews, images, models] = await Promise.all([
+    byIds<ITileReview>(tileIds, (chunk, from, to) =>
+      audit().from("tile_human_reviews").select(TILE_REVIEW_COLUMNS).eq("layer", layer).in("tile_id", chunk).order("id", { ascending: false }).range(from, to),
+    ),
+    byIds<IAuditImage>(tileIds, (chunk, from, to) => audit().from("images").select(IMAGE_COLUMNS).in("tile_id", chunk).order("id").range(from, to)),
+    byIds<ITileJudgement>(tileIds, (chunk, from, to) =>
+      audit().from("tile_vlm_judgements").select(TILE_JUDGEMENT_COLUMNS).eq("layer", layer).in("tile_id", chunk).order("id").range(from, to),
+    ),
+  ]);
+  // the newest review per tile comes first
+  const labels = await withEmails(tileIds.flatMap((id) => reviews.find((r) => r.tile_id === id) ?? []));
+  return refs.map(({ dataset_id, tile_id }) => {
+    const label = labels.find((l) => l.tile_id === tile_id) ?? null;
+    const shown = tileImages(images.filter((i) => i.tile_id === tile_id), layer, label?.prediction_label_id);
+    const run = shown[0]?.run_id;
+    return {
+      id: tile_id,
+      dataset_id,
+      tile_id,
+      label,
+      images: shown,
+      models: models.filter((m) => m.tile_id === tile_id && m.run_id === run),
+      prediction_label_id: shown.find((i) => i.kind !== "raw")?.prediction_label_id ?? null,
+    };
+  });
+}
 
-/** The open benchmark version of each check (one at most per check), auditors only. */
-export function useOpenBenchmarks() {
+/** A benchmark's targets: the datasets or tiles with a review ticked in_benchmark, in stratified
+ * order (one per dataset in turn). A tile benchmark leaves out the tiles of datasets the audit
+ * excludes while that decision stands; their labels stay. */
+async function loadBenchmark(key: BenchmarkKey): Promise<IBenchmarkTarget[]> {
+  const layer = layerOf(key);
+  if (!layer) {
+    const ticked = await allRows<{ dataset_id: number }>((from, to) =>
+      audit().from("dataset_human_reviews").select("dataset_id").eq("check_key", "dataset_evaluation").eq("in_benchmark", true).order("dataset_id").range(from, to),
+    );
+    return loadDatasetTargets(unique(ticked.map((t) => t.dataset_id)));
+  }
+  const ticked = await allRows<{ dataset_id: number; tile_id: number }>((from, to) =>
+    audit().from("tile_human_reviews").select("dataset_id, tile_id").eq("layer", layer).eq("in_benchmark", true).order("tile_id").range(from, to),
+  );
+  const tiles = unique(ticked.map((t) => t.tile_id)).map((id) => ticked.find((t) => t.tile_id === id)!);
+  const excluded = await excludedDatasets(unique(tiles.map((t) => t.dataset_id)));
+  return loadTileTargets(layer, stratified(tiles.filter((t) => !excluded.has(t.dataset_id))));
+}
+
+/** One random new target for "Label new random ...", or null when none is left (audit.draw_target:
+ * not in the benchmark yet, not skipped; a tile of a random dataset the audit keeps). It is shown
+ * unlabeled, so the labeler answers blind. */
+async function drawTarget(key: BenchmarkKey, skipped: number[]): Promise<IBenchmarkTarget | null> {
+  const { data, error } = await audit().rpc("draw_target", { p_benchmark: key, p_skipped: skipped });
+  if (error) throw error;
+  const [pick] = (data ?? []) as { dataset_id: number; tile_id: number | null }[];
+  if (!pick) return null;
+  const layer = layerOf(key);
+  const [target] =
+    layer && pick.tile_id !== null ? await loadTileTargets(layer, [{ dataset_id: pick.dataset_id, tile_id: pick.tile_id }]) : await loadDatasetTargets([pick.dataset_id]);
+  return target ? { ...target, label: null } : null;
+}
+
+export const benchmarkKey = (key: BenchmarkKey) => ["audit-benchmark", key];
+const candidateKey = (key: BenchmarkKey) => ["audit-benchmark-candidate", key];
+
+/** One benchmark's targets with their labels, images and the models' answers (auditors only). */
+export function useBenchmark(key: BenchmarkKey) {
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
   return useQuery({
-    queryKey: benchmarksKey,
-    queryFn: async () =>
-      unwrap(await audit().from("benchmarks").select("id, check_key, name, version").is("frozen_at", null)) as IAuditBenchmark[],
+    queryKey: benchmarkKey(key),
+    queryFn: () => loadBenchmark(key),
     enabled: !!user?.id && canAudit,
-  });
-}
-
-/** One benchmark's targets with their images, people's answers and the models' answers. */
-export function useBenchmark(benchmark: IAuditBenchmark | undefined) {
-  return useQuery({
-    queryKey: benchmarkKey(benchmark?.id),
-    queryFn: () => loadBenchmark(benchmark!),
-    enabled: !!benchmark,
     staleTime: 60_000,
   });
 }
 
-/** Stores a label on a benchmark target (new person rows, no run) and adds them to the loaded benchmark. */
-export function useSaveBenchmarkLabel(benchmarkId: number | undefined) {
-  const queryClient = useQueryClient();
-  const { mutateAsync, isPending } = useSaveAuditAnswers();
-  const save = async (answers: IAuditAnswerInput[]) => {
-    const rows = await mutateAsync(answers);
-    queryClient.setQueryData<IBenchmarkData>(benchmarkKey(benchmarkId), (data) =>
-      data && {
-        ...data,
-        targets: data.targets.map((t) => {
-          const added = rows.filter((r) => isOnTarget(t, r));
-          return added.length ? { ...t, people: mergeAnswers(t.people, added) } : t;
-        }),
-      },
-    );
-    return rows;
+/** A random new target to label: next() draws another once it is labeled, skip() draws another
+ * and leaves this one out for the rest of the visit. */
+export function useBenchmarkCandidate(key: BenchmarkKey, enabled: boolean) {
+  const skipped = useRef(new Set<number>());
+  const query = useQuery({
+    queryKey: candidateKey(key),
+    queryFn: () => drawTarget(key, [...skipped.current]),
+    enabled,
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+  const next = () => query.refetch();
+  const skip = () => {
+    if (query.data) skipped.current.add(query.data.id);
+    return query.refetch();
   };
-  return { save, isPending };
+  return { ...query, next, skip };
 }
 
-/** Whether a dataset or crop is already a target of its check's open benchmark. */
+const sameTarget = (a: { dataset_id: number; tile_id: number | null }, b: { dataset_id: number; tile_id: number | null }) =>
+  a.dataset_id === b.dataset_id && a.tile_id === b.tile_id;
+
+/** Stores a label: the answer as a review ticked in_benchmark (operators), which makes it the
+ * target's label and puts the target into the benchmark. */
+export function useSaveBenchmarkLabel(key: BenchmarkKey) {
+  const queryClient = useQueryClient();
+  const saveDataset = useSaveDatasetReviews();
+  const saveTile = useSaveTileReview();
+  const save = async (target: IBenchmarkTarget, review: DatasetReviewInput | TileReviewInput) => {
+    const label = "tile_id" in review ? await saveTile.mutateAsync({ ...review, in_benchmark: true }) : (await saveDataset.mutateAsync([{ ...review, in_benchmark: true }]))[0];
+    const labeled = <T extends IBenchmarkTarget>(t: T): T => (sameTarget(t, target) ? { ...t, label } : t);
+    queryClient.setQueryData<IBenchmarkTarget | null>(candidateKey(key), (t) => t && labeled(t));
+    const listed = queryClient.getQueryData<IBenchmarkTarget[]>(benchmarkKey(key))?.some((t) => sameTarget(t, target));
+    if (listed) queryClient.setQueryData<IBenchmarkTarget[]>(benchmarkKey(key), (targets) => targets?.map(labeled));
+    // a target new to the benchmark comes with the next read
+    else void queryClient.invalidateQueries({ queryKey: benchmarkKey(key) });
+  };
+  return { save, isPending: saveDataset.isPending || saveTile.isPending };
+}
+
+/** The answer a label holds, to store it again (Undo of a removal). */
+export function labelInput(target: IBenchmarkTarget, layer: PredictionLayer | null): DatasetReviewInput | TileReviewInput | null {
+  if (!target.label) return null;
+  const { dataset_id, note } = target.label;
+  if (target.tile_id === null) {
+    const { decision, exclude_reason, cog_issue, thumbnail_issue } = target.label as IDatasetReview;
+    return { dataset_id, check_key: "dataset_evaluation", decision, exclude_reason, cog_issue, thumbnail_issue, note };
+  }
+  const { verdict, problems, prediction_label_id } = target.label as ITileReview;
+  return { dataset_id, tile_id: target.tile_id, layer: layer!, prediction_label_id, verdict, problems, note };
+}
+
+/** Whether a dataset and its tiles are in the benchmarks: a review of them ticked in_benchmark. */
 export function useBenchmarkMembership(datasetId: number | undefined) {
   const { canAudit } = useCanAudit();
   return useQuery({
-    queryKey: ["audit-benchmark-membership", datasetId],
-    queryFn: async () =>
-      unwrap(
-        await audit()
-          .from("benchmark_members")
-          .select("crop_id, benchmark:benchmarks!inner(check_key, frozen_at)")
-          .eq("dataset_id", datasetId!)
-          .is("benchmark.frozen_at", null),
-      ) as unknown as { crop_id: number | null; benchmark: { check_key: AuditCheckKey } }[],
+    queryKey: benchmarkMembershipKey(datasetId),
+    queryFn: async () => {
+      const [dataset, tiles] = await Promise.all([
+        audit().from("dataset_human_reviews").select("id").eq("dataset_id", datasetId!).eq("check_key", "dataset_evaluation").eq("in_benchmark", true).limit(1),
+        audit().from("tile_human_reviews").select("tile_id, layer").eq("dataset_id", datasetId!).eq("in_benchmark", true),
+      ]);
+      return { dataset: unwrap(dataset).length > 0, tiles: unwrap(tiles) as { tile_id: number; layer: PredictionLayer }[] };
+    },
     enabled: !!datasetId && canAudit,
   });
 }
 
-/** Adds a crop, or the whole dataset (cropId null), to the open benchmark of a check
- * (audit.add_benchmark_target, operators only). Adding a target that is already in it is a no-op. */
-export function useAddBenchmarkTarget() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ checkKey, datasetId, cropId = null }: { checkKey: AuditCheckKey; datasetId: number; cropId?: number | null }) => {
-      const { data, error } = await audit().rpc("add_benchmark_target", { p_check_key: checkKey, p_dataset_id: datasetId, p_crop_id: cropId });
-      if (error) throw error;
-      return data as { id: number; split: string };
-    },
-    onSuccess: (_, { datasetId }) => {
-      queryClient.invalidateQueries({ queryKey: ["audit-benchmark-membership", datasetId] });
-      queryClient.invalidateQueries({ queryKey: ["audit-benchmark"] });
-    },
-  });
-}
+type TargetRef = { dataset_id: number; tile_id: number | null };
 
-/** Takes a crop, or a dataset with all its crops (cropId null), out of the open benchmark of a
- * check again (audit.remove_benchmark_target, operators only). The labels stay, so adding the
- * target back restores it. Removing what is not there removes nothing. */
-export function useRemoveBenchmarkTarget(benchmarkId: number | undefined) {
+/** Takes targets out of a benchmark (audit.remove_benchmark_target, operators only): their
+ * reviews lose the tick and stay as reviews. */
+export function useRemoveBenchmarkTargets(key: BenchmarkKey) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ checkKey, datasetId, cropId = null }: { checkKey: AuditCheckKey; datasetId: number; cropId?: number | null }) => {
-      const { data, error } = await audit().rpc("remove_benchmark_target", { p_check_key: checkKey, p_dataset_id: datasetId, p_crop_id: cropId });
-      if (error) throw error;
-      return (data ?? []) as TargetRef[];
-    },
-    onSuccess: (removed, { datasetId }) => {
-      // the target leaves the loaded benchmark at once; a reload confirms it
-      queryClient.setQueryData<IBenchmarkData>(benchmarkKey(benchmarkId), (data) =>
-        data && { ...data, targets: data.targets.filter((t) => !removed.some((r) => r.dataset_id === t.dataset_id && r.crop_id === t.crop_id)) },
+    mutationFn: async (targets: TargetRef[]) => {
+      const results = await Promise.all(
+        targets.map((t) => audit().rpc("remove_benchmark_target", { p_benchmark: key, p_dataset_id: t.dataset_id, p_tile_id: t.tile_id })),
       );
-      queryClient.invalidateQueries({ queryKey: ["audit-benchmark-membership", datasetId] });
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+      return targets;
+    },
+    onSuccess: (removed) => {
+      // the targets leave the loaded benchmark at once; a reload confirms it
+      queryClient.setQueryData<IBenchmarkTarget[]>(benchmarkKey(key), (targets) => targets?.filter((t) => !removed.some((r) => sameTarget(r, t))));
+      void queryClient.invalidateQueries({ queryKey: AUDIT_RESULTS_KEY });
+      return Promise.all(unique(removed.map((r) => r.dataset_id)).map((id) => queryClient.invalidateQueries({ queryKey: benchmarkMembershipKey(id) })));
     },
   });
 }

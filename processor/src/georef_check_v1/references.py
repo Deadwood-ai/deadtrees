@@ -26,8 +26,9 @@ from .providers import ESRI, REGISTRY, Provider
 
 WORLD = 40075016.68557849
 TILE_BUDGET = 45
-# Yandex, Esri Clarity and others have no tiles above z18 in many rural areas
-# and answer 404; the mosaic then retries this many zoom levels lower
+# Yandex, Esri Clarity, older Wayback releases and others have no tiles above z18
+# in many rural areas and answer 404; the mosaic and the Wayback date lookup then
+# retry this many zoom levels lower
 MISSING_TILE_FALLBACK = 2
 USER_AGENT = 'DeadTrees-georeferencing-check/1.0 (+https://deadtrees.earth)'
 WAYBACK_CONFIG = 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json'
@@ -143,11 +144,15 @@ def _blank(image: np.ndarray) -> bool:
 
 
 def wayback_captures(lon: float, lat: float, zoom: int, session: requests.Session) -> list[dict]:
-	"""The capture date at the point in the last Wayback release of every year.
+	"""The capture date at the point in the last Wayback release of every year, and the
+	zoom it was found at.
 
 	Walking every release through the tilemap service took ~100 s per dataset on
 	the slow archive host; one metadata query per year, in parallel, takes a few
-	seconds and still finds each distinct capture."""
+	seconds and still finds each distinct capture. Older releases often have no
+	imagery at the drone image's zoom (z19 outside cities): their metadata layer
+	answers nothing there, so the lookup asks up to MISSING_TILE_FALLBACK zooms
+	lower, as the mosaic does for missing tiles."""
 	catalog = session.get(WAYBACK_CONFIG, timeout=30).json()
 	yearly: dict[str, dict] = {}
 	for release, item in catalog.items():
@@ -156,9 +161,10 @@ def wayback_captures(lon: float, lat: float, zoom: int, session: requests.Sessio
 			yearly[released[:4]] = {'release': int(release), 'released': released, 'metadata': item['metadataLayerUrl']}
 	point = f'{{"spatialReference":{{"wkid":4326}},"x":{lon},"y":{lat}}}'
 
-	def capture(item):
+	def captured_at(item, z: int) -> str | None:
+		# one metadata layer per zoom: layer 0 is z23
 		meta = session.get(
-			item['metadata'] + f'/{23 - zoom}/query',
+			item['metadata'] + f'/{23 - z}/query',
 			params={
 				'f': 'json',
 				'where': '1=1',
@@ -171,8 +177,14 @@ def wayback_captures(lon: float, lat: float, zoom: int, session: requests.Sessio
 			timeout=30,
 		).json()
 		ms = ((meta.get('features') or [{}])[0].get('attributes') or {}).get('SRC_DATE2')
-		captured = datetime.fromtimestamp(ms / 1000, timezone.utc).date().isoformat() if ms else None
-		return {'release': item['release'], 'capture_date': captured}
+		return datetime.fromtimestamp(ms / 1000, timezone.utc).date().isoformat() if ms else None
+
+	def capture(item):
+		for z in range(zoom, max(zoom - MISSING_TILE_FALLBACK, 0) - 1, -1):
+			captured = captured_at(item, z)
+			if captured:
+				return {'release': item['release'], 'capture_date': captured, 'zoom': z}
+		return {'release': item['release'], 'capture_date': None, 'zoom': None}
 
 	with ThreadPoolExecutor(max_workers=6) as pool:
 		captures = list(pool.map(capture, sorted(yearly.values(), key=lambda i: i['released'], reverse=True)))
@@ -312,6 +324,8 @@ def fetch_references(
 						ESRI.group,
 						'xyz',
 						WAYBACK_TILES.replace('{release}', str(c['release'])),
+						# where the release has imagery: no failed mosaic at the zoom above
+						max_zoom=c['zoom'],
 						attribution=ESRI.attribution,
 					),
 					c['capture_date'],

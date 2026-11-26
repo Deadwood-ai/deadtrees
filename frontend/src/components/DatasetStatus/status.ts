@@ -1,4 +1,3 @@
-import dayjs from "dayjs";
 import type { DatasetProgress } from "../../utils/processingSteps";
 import { isDatasetProcessingComplete } from "../../utils/processingSteps";
 import type { QueueInfo } from "../../hooks/useQueuePositions";
@@ -14,9 +13,6 @@ export interface ContributorDataset extends DatasetProgress {
   has_forest_cover_prediction?: boolean | null;
   archived?: boolean;
   is_in_audit?: boolean;
-  has_cog_issue?: boolean | null;
-  has_thumbnail_issue?: boolean | null;
-  is_georeferenced?: boolean | null;
 }
 
 export type QueueState =
@@ -161,58 +157,30 @@ const AMBER = "#b45309";
 const SLATE = "#64748b";
 
 export interface ReviewOutcome {
-  kind: "none" | "in_progress" | "excluded" | "fixable" | "findings" | "accepted";
+  kind: "none" | "in_progress" | "excluded" | "accepted";
   label: string;
   color: string;
-  /** Date the review was recorded. It does not say which processing run it looked at. */
-  date: string | null;
 }
 
+/** The dataset evaluation's decision from the Audit Review (audit_decision). The review never
+ * hides a prediction; only an exclusion takes the dataset off the public map. */
 export function reviewStatus(dataset: ContributorDataset): ReviewOutcome {
-  const date = dataset.audit_date ? dayjs(dataset.audit_date).format("D MMM YYYY") : null;
   if (dataset.is_in_audit || dataset.current_status === "audit_in_progress") {
-    return { kind: "in_progress", label: "Review in progress", color: SLATE, date };
+    return { kind: "in_progress", label: "Review in progress", color: SLATE };
   }
-  const assessment = dataset.final_assessment === "ready" ? "no_issues" : dataset.final_assessment;
-  if (assessment === "exclude_completely") {
-    return { kind: "excluded", label: "Excluded from public map", color: AMBER, date };
+  switch (dataset.audit_decision) {
+    case "exclude":
+      return { kind: "excluded", label: "Excluded from public map", color: AMBER };
+    case "keep":
+      return { kind: "accepted", label: "Reviewed · accepted", color: GREEN };
+    default:
+      return { kind: "none", label: "Not yet reviewed", color: SLATE };
   }
-  if (assessment === "fixable_issues") {
-    return { kind: "fixable", label: "Reviewed · fixable issues", color: AMBER, date };
-  }
-  if (!assessment) {
-    return { kind: "none", label: "Not yet reviewed", color: SLATE, date: null };
-  }
-  const deadwoodHidden = dataset.deadwood_quality === "bad";
-  const treecoverHidden = dataset.forest_cover_quality === "bad";
-  const otherFindings =
-    !!dataset.has_cog_issue ||
-    !!dataset.has_thumbnail_issue ||
-    dataset.is_georeferenced === false ||
-    dataset.has_valid_phenology === false ||
-    dataset.has_valid_acquisition_date === false;
-  const label =
-    deadwoodHidden && treecoverHidden
-      ? "Reviewed · analysis layers hidden"
-      : deadwoodHidden
-        ? "Reviewed · deadwood layer hidden"
-        : treecoverHidden
-          ? "Reviewed · tree cover layer hidden"
-          : otherFindings
-            ? "Reviewed · see findings"
-            : "Reviewed · accepted";
-  const findings = deadwoodHidden || treecoverHidden || otherFindings;
-  return { kind: findings ? "findings" : "accepted", label, color: findings ? AMBER : GREEN, date };
 }
 
 /** True when the contributor should read the details before relying on this dataset. */
 export function needsAttention(processing: ProcessingOutcome, review: ReviewOutcome): boolean {
-  return (
-    processing.kind === "failed" ||
-    processing.kind === "incomplete" ||
-    review.kind === "excluded" ||
-    review.kind === "fixable"
-  );
+  return processing.kind === "failed" || processing.kind === "incomplete" || review.kind === "excluded";
 }
 
 export interface StatusSummary {
@@ -230,12 +198,12 @@ export function statusSummary(dataset: ContributorDataset, queue: QueueState): S
   const contact = `If you need help with this dataset, contact the DeadTrees team and include dataset ${dataset.id}.`;
   const reviewClause =
     review.kind === "excluded"
-      ? ` A reviewer excluded it from the public map${review.date ? ` on ${review.date}` : ""}; it stays in your account.`
+      ? " A reviewer excluded it from the public map; it stays in your account."
       : review.kind === "in_progress"
         ? " A quality review is in progress."
         : review.kind === "none"
           ? " No quality review has been recorded yet."
-          : ` A quality review was recorded${review.date ? ` on ${review.date}` : ""}.`;
+          : " A quality review was recorded.";
 
   switch (processing.kind) {
     case "failed":
@@ -252,10 +220,7 @@ export function statusSummary(dataset: ContributorDataset, queue: QueueState): S
     case "complete":
       return {
         headline: processing.detail + reviewClause,
-        next:
-          review.kind === "excluded" || review.kind === "fixable" || review.kind === "findings"
-            ? "The review findings below explain what a reviewer flagged."
-            : null,
+        next: review.kind === "excluded" ? "The review findings below explain what a reviewer flagged." : null,
       };
   }
 }

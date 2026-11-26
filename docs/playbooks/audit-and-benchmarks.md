@@ -1,258 +1,142 @@
 # Audit and benchmarks: how they work and what we plan
 
 Start here if you review datasets in the audit, label a benchmark, or work on an audit
-check as an agent. This page explains the whole loop in plain words and links to the
-reference docs for the details. Plan and parent issue: DT-1470. Benchmark loop: DT-1488.
+check as an agent. This page explains the loop in plain words and links to the reference
+docs for the details. Plan and parent issue: DT-1470. Data model: DT-1606.
 
 ## The idea in one paragraph
 
 Every dataset must be checked before its predictions feed the maps and the satellite
-products. People used to fill in an audit form for each dataset by hand. Now automated
-checks fill in every answer first, and a person confirms or corrects them. Two of the
-checks use vision models ("judges") that look at images of the dataset. A judge is only
-useful if we know how often it is right, so each judged check has a **benchmark**: a fixed
-set of crops or datasets with answers people gave blind. A change to a check is scored on
-its benchmark before it goes live. Trust is earned per check: everything starts as a
-suggestion that a person reviews, and a check may later decide on its own once its
-benchmark scores and the review results show it is reliable.
+products. Automated checks report what they measured (an offset, a date to replace, how
+many tiles of a layer are wrong) on the **Audit Review** page, and a person looks only
+where a check asks for it. Only the dataset evaluation decides something: keep (shown as
+OK) or exclude. Two checks use vision models ("judges") that look at images of the
+dataset. A judge is only useful if we know how often it is right, so each judged check has
+a **benchmark**: tiles or datasets that people labeled blind.
 
-```text
-new upload or batch ──> checks run ──> review list ──> a person confirms or corrects
-                                                         │
-                                 B copies a good case ───┴──> benchmark (gold answers)
-                                                                     │
-          new check version <── scored on the benchmark first <─────┘
-```
+## How it is stored
 
-## Words we use
+Everything lives in the `audit` schema. Only answers are stored; every result is a view,
+worked out when it is read, so it is never out of date after a rerun or a new review.
 
-| Word | Meaning |
-|---|---|
-| Check | One automated question about a dataset, e.g. georeferencing or prediction quality |
-| Check version | A fixed prompt, drawing, rule and settings. Any change makes a new version |
-| Run | One version applied to one dataset. Every run is kept; one per dataset and check is "current" |
-| Judge | A vision model that answers a check: Luna (`gpt-6-luna`, medium effort) and Claude Haiku 5.5. Their answers are averaged |
-| Rule | Code that turns the judges' crop answers into one dataset verdict, e.g. "2 or more of 10 crops major" |
-| Verdict | `ok`, `minor` (keep, but fix), `major` (exclude, or the layer is wrong), `unsure` (a person decides) |
-| Crop | A 51.2 m square on the CLIP tile grid, shown at 5 cm per pixel (1024 px) |
-| Review list | The datasets waiting for a person: the audit's **To review** tab |
-| Benchmark | A fixed set of crops or datasets with blind human answers ("gold") that judges are scored against |
-| Dev and holdout | The two parts of a benchmark. Tune on dev; decide on holdout only. A dataset's side is fixed by a hash of its id |
-| Operator | An auditor who may change check settings and add to benchmarks |
+- **Answers.** The models' answers: `dataset_vlm_judgements` (a whole dataset) and
+  `tile_vlm_judgements` (one tile and layer). People's answers: `dataset_human_reviews`
+  (one row per check answered: dataset evaluation, georeferencing, acquisition date) and
+  `tile_human_reviews` (one tile and layer, on the prediction it showed). Answers are
+  never changed; a new answer is a new row and the newest counts.
+- **What was judged.** `check_versions` (what the models are asked), `check_rules` (how
+  their answers become results, e.g. which judge decides), `runs`, `tiles` (squares on the
+  embedding grid) and `images` (the pictures a run judged, on the storage server).
+- **Results (views).** `current_runs` (the run that counts per dataset and check),
+  `tile_calls` (per tile and layer: a person's review, else the deciding judge's answer),
+  `evaluation_calls` (the dataset check's keep, exclude or unsure),
+  `current_dataset_human_reviews` (the newest review per check, marked stale once the
+  ortho or the date advice changed), `evaluation_decisions` (the decision that counts:
+  a person's review, the old audit's keep, the check, the old audit's exclude) and
+  `dataset_outcomes` (one row per dataset: every output, the counts and what needs a
+  person).
+
+A dataset is hidden from the public only when its evaluation decision is exclude.
+Predictions are never hidden because of the audit. The dataset page shows what the audit
+found to anyone who can see the dataset (`public.get_dataset_audit_summary`, read from
+`dataset_outcomes`): the georeferencing offset, the suggested acquisition date (a
+reviewer's correction included) and, once no review is required, each prediction's share
+of wrong sample tiles with the deciding model's reasoning.
 
 ## The checks
 
-They run in this order. The review page shows them as steps.
+They run in this order; the review page shows them as steps.
 
-| Check | What it decides | Runs where | Reference |
-|---|---|---|---|
-| Dataset evaluation | Keep, keep but fix, or exclude the whole image, with a reason (blurry, no trees, artifacts, not RGB, broken ortho, too dark, other), plus COG, thumbnail and reprocess flags. Judges look at a 2048 px overview, four crops and the thumbnail. A band check and a duplicate check run as rules | Audit worker | [dataset-evaluation.md](../dataset-evaluation.md) |
-| Georeferencing | How far the image is shifted against satellite and official imagery; Good means under 15 m | GPU processors (`georef_check_v1`) | [georef-check.md](../georef-check.md) |
-| Acquisition date | A probability curve for the flight day; the date shows as "Uncertain" when the reported date is outside the 80% range | GPU processors (`doy_estimation_v1`) | [doy-estimation.md](../doy-estimation.md) |
-| Prediction quality | Per layer (deadwood, tree cover): ok, or major errors. Judges see each crop raw and with the prediction drawn on it, and name failure modes such as "dead trees missed" or "trees missed" | Audit worker | [prediction-quality.md](../prediction-quality.md) |
+- **Dataset evaluation.** The only decision, plus COG and thumbnail issues. Judges look at
+  an overview, four tiles and the thumbnail. [dataset-evaluation.md](../dataset-evaluation.md)
+- **Area of interest.** Whether an AOI exists, when, by whom and with which model.
+- **Georeferencing.** Estimated, no reference, needs review, passed or not passed, and the
+  offset in metres; passed means within 15 m. [georef-check.md](../georef-check.md)
+- **Acquisition date.** AerialStamp: keep the recorded date or replace it with the
+  estimate. It never changes the dataset. [doy-estimation.md](../doy-estimation.md)
+- **Phenology.** The probability of peak greenness on the recorded date.
+- **Prediction quality.** Per layer (deadwood, tree cover): how many judged tiles are OK or
+  have minor or major errors. [prediction-quality.md](../prediction-quality.md)
 
-Area of interest and phenology have no automated check yet; the reviewer answers them by
-hand. Phenology is being built separately.
-
-Conventions for prediction quality that every reviewer and prompt follows: lying wood is
-never deadwood; season and phenology are not prediction errors; partly dead crowns count
-under "dead trees missed"; an error is substantial at about 20% of the layer in the crop.
-
-### The audit worker
-
-The two judged checks run in one process on the processing server, the audit worker
-(`processor/src/audit_worker`, service `deadtrees-audit-worker`). It uses subscription
-logins rather than API keys, so it lives where those logins are. It runs one dataset at a
-time: new uploads first, then manual batches, then the backfill. A dataset evaluation run
-asks each judge once; a prediction quality run asks both judges about each of 14 to 46
-crops, about 45 calls per dataset in all.
-Measured in the pilot: the evaluation takes about 1 to 2 minutes per dataset, the
-prediction check about 6 minutes (slowest tenth over 15). When a login expires or a usage
-limit is hit, the worker pauses and the platform monitor reports it; no run is lost. Its
-commands and safety rules are in [audit-checks.md](../audit-checks.md#audit-worker).
+The judged checks run in the audit worker (`processor/src/audit_worker`), one dataset at
+a time; its commands and safety rules are in [audit-checks.md](../audit-checks.md).
 
 ## The review (for reviewers)
 
-Open the audit, tab **To review**. It lists the datasets where checks are waiting for you,
-complete ones first. Each dataset has 7 steps:
+Open the Audit Review. **All audits** lists every dataset, **Pending audit reviews** the
+ones a check asks about, **Benchmark** the three benchmarks. A check asks for a person
+when the dataset evaluation is unsure, processing finished without an AOI, the
+georeferencing needs review, or the date estimate's advice flipped after a reviewer's
+answer. The prediction layers never ask; you can still answer their tiles.
 
-1. Dataset evaluation
-2. Area of interest
-3. Georeferencing
-4. Acquisition date
-5. Phenology
-6. Tree cover prediction
-7. Deadwood prediction
+Each dataset has 7 steps: dataset evaluation, area of interest, georeferencing,
+acquisition date, phenology, tree cover prediction, deadwood prediction. Save stores one
+review per step you answered or changed. A tile answer in steps 6 and 7 is stored at once,
+on the prediction the tile shows. A review counts while the evidence it was given on is
+the same: a new ortho asks again, a new prediction makes the tile answers stop counting.
 
-Every step is prefilled with what the checks suggest, so mostly you confirm or correct.
-Your answer is stored as your own row next to the models' rows; nothing overwrites
-anything. The review is model-assisted: you see the checks' calls while you answer, and
-other reviewers' answers sit folded under Details. Blind answers, where the models stay
-hidden until you answer, are only given in the Benchmark tab.
+Keys: Enter next step (in the tile view: save and go on), Shift+Enter back, Ctrl+S save.
+In the tile view: ← → tiles, Tab next tile without an answer, ↑ ↓ problem, Y N U yes,
+no or unsure, 1 2 3 4 OK, minor, major, ambiguous (and save), T raw or prediction, V side by
+side, - + prediction opacity, M map, B benchmark (operators).
 
-| Key | Where | Does |
-|---|---|---|
-| Enter | any step | take the suggestion as your answer and go on |
-| Shift+Enter | any step | go back one step |
-| Ctrl+S | anywhere | save the audit |
-| ← → | crop view (steps 6, 7) | previous or next crop; flagged crops come first |
-| Tab | crop view | next crop you have not answered |
-| Y / N / U | crop view | yes, no or unsure for the highlighted problem (↑ ↓ move between problems) |
-| 1 / 2 / 3 | crop view | the layer is OK, has minor errors, has major errors |
-| Space, Shift+Space | crop view | layer OK; the whole crop is fine |
-| C | crop view | can't tell from this crop |
-| T, V | crop view | switch raw and prediction; side by side |
-| - and + | crop view | weaker or stronger prediction overlay |
-| A | crop view | all crops instead of only the flagged ones |
-| M | crop view | show the crop on the map |
-| B | step 1 and crop view, operators | copy this dataset or crop into the open benchmark |
+## Benchmarks
 
-At the top, the page adds the steps up to a decision (exclude, fix or ready). Confirm it or
-pick another, then save. When you disagree with a check, say why with its fixed reasons; a
-disagreement is the most useful thing you can give the checks.
+A benchmark is a tick on a person's review (`in_benchmark`); there are no benchmark tables,
+versions or splits. The three benchmarks:
 
-Press **B** on a clear, instructive case: one the models got wrong, or a typical example
-of a reason. B copies the dataset or crop into the benchmark; it never moves anything
-there on its own, and it does not change the review.
+- **Dataset evaluation:** `dataset_human_reviews` ticked, on the dataset evaluation.
+- **Deadwood** and **Tree cover:** `tile_human_reviews` ticked, on that layer.
 
-**Known issue (16 Nov 2026):** on crops that are fully forest, the judges often claim
-"trees missed" although the tree cover is fine, because the old drawing shows no edge
-there. Trust your eyes over the models on those crops until the fix (below) is live.
+A target's label is its newest review, whoever gave it. Only operators add to a
+benchmark:
 
-## The review list
+- **Label new random** on the Benchmark tab draws one target at a time
+  (`audit.draw_target`): a dataset with a current dataset evaluation run, or a tile of a
+  random kept dataset with a call on the layer, never one that is ticked already. The
+  models stay hidden until the target has a label. K or Skip draws another; skipped ones
+  do not come back during the visit. The label is saved as a review with the tick, so it
+  is also that dataset's or tile's review.
+- **B** in the Audit Review stores your answer on the dataset (step 1) or the tile with the
+  tick, or takes it out again.
+- **Remove (Del)** in Review existing labels clears the tick (`audit.remove_benchmark_target`);
+  the review stays. Undo stores the label again with the tick, while the page is open.
 
-The review list is a stream, not a fixed set. Datasets join it when their checks have run:
+Tiles of a dataset whose decision is exclude leave the tile benchmarks while it stands;
+their labels stay.
 
-- **Batches.** The pilot ran 100 datasets on 11 and 12 Nov 2026. The next 100 (the newest
-  fully processed datasets without an audit) were queued on 16 Nov 2026. Each batch first
-  gets the georeferencing and date checks on the processors at low priority, then the
-  dataset evaluation and the prediction check in the audit worker.
-- **New uploads.** Once a version of a judged check is active, the audit worker gives
-  every newly processed dataset a run of it. The date estimate runs as an upload stage.
-  The georeferencing check does not run on uploads yet and is queued explicitly.
-- **The backfill.** Later, every historical dataset is run through the checks. Old audits
-  are imported as history, marked as imported, and are not treated as truth.
+## How a change goes live
 
-Each check version has a mode: `review_all` (every result goes to a person; every new
-version starts here), `review_uncertain` (only unsure or disagreeing results) and
-`auto_apply` (only a 5% spot check). Moving a check to a less strict mode is Janusch's
-decision, based on its benchmark score and on how often reviewers corrected it.
-
-The **Disagreements** tab lists datasets where people disagree with each other or with the
-checks. Those go to adjudication.
-
-## Benchmarks (the gold answer keys)
-
-A benchmark answers one question: how good is a check version, measured against people?
-It is a fixed list of targets (crops or whole datasets). The truth is the answers people
-gave on those targets in the **Benchmark** tab of the audit, blind: you see the models'
-and others' answers only after your own. Answers are stored per target, so they survive
-new benchmark versions.
-
-Rules:
-
-- One benchmark holds crops or datasets, never both. Each check has at most one open
-  version, where new targets go; a frozen version never changes, and a bigger set is a new
-  version.
-- About 1 in 5 datasets is held out by a fixed hash, and all crops of a dataset share its
-  side. Tuning looks at dev only; the go or no-go for a change uses holdout only.
-- Benchmark runs use their own queue. They never become a dataset's current result and
-  never touch the review list.
-- The old audits are not gold: auditors disagreed a lot (some excluded under 1% of their
-  datasets, others over 40%).
-
-### The two benchmarks we have
-
-| Benchmark | Targets | Built from | State on 16 Nov 2026 |
-|---|---|---|---|
-| Prediction quality, `pq-gold-dt1272` | Crops, judged per layer | Crops Janusch graded during the first prediction study (DT-1272) | v1 frozen with 197 crops. v2 open with 172 (86 dev, 86 holdout), after 25 early test crops at the wrong scale were removed |
-| Dataset evaluation, `dataset-evaluation-gold` | Whole datasets: keep, fix or exclude | 125 past exclusions spread by reason (blurry 35, no trees 25, artifacts 18, not RGB 15, broken ortho 12, too dark 8, other 12) and 125 kept (85 without issues, 40 fixable, the hard cases) | v1 open with 250 (207 dev, 43 holdout); not labeled yet |
-
-The past audit decisions only make sure every reason is represented; the labels people give
-in the Benchmark tab are the truth. The tab shows stored images: the gold crops carry their
-own, and a dataset target shows the overview and crops a dataset evaluation run stored, so
-it needs one such run before it can be labeled.
-
-Targets for prediction quality (DT-1272): at the dataset level, catch at least 90% of bad
-layers and wrongly exclude at most 20% of good ones. The judges reach a crop-level AUC of
-about 0.93 averaged; at the last measurement the dataset rule for deadwood was still below
-target.
-
-### How a change goes live
-
-Every change to a judged check follows the same loop. Fix A is the current example.
-
-1. **Spot a pattern in review.** In the pilot, the judges called "trees missed" on many
-   fully forested crops. The cause was the drawing: forest that fills the crop showed only
-   a faint tint with no edge.
-2. **Build a new version.** A changed prompt, drawing, rule or setting is a new check
-   version (here prediction quality v2: forest outlined along the crop border, a stronger
-   fill, and each layer's share of the crop in the prompt; branch
-   `fix/forest-overlay-dt-1560`). The old version stays.
-3. **Score old against new on the benchmark.** Run both on the gold targets and compare.
-   Tune on dev; decide on holdout.
-4. **Ship.** A PR with tests and the scores, merged on Janusch's "ship".
-5. **Activate.** An operator makes the new version active. New uploads then get it.
-6. **Rerun, with his go.** Rerunning datasets that already have a result is a production
-   rerun and needs Janusch's go, with the count and the expected model calls. Runs queued
-   for the old version should fail with a clear "wrong version" error instead of being
-   judged with the new code. The dataset evaluation already does this; fix A adds the same
-   guard to prediction quality.
-
-A new rule alone (new thresholds, a new way to combine judges) needs no model calls: it is
-recomputed from the stored answers.
-
-## Not the same: the disturbance benchmark
-
-The **satellite disturbance benchmark** (Releases, core team; v8 prepared in DT-1556) is a
-separate thing. It scores satellite products of tree cover and deadwood change against
-reference polygons over time, shown in its own viewer. It has nothing to do with the audit
-judges. Its docs are in `docs/releases/disturbance-benchmark-*.md`.
-
-## State on 16 Nov 2026 and what comes next
-
-- The review page with all 7 steps, the crop view with the prediction slider and the
-  Benchmark tab are live.
-- The audit worker is paused until fix A is live, so the new 100 are not judged with the
-  old drawing. Georeferencing and date checks for them run on the processors.
-- Fix A is being scored old against new on the 172 gold crops; its PR follows.
-- COG streaming (DT-1561): both judged checks read the image straight from the stored COG
-  instead of copying the whole file, and store a run's images over one connection. This
-  saves about a minute per prediction run.
-- Next, in this order:
-  1. Make the review workflow and page practical. Reviewers' feedback on what is slow or
-     confusing comes first; everything on the page can change.
-  2. Audit 100 to 200 datasets, and add the hard cases to the benchmarks with B.
-  3. Improve the prompts of prediction quality and dataset evaluation, scored on the
-     benchmarks.
-- Also open: a rerun of tree cover on the pilot datasets after fix A (needs Janusch's go),
-  labeling the 250 evaluation datasets, and reviewer-placed extra crops.
-
-Update this section when one of these changes.
+1. Spot a pattern in review.
+2. Build a new check version (other models or another question) or new rules (another
+   deciding judge, other thresholds). The old ones stay.
+3. Score old against new on the benchmarks.
+4. Ship through a PR, merged on Janusch's "ship".
+5. An operator switches it on (`audit.activate_version`, `audit.activate_rules`). New
+   rules apply to every dataset at once from the stored answers, with no model calls. A
+   new version needs reruns: each dataset keeps its old result until its rerun finishes.
+6. Reruns of datasets that already have a result need Janusch's go, with the count and the
+   expected model calls.
 
 ## For agents
 
 - Production is read-only for you. Read audit tables as `team_analyst`
   ([analyst-database-access.md](analyst-database-access.md)).
 - These need Janusch's own words in the thread: starting or stopping the worker,
-  activating a version, queueing runs or a backfill, any rerun, adding to or removing from
-  a benchmark outside the page, and every message to a reviewer. He usually runs the
-  command himself; give it to him in one code block.
-- Read-only status: `systemctl --user is-active deadtrees-audit-worker`,
-  `~/.local/state/deadtrees-audit-worker/status.json`, `python -m
-  processor.src.audit_worker status`.
-- Never publish non-public dataset ids in the repo (it is public). A benchmark seeded from
-  a list therefore goes in through the page or a reviewed SQL script Janusch runs, not
-  through a migration.
-- Every job on the processing server runs under a memory cap of at most 10 GB, because
-  production ODM runs there too.
+  activating a version or rules, queueing runs or a backfill, any rerun, changing a
+  benchmark outside the page, and every message to a reviewer.
+- Never publish non-public dataset ids in the repo (it is public).
 - Judges may see private datasets; only auditors see the models' answers.
+
+## Not the same: the disturbance benchmark
+
+The satellite disturbance benchmark (Releases, core team) scores satellite change products
+against reference polygons. It has nothing to do with the audit judges; see
+`docs/releases/disturbance-benchmark-*.md`.
 
 ## Read next
 
-- [audit-checks.md](../audit-checks.md): tables, verdicts, modes, the worker, the review
-  page and the benchmark mechanics.
+- [audit-checks.md](../audit-checks.md): the tables, views and functions in detail.
 - [dataset-evaluation.md](../dataset-evaluation.md) and
-  [prediction-quality.md](../prediction-quality.md): what each judged check sees and its
-  rule.
+  [prediction-quality.md](../prediction-quality.md): what each judged check sees.
 - `docs/qa/playbooks/auditor-check-review.md`: local QA of the review page.

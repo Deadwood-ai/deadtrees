@@ -1,187 +1,91 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, message, notification } from "antd";
 import confetti from "canvas-confetti";
 import { IDataset } from "../../types/dataset";
-import {
-	useDatasetAudit,
-	useSaveDatasetAudit,
-	AuditFormValues,
-	useOrthoMetadata,
-	useMarkAsReviewed,
-} from "../../hooks/useDatasetAudit";
+import { useCogMetadata } from "../../hooks/useDatasetAudit";
 import { useAuth } from "../../hooks/useAuthProvider";
 import { useDownload } from "../../hooks/useDownloadProvider";
 import { useAuditNavigationGuard } from "../../hooks/useAuditNavigationGuard";
 import { describeAuditLockDenial, isAuditLeaseConflict, useAuditLock } from "../../hooks/useAuditLock";
 import { useAuditNavigation } from "../../hooks/useAuditNavigation";
-import { useDatasetFlags, useUpdateFlagStatus } from "../../hooks/useDatasetFlags";
-import { usePhenologyData } from "../../hooks/usePhenologyData";
-import {
-	useAcquisitionDateDecisions,
-	useAcquisitionDateEstimate,
-	useGeorefCheck,
-	useAuditReviewQueue,
-	useAuditSuggestions,
-} from "../../hooks/useAcquisitionDateEstimate";
-import { suggestedAuditValues } from "../../utils/acquisitionDate";
-import { answeredValues } from "../../utils/cropAnswers";
-import { REPROCESS_DRAFT, answersWithSave, withCheckSuggestions } from "../../utils/auditPrefill";
-import { withoutUncertainDate } from "../../utils/acquisitionDate";
-import { useAuditChecks, useSaveAuditAnswers } from "../../hooks/useAuditChecks";
-import type { IAcquisitionDateDecision, IAuditReviewItem, IAuditSuggestion } from "../../types/acquisitionDate";
-import { useSeasonPrompt } from "../../hooks/useSeasonPrompt";
-import { supabase } from "../../hooks/useSupabase";
+import { useAcquisitionDateEstimate, useGeorefCheck } from "../../hooks/useAcquisitionDateEstimate";
+import { useAuditChecks, useAuditReviews, useSaveDatasetReviews } from "../../hooks/useAuditChecks";
+import { useAuditDatasetResult, useAuditDatasetResults } from "../../hooks/useAuditDatasetResults";
+import { initialDraft, reviewAnswers, type IReviewDraft } from "../../utils/auditReview";
+import { nextPendingReview } from "../../utils/auditReviewList";
 import { trackAppEvent } from "../../utils/analytics";
 import { useAuditAOIState } from "./useAuditAOIState";
-
-const NO_SUGGESTIONS: IAuditSuggestion[] = [];
-const NO_DECISIONS: IAcquisitionDateDecision[] = [];
-const NO_REVIEW_ITEMS: IAuditReviewItem[] = [];
-
-export interface UseAuditDetailStateProps {
-	dataset: IDataset;
-}
 
 const GRATITUDE_MESSAGES = [
 	"Thank you! That was careful work, and it shows. 🌲",
 	"Grateful for your effort - this is the hard part. 🙌",
 	"Thanks for the precision. It really adds up. 🎯",
 	"Appreciate the care. One more dataset, way better. ✨",
-	"Thank you for doing the unglamorous, important bit. 🧠",
 	"Thanks - your sharp eyes just helped a lot. 👀",
-	"Grateful for the patience. The data is cleaner now. 🧼",
 	"Thanks! The forest data owes you a coffee. ☕",
 	"Appreciate you. This work genuinely matters. 💚",
-	"Thank you! That was brainwork, not busywork. 🧠",
-	"Thanks for the focus - and the accuracy boost. 🎯",
-	"Grateful for the hustle. Quality is up. 📈",
-	"Thank you for the detail work. Seriously. 🔎",
 	"Thanks! You just made the map kinder to truth. 🗺️",
-	"Appreciate the craft. That was solid. 🪵",
-	"Thank you. That was not easy, and you did it well. 💪",
-	"Thanks - another dataset made less chaotic. 🧹",
-	"Grateful for your time. The trees approve. 🌳",
-	"Thank you! That is the kind of audit that counts. ✅",
-	"Thanks for the care. The canopy salutes you. 🌿",
-	"Appreciate the effort. Signal-to-noise just improved. 📡",
 	"Thank you! Your work makes this trustworthy. 🔒",
-	"Grateful for the grind - and the win. 🏆",
-	"Thanks. You just leveled up data quality. 🎉",
+	"Thanks for the care. The canopy salutes you. 🌿",
 ];
 
-const getRandomGratitudeMessage = () => {
-	if (GRATITUDE_MESSAGES.length === 0) {
-		return "Thank you. That was meaningful work. 🌲";
-	}
-	const idx = Math.floor(Math.random() * GRATITUDE_MESSAGES.length);
-	return GRATITUDE_MESSAGES[idx];
-};
-
-const getLocalDayRangeIso = () => {
-	const now = new Date();
-	const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-	const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-	return { startIso: start.toISOString(), endIso: end.toISOString() };
-};
-
-const getDailyAuditCount = async (userId: string) => {
-	const { startIso, endIso } = getLocalDayRangeIso();
-	const { count, error } = await supabase
-		.from("dataset_audit")
-		.select("dataset_id", { count: "exact", head: true })
-		.eq("audited_by", userId)
-		.gte("audit_date", startIso)
-		.lte("audit_date", endIso);
-	if (error) throw error;
-	return count ?? 0;
-};
-
-const fireConfetti = (count: number) => {
-	const safeCount = Math.max(1, count);
-	const intensity = Math.min(safeCount, 25);
-	const particleCount = 25 + intensity * 4;
-	const spread = 55 + intensity * 1.6;
-	const startVelocity = 22 + intensity * 0.6;
-	const ticks = 140 + intensity * 6;
-	const scalar = 0.85 + intensity * 0.01;
+const thankYou = () => {
 	try {
-		confetti({
-			particleCount,
-			spread,
-			startVelocity,
-			gravity: 0.9,
-			decay: 0.9,
-			scalar,
-			ticks,
-			origin: { y: 0.7 },
-		});
+		confetti({ particleCount: 60, spread: 70, startVelocity: 26, gravity: 0.9, decay: 0.9, ticks: 160, origin: { y: 0.7 } });
 	} catch (error) {
 		console.debug("Confetti skipped", error);
 	}
+	notification.success({
+		message: "Thank you 🌲✨",
+		description: GRATITUDE_MESSAGES[Math.floor(Math.random() * GRATITUDE_MESSAGES.length)],
+		placement: "top",
+		duration: 5,
+	});
 };
 
-export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
-	const navigate = useNavigate();
-	const [form] = Form.useForm<AuditFormValues>();
-	const { user } = useAuth();
+/** Whether the reviewer changed the draft: a field whose value differs from where it started
+ * (unset and null are the same). */
+function draftChanged(start: IReviewDraft, now: IReviewDraft): boolean {
+	const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+	const keys = new Set([...Object.keys(start), ...Object.keys(now)]) as Set<keyof IReviewDraft>;
+	return [...keys].some((k) => !same(start[k], now[k]));
+}
 
-	// Download state
+/** Everything the Audit Review detail page holds: the dataset's check results and outputs, the
+ * reviewer's draft (an antd form of IReviewDraft), the review lease, the AOI editor and Save,
+ * which stores only dataset reviews (utils/auditReview reviewAnswers). */
+export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
+	const navigate = useNavigate();
+	const [form] = Form.useForm<IReviewDraft>();
+	const { user } = useAuth();
 	const { isDownloading, startDownload, finishDownload, currentDownloadId } = useDownload();
 
-	const {
-		currentGeometryRef: currentAOIGeometry,
-		hasAOI,
-		isLoaded: isAOILoaded,
-		isDirty: isAOIDirty,
-		isSaving: isSavingAOI,
-		toolbarState: aoiToolbarState,
-		setToolbarState: setAoiToolbarState,
-		handleChange: handleAOIChange,
-		handleSave: saveAOIWithLease,
-	} = useAuditAOIState(dataset.id);
-
-	// Data hooks
-	const { data: auditData, isLoading: isAuditLoading } = useDatasetAudit(dataset.id);
-	const { data: flags = [], isLoading: isFlagsLoading } = useDatasetFlags(dataset.id);
-	const { mutateAsync: updateFlagStatusWithLease, isPending: isUpdatingFlag } = useUpdateFlagStatus();
-	const { mutateAsync: saveAudit, isPending: isSavingAudit } = useSaveDatasetAudit();
-	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
-	const { mutateAsync: markAsReviewed, isPending: isMarkingReviewed } = useMarkAsReviewed();
-	const { data: orthoMetadata, isLoading: isOrthoLoading } = useOrthoMetadata(dataset.id);
-	const { data: phenologyData, isLoading: isPhenologyLoading } = usePhenologyData(dataset.id);
-	const { data: acquisitionDateEstimate, isLoading: isEstimateLoading } = useAcquisitionDateEstimate(dataset.id);
+	const aoi = useAuditAOIState(dataset.id);
+	const { mutateAsync: saveReviews } = useSaveDatasetReviews();
+	const { data: cogMetadata, isLoading: isCogLoading } = useCogMetadata(dataset.id);
+	const { data: dateEstimate } = useAcquisitionDateEstimate(dataset.id);
 	const { data: georefCheck } = useGeorefCheck(dataset.id);
-	const { data: acquisitionDateDecisions = NO_DECISIONS } = useAcquisitionDateDecisions(dataset.id);
-	const { data: auditSuggestionsData } = useAuditSuggestions(dataset.id);
-	const { data: reviewItems } = useAuditReviewQueue(dataset.id);
 	const auditChecksQuery = useAuditChecks(dataset.id);
 	const auditChecks = auditChecksQuery.data;
-	const auditReviewItems = reviewItems ?? NO_REVIEW_ITEMS;
-	// The stored suggestions plus the checks' calls. Memoised: a fresh list per render would re-run
-	// the prefill effect and reset edits.
-	const auditSuggestions = useMemo(
-		() => withCheckSuggestions(withoutUncertainDate(auditSuggestionsData ?? NO_SUGGESTIONS, acquisitionDateEstimate), auditChecks, dataset.id),
-		[auditSuggestionsData, acquisitionDateEstimate, auditChecks, dataset.id],
-	);
+	const auditReviewsQuery = useAuditReviews(dataset.id);
+	const resultQuery = useAuditDatasetResult(dataset.id);
+	const result = resultQuery.data;
 
-	// Navigation context
-	const { getNextDatasetId, currentIndex, totalCount, listPath } = useAuditNavigation();
-
-	// Audit lease: claimed, renewed and released with this page
+	const { listPath } = useAuditNavigation();
+	// Save & Next goes on to the next dataset that needs review, whichever list this was opened from
+	const { data: allResults } = useAuditDatasetResults();
+	const nextDatasetId = nextPendingReview(allResults?.rows ?? [], dataset.id);
 	const { state: auditLock, continueHere: continueAuditHere } = useAuditLock(dataset.id);
 
-	// Season prompt
-	const { copyPromptWithImage } = useSeasonPrompt();
-
-	// Local state
 	const [isSubmitting, setIsSubmitting] = useState(false);
-	const [hasFormChanges, setHasFormChanges] = useState(false);
-	const [navigateToNext, setNavigateToNext] = useState(false);
-	// form fields currently holding a machine suggestion rather than a saved value
-	const [prefilledFields, setPrefilledFields] = useState<string[]>([]);
+	const navigateToNext = useRef(false);
+	// what the draft started from: leaving asks only when something differs from it
+	const [startDraft, setStartDraft] = useState<IReviewDraft | null>(null);
+	const draft = Form.useWatch([], { form, preserve: true }) as IReviewDraft | undefined;
+	const hasFormChanges = aoi.isDirty || (!!startDraft && !!draft && draftChanged(startDraft, draft));
 
-	// Another auditor holds the dataset (or the claim failed): return to the queue.
+	// Another auditor holds the dataset (or the claim failed): return to the list.
 	const auditLockError =
 		auditLock.status === "denied" && !auditLock.heldByYou
 			? describeAuditLockDenial(auditLock)
@@ -189,38 +93,18 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 				? auditLock.message
 				: null;
 	// The auditor's own other page holds it: let them choose where to continue.
-	const auditOpenElsewhereMessage =
-		auditLock.status === "denied" && auditLock.heldByYou ? describeAuditLockDenial(auditLock) : null;
+	const auditOpenElsewhereMessage = auditLock.status === "denied" && auditLock.heldByYou ? describeAuditLockDenial(auditLock) : null;
 	const auditLockLostMessage =
 		auditLock.status !== "lost"
 			? null
 			: auditLock.heldByYou
-				? "You continued this audit in another tab or window. Saving here is turned off so that page's work is not overwritten."
+				? "You continued this review in another tab or window. Saving here is turned off so that page's work is not overwritten."
 				: `${auditLock.holderEmail ?? "Another auditor"} opened this dataset while this page was inactive. Saving here is turned off so their work is not overwritten.`;
 	const isLockingAudit = auditLock.status === "claiming";
 	const auditLeaseId = auditLock.status === "held" ? auditLock.leaseId : null;
-	const updateFlagStatus = (payload: Parameters<typeof updateFlagStatusWithLease>[0]) =>
-		updateFlagStatusWithLease({ ...payload, auditLeaseId });
 
-	// Navigation guard
-	const { showExitConfirmation } = useAuditNavigationGuard({
-		isActive: !auditLockError && !isSubmitting,
-		hasFormChanges,
-	});
+	const { showExitConfirmation } = useAuditNavigationGuard({ isActive: !auditLockError && !isSubmitting, hasFormChanges });
 
-	// Reset form state when dataset changes
-	useEffect(() => {
-		setHasFormChanges(false);
-		form.resetFields();
-	}, [dataset.id, form]);
-
-	useEffect(() => {
-		if (auditLock.status === "held") {
-			setHasFormChanges(true);
-		}
-	}, [auditLock.status]);
-
-	// A dataset held by someone else cannot be audited here; return to the queue.
 	useEffect(() => {
 		if (!auditLockError) return;
 		message.error(auditLockError);
@@ -228,319 +112,112 @@ export function useAuditDetailState({ dataset }: UseAuditDetailStateProps) {
 		return () => clearTimeout(timeout);
 	}, [auditLockError, navigate, listPath]);
 
-	// Every audit write carries this page's lease; without it nothing is saved.
+	// The draft starts from the stored values once they load, once per dataset: later refetches
+	// never touch what the reviewer is editing. Save starts it again from the new values.
+	const startedFor = useRef<number | null>(null);
+	useEffect(() => {
+		if (resultQuery.isPending || startedFor.current === dataset.id) return;
+		startedFor.current = dataset.id;
+		form.resetFields();
+		form.setFieldsValue(initialDraft(result));
+		setStartDraft(initialDraft(result));
+	}, [dataset.id, resultQuery.isPending, result, form]);
+
+	// Every write carries this page's lease; without it nothing is saved.
 	const requireAuditLease = () => {
 		if (auditLock.status === "held") return auditLock.leaseId;
-		message.error(auditLockLostMessage ?? "This page does not hold the audit lock. Nothing was saved.");
+		message.error(auditLockLostMessage ?? "This page does not hold the review lock. Nothing was saved.");
 		return null;
 	};
 
 	const handleSaveAOI = () => {
 		const leaseId = requireAuditLease();
-		if (leaseId) void saveAOIWithLease(leaseId);
+		if (leaseId) void aoi.handleSave(leaseId);
 	};
 
-	// Set form values when audit data is loaded
-	useEffect(() => {
-		if (auditData) {
-			const partial: Partial<AuditFormValues> = { ...auditData } as unknown as Partial<AuditFormValues>;
-			const toDelete: (keyof Partial<AuditFormValues>)[] = ["audit_date"];
-			toDelete.forEach((k) => delete (partial as Record<string, unknown>)[k as string]);
-			form.setFieldsValue(partial);
-		}
-	}, [auditData, form]);
+	const leave = () => {
+		const next = navigateToNext.current ? nextDatasetId : null;
+		if (navigateToNext.current && !next) message.info("No other dataset needs review");
+		navigate(next ? `/dataset-audit/${next}` : listPath);
+	};
 
-	// Where a check has run, the reviewer's answer decides its saved-audit field; a prediction
-	// layer's is the rating from its crops.
-	const answered = useMemo(() => answeredValues(auditChecks, user?.id), [auditChecks, user?.id]);
-
-	// Machine suggestions prefill the form once per page load, after the saved
-	// audit, the suggestions and the re-review items have all arrived: fields
-	// the saved audit leaves empty, and the fields of items listed for re-review
-	// (newer evidence disagrees with the saved value). Later refetches never
-	// touch what the auditor is editing; nothing is saved until the auditor saves.
-	const prefilledForRef = useRef<number | null>(null);
-	useEffect(() => {
-		if (prefilledForRef.current === dataset.id) return;
-		if (auditData === undefined || auditSuggestionsData === undefined || reviewItems === undefined || auditChecksQuery.isLoading || isEstimateLoading) return;
-		prefilledForRef.current = dataset.id;
-		const { values: suggested, fields } = suggestedAuditValues(
-			auditData as Record<string, unknown> | null,
-			auditSuggestions,
-			reviewItems.flatMap((r) => r.fields),
-		);
-		form.setFieldsValue({ ...suggested, ...answered });
-		setPrefilledFields(fields);
-	}, [dataset.id, auditData, auditSuggestionsData, auditSuggestions, auditChecksQuery.isLoading, isEstimateLoading, reviewItems, answered, form]);
-
-	// The form follows the answers whenever they or the saved audit load or change,
-	// so an answer and its saved field cannot disagree. Declared after the two
-	// effects above: in one commit the answers are applied last.
-	useEffect(() => {
-		if (Object.keys(answered).length) form.setFieldsValue(answered);
-	}, [answered, auditData, form]);
-
-	// Track form changes
-	useEffect(() => {
-		const handleFormChange = () => setHasFormChanges(true);
-		const formElement = document.querySelector(".ant-form");
-		if (!formElement) return;
-		formElement.addEventListener("change", handleFormChange);
-		formElement.addEventListener("input", handleFormChange);
-		return () => {
-			formElement.removeEventListener("change", handleFormChange);
-			formElement.removeEventListener("input", handleFormChange);
+	const handleSubmit = async (values: IReviewDraft) => {
+		const stop = (text: string) => {
+			navigateToNext.current = false;
+			message.error(text);
 		};
-	}, []);
+		if (aoi.isDirty) return stop("Please save the AOI edits before saving the review.");
+		const { reviews, problems } = reviewAnswers(values, dataset.id, result);
+		if (problems.length) return stop(problems[0]);
+		if (!requireAuditLease()) return stop("Nothing was saved.");
 
-	// Form submit handler
-	const handleSubmit = async (values: AuditFormValues) => {
-		if (!isAOILoaded) {
-			setNavigateToNext(false);
-			message.warning("AOI is still loading, please wait...");
-			return;
-		}
-
-		if (flags.some((f) => f.status === "open")) {
-			setNavigateToNext(false);
-			message.error("There are open user-reported issues. Please acknowledge them before saving.");
-			return;
-		}
-
-		if (values.final_assessment === "fixable_issues" && !values.notes?.trim()) {
-			setNavigateToNext(false);
-			message.error("Please provide detailed notes for the fixable issues");
-			return;
-		}
-
-		if (values.final_assessment === "exclude_completely" && !values.notes?.trim()) {
-			setNavigateToNext(false);
-			message.error("Please provide detailed notes for excluding this dataset");
-			return;
-		}
-
-		if (values.final_assessment === "no_issues" && !currentAOIGeometry.current) {
-			setNavigateToNext(false);
-			message.error("Please draw an AOI on the map before submitting");
-			return;
-		}
-
-		if (isAOIDirty) {
-			setNavigateToNext(false);
-			message.warning("Please save AOI edits before saving the audit.");
-			return;
-		}
-
-		const leaseId = requireAuditLease();
-		if (!leaseId) {
-			setNavigateToNext(false);
-			return;
-		}
-
+		setIsSubmitting(true);
 		try {
-			setIsSubmitting(true);
-
-			// the form's store also holds drafts that have no column (step 1's reprocessing draft)
-			const auditValues: Record<string, unknown> = { ...values };
-			delete auditValues[REPROCESS_DRAFT];
-			const auditPayload = {
-				...auditValues,
-				dataset_id: dataset.id,
-				aoi_done: !!currentAOIGeometry.current,
-			};
-
-			const isCompletion = !auditData;
-			// Saving is your review of every step: the checks' calls you left as they are become your
-			// answers, marked as given with the save. They go first: if they fail, nothing is saved and
-			// you stay on the page to try again; if the audit then fails, the answers are already yours
-			// and a second save skips them. The whole store: it holds step 1's reprocessing draft.
-			const withSave = answersWithSave(auditChecks, user?.id, form.getFieldsValue(true), dataset.id);
-			if (withSave.length) {
-				try {
-					await saveAnswers(withSave);
-				} catch (error) {
-					console.debug("Failed to store the answers given with the save", error);
-					setNavigateToNext(false);
-					message.error("Your answers on the automated checks were not saved, so the audit was not saved either. Please try again.");
-					return;
-				}
+			if (reviews.length) {
+				await saveReviews(reviews);
+				trackAppEvent("audit_completed", { dataset_id: dataset.id, final_assessment: values.decision ?? "unchanged" });
 			}
-			await saveAudit({ values: auditPayload, leaseId });
-			trackAppEvent("audit_completed", {
-				dataset_id: dataset.id,
-				final_assessment: values.final_assessment || "unknown",
-			});
-			if (!isCompletion) {
-				message.success("Audit data updated successfully");
-			}
-
-			let dailyCountText = "";
-			let dailyCountForConfetti = 1;
-			if (user?.id) {
-				try {
-					const dailyCount = await getDailyAuditCount(user.id);
-					dailyCountText = ` You have audited ${dailyCount} today. 🎉`;
-					dailyCountForConfetti = dailyCount || 1;
-				} catch (error) {
-					console.debug("Failed to load daily audit count", error);
-				}
-			}
-
-			fireConfetti(dailyCountForConfetti);
-			notification.success({
-				message: "Thank you 🌲✨",
-				description: `${getRandomGratitudeMessage()}${dailyCountText}`,
-				placement: "top",
-				duration: 6,
-			});
-
-			setHasFormChanges(false);
-
-			setTimeout(() => {
-				if (navigateToNext) {
-					const nextId = getNextDatasetId(dataset.id);
-					if (nextId) {
-						navigate(`/dataset-audit/${nextId}`);
-					} else {
-						message.info("All datasets in filter completed");
-						navigate(listPath);
-					}
-				} else {
-					navigate(listPath);
-				}
-				setNavigateToNext(false);
-			}, 100);
+			// the next draft starts from what is stored now
+			const { data: stored } = await resultQuery.refetch();
+			form.resetFields();
+			form.setFieldsValue(initialDraft(stored ?? result));
+			setStartDraft(initialDraft(stored ?? result));
+			if (reviews.length) thankYou();
+			else message.info("Nothing changed, so nothing was saved.");
+			leave();
 		} catch (error) {
-			console.error("Error saving audit data:", error);
-			if (isAuditLeaseConflict(error)) {
-				message.error("Another audit page holds this dataset. Your changes were not saved.");
-			} else {
-				message.error("Failed to save audit data");
-			}
+			console.error("Error saving the review:", error);
+			message.error(isAuditLeaseConflict(error) ? "Another review page holds this dataset. Your answers were not saved." : "Your answers were not saved. Please try again.");
 		} finally {
 			setIsSubmitting(false);
-			setNavigateToNext(false);
+			navigateToNext.current = false;
 		}
 	};
 
 	const handleSaveAndNext = () => {
-		setNavigateToNext(true);
+		navigateToNext.current = true;
 		form.submit();
 	};
 
-	const handleCancel = () => {
-		showExitConfirmation(() => navigate(listPath));
-	};
-
-	const handleMarkReviewedAndNext = async () => {
-		if (isSavingAOI) {
-			message.warning("Please wait for the AOI save to finish.");
-			return;
-		}
-		if (isAOIDirty) {
-			message.warning("Please save AOI edits before marking the audit reviewed.");
-			return;
-		}
-		const leaseId = requireAuditLease();
-		if (!leaseId) return;
-
-		try {
-			await markAsReviewed({ datasetId: dataset.id, leaseId });
-			const nextId = getNextDatasetId(dataset.id);
-			if (nextId) {
-				navigate(`/dataset-audit/${nextId}`);
-			} else {
-				message.success("Review complete - returning to list");
-				navigate(listPath);
-			}
-		} catch (error) {
-			console.error("Error marking as reviewed:", error);
-			message.error(
-				isAuditLeaseConflict(error)
-					? "Another audit page holds this dataset. The review was not recorded."
-					: "Failed to mark as reviewed",
-			);
-		}
-	};
-
-	// Computed values
-	const isLoading = isAuditLoading || !user || isLockingAudit;
-	const isSaving = isSavingAudit || isSubmitting;
-	const isPending = !auditData;
-	const isReviewed = auditData?.reviewed_at != null;
-	const nextDatasetId = getNextDatasetId(dataset.id);
-	const hasNextDataset = nextDatasetId !== null;
-	const currentDatasetIndex = currentIndex(dataset.id);
+	const handleCancel = () => showExitConfirmation(() => navigate(listPath));
 
 	return {
-		// Form
 		form,
 		handleSubmit,
 		handleSaveAndNext,
 		handleCancel,
-		handleMarkReviewedAndNext,
 
-		// State
-		isLoading,
-		isSaving,
-		isPending,
-		isReviewed,
+		isLoading: !user || isLockingAudit || resultQuery.isLoading,
+		isSaving: isSubmitting,
 		auditLockError,
 		isLockingAudit,
 		auditLockLostMessage,
 		auditLeaseId,
 		auditOpenElsewhereMessage,
 		continueAuditHere,
-		navigateToNext,
 
-		// Data
-		user,
-		auditData,
-		flags,
-		isFlagsLoading,
-		orthoMetadata,
-		isOrthoLoading,
-		phenologyData,
-		isPhenologyLoading,
-		acquisitionDateEstimate,
+		result,
+		resultFailed: resultQuery.isError,
+		auditReviews: auditReviewsQuery.data,
+		cogMetadata,
+		isCogLoading,
+		dateEstimate,
 		georefCheck,
-		acquisitionDateDecisions,
-		auditSuggestions,
-		auditReviewItems,
 		auditChecks,
-		auditChecksFailed: auditChecksQuery.isError,
-		retryAuditChecks: auditChecksQuery.refetch,
-		// a field the reviewer's answer decides is no longer "suggested"
-		prefilledFields: prefilledFields.filter((field) => !(field in answered)),
+		auditChecksFailed: auditChecksQuery.isError || auditReviewsQuery.isError,
+		retryChecks: () => {
+			void auditChecksQuery.refetch();
+			void auditReviewsQuery.refetch();
+			void resultQuery.refetch();
+		},
 
-		// Flags
-		updateFlagStatus,
-		isUpdatingFlag,
-
-		// Navigation
 		nextDatasetId,
-		hasNextDataset,
-		currentDatasetIndex,
-		totalCount,
-		isMarkingReviewed,
 
-		// AOI
-		hasAOI,
-		isAOILoaded,
-		handleAOIChange,
-		handleSaveAOI,
-		aoiToolbarState,
-		setAoiToolbarState,
-		isAOIDirty,
-		isSavingAOI,
+		aoi: { ...aoi, handleSave: handleSaveAOI },
 
-		// Download
 		isDownloading,
 		startDownload,
 		finishDownload,
 		currentDownloadId,
-
-		// Season prompt
-		copyPromptWithImage,
 	};
 }

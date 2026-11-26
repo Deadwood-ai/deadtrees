@@ -47,7 +47,7 @@ def archive_dataset(db, owner, *, access='public', archived=False, excluded=Fals
 	)
 	if excluded:
 		db.execute(
-			"INSERT INTO public.dataset_audit (dataset_id,final_assessment) VALUES (%s,'exclude_completely')", (row,)
+			"INSERT INTO audit.legacy_decisions(dataset_id,decision,decided_at) VALUES (%s,'exclude',now())", (row,)
 		)
 	for source in labels:
 		db.execute(

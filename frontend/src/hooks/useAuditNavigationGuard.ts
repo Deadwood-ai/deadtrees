@@ -35,9 +35,9 @@ export function useAuditNavigationGuard({ isActive, hasFormChanges }: UseAuditNa
     [hasFormChanges],
   );
 
-  // Ask before browser refresh/close
+  // Ask before browser refresh/close, when there is something to lose
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || !hasFormChanges) return;
 
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -47,7 +47,7 @@ export function useAuditNavigationGuard({ isActive, hasFormChanges }: UseAuditNa
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isActive]);
+  }, [isActive, hasFormChanges]);
 
   // Listen for navigation attempts from other components
   useEffect(() => {

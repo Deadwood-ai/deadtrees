@@ -37,7 +37,7 @@ def test_monitor_reads_private_workflows_without_changing_app_visibility(db):
 		"INSERT INTO public.data_publication (user_id, status) VALUES (%s, 'pending') RETURNING id", (owner,)
 	).fetchone()[0]
 	db.execute('INSERT INTO public.jt_data_publication_datasets VALUES (%s, %s)', (publication, dataset))
-	db.execute('INSERT INTO public.dataset_audit (dataset_id) VALUES (%s)', (dataset,))
+	db.execute('INSERT INTO public.dataset_audit_legacy (dataset_id) VALUES (%s)', (dataset,))
 	flag = db.execute(
 		"INSERT INTO public.dataset_flags (dataset_id, created_by, description) "
 		"VALUES (%s, %s, 'Private report') RETURNING id", (dataset, owner)
@@ -74,8 +74,11 @@ def test_monitor_reads_private_workflows_without_changing_app_visibility(db):
 		'JOIN public.jt_data_publication_datasets j ON j.publication_id = p.id '
 		'WHERE p.id = %s GROUP BY p.status', (publication,)
 	).fetchall() == [('pending', 1)]
-	# the monitor reads its audit columns from the table behind the dataset_audit view
-	assert db.execute('SELECT dataset_id FROM public.dataset_audit_legacy WHERE dataset_id = %s', (dataset,)).fetchone()
+	# the legacy audits are history the monitor no longer reads
+	db.execute('SAVEPOINT legacy')
+	with pytest.raises(psycopg.errors.InsufficientPrivilege):
+		db.execute('SELECT dataset_id FROM public.dataset_audit_legacy WHERE dataset_id = %s', (dataset,))
+	db.execute('ROLLBACK TO SAVEPOINT legacy')
 	assert db.execute('SELECT status FROM public.dataset_flags WHERE id = %s', (flag,)).fetchone() == ('open',)
 	assert db.execute('SELECT status FROM public.processing_notification_events WHERE dataset_id = %s', (dataset,)).fetchone() == ('pending',)
 	assert db.execute('SELECT id FROM public.priwa_kaeferbaeume WHERE id = %s', (tree,)).fetchone() == (tree,)
@@ -127,7 +130,7 @@ def test_every_monitoring_policy_is_select_only_and_columns_are_readable(db):
 	policies = db.execute(
 		"SELECT tablename, cmd, roles FROM pg_policies WHERE policyname = 'operator_monitoring_read'"
 	).fetchall()
-	assert len(policies) == 33
+	assert len(policies) == 32
 	for table, command, roles in policies:
 		assert command == 'SELECT' and roles == [ROLE]
 		assert db.execute('SELECT relrowsecurity FROM pg_class WHERE oid = %s::regclass', ('public.' + table,)).fetchone()[0]

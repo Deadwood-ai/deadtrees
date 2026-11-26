@@ -1,101 +1,152 @@
-import type { AuditCheckKey, AuditLayer, AuditVerdict, IAuditQueueRow } from "../types/auditChecks";
-import { AUDIT_SECTIONS, LAYER_LABELS, sectionOfCheck } from "./auditChecks";
+/** The Audit Review list: one row per dataset with its check results, the tabs (each a fixed
+ * filter on the same rows) and the filters, kept in the URL. */
 
-/** One column of the To review list: a check on one layer, e.g. prediction quality on deadwood. */
-export interface IReviewTarget {
-	key: string;
-	checkKey: AuditCheckKey;
-	layer: AuditLayer;
-	title: string;
+import type { AuditDataset } from "../hooks/useAuditDatasets";
+import type { EvaluationDecision, GeorefStatus, IAuditDatasetResult } from "../types/auditChecks";
+import { majorShare } from "./auditReview";
+
+export interface IAuditListRow {
+	id: number;
+	dataset: AuditDataset;
+	/** the dataset's row of audit.dataset_outcomes; null when the view has none or can't be read */
+	result: IAuditDatasetResult | null;
+	/** who answered on the dataset on this page (emails, else user ids) */
+	reviewers: string[];
+	/** user reports, open or acknowledged */
+	flags: number;
+	/** suggested polygon edits waiting for a decision */
+	edits: number;
+	/** selected as reference data: the segmentation benchmark (reference patches) */
+	reference: boolean;
 }
 
-/** A check result in a dataset's row, with who answered it on the current run. */
-export interface IReviewCell {
-	verdict: AuditVerdict;
-	/** the result goes to a person; false when its version applies it without review */
-	needsReview: boolean;
-	/** you answered it on the current run */
-	mine: boolean;
+export type AuditListTab = "all" | "pending" | "benchmark" | "edits-flags" | "reference";
+
+/** Each tab is the whole list with one fixed chip; "all" has none. The Audit Review's tabs come
+ * first; the other group holds lists that are not part of the audit. */
+export const TABS: { key: AuditListTab; group: "review" | "other"; label: string; chip: string | null; test: (row: IAuditListRow) => boolean }[] = [
+	{ key: "all", group: "review", label: "All audits", chip: null, test: () => true },
+	{ key: "pending", group: "review", label: "Pending audit reviews", chip: "Review required", test: (r) => !!r.result?.review_required.length },
+	// the benchmark tab shows the benchmarks themselves, not datasets: no count
+	{ key: "benchmark", group: "review", label: "Benchmark", chip: null, test: () => false },
+	{ key: "edits-flags", group: "other", label: "Edits & flags", chip: "Edits or user reports", test: (r) => r.flags > 0 || r.edits > 0 },
+	{ key: "reference", group: "other", label: "Segmentation Benchmark", chip: "Segmentation benchmark", test: (r) => r.reference },
+];
+
+export const tabOf = (key: string | null): AuditListTab => TABS.find((t) => t.key === key)?.key ?? "all";
+
+export interface IAuditListFilters {
+	id: string;
+	country: string | null;
+	/** "finished", "unfinished" or a processing status, e.g. "deadwood_segmentation" */
+	stage: string | null;
+	decision: EvaluationDecision | "none" | null;
+	georef: GeorefStatus | "none" | null;
+	dateReplaced: "yes" | "no" | null;
+	/** the least share of major crops (0 to 100) on either prediction layer */
+	majorShare: number | null;
+	reviewRequired: boolean;
+	inBenchmark: boolean;
+	reviewedBy: string | null;
 }
 
-/** One dataset in the To review list, with a cell per target; a missing cell means the check has not run. */
-export interface IDatasetReviewRow {
-	datasetId: number;
-	cells: Partial<Record<string, IReviewCell>>;
-	/** every target has a result */
-	complete: boolean;
-	/** you answered every result of the dataset that goes to a person */
-	finished: boolean;
-	/** results that are not "ok" */
-	problems: number;
-	/** the check to open: the first one you have not answered, in audit page order */
-	next: AuditCheckKey;
+export const NO_FILTERS: IAuditListFilters = {
+	id: "",
+	country: null,
+	stage: null,
+	decision: null,
+	georef: null,
+	dateReplaced: null,
+	majorShare: null,
+	reviewRequired: false,
+	inBenchmark: false,
+	reviewedBy: null,
+};
+
+/** Each filter's URL parameter. */
+const PARAMS: Record<keyof IAuditListFilters, string> = {
+	id: "id",
+	country: "country",
+	stage: "stage",
+	decision: "decision",
+	georef: "georef",
+	dateReplaced: "date",
+	majorShare: "major",
+	reviewRequired: "review",
+	inBenchmark: "benchmark",
+	reviewedBy: "reviewer",
+};
+
+export function filtersFromParams(params: URLSearchParams): IAuditListFilters {
+	const get = (key: keyof IAuditListFilters) => params.get(PARAMS[key]);
+	const major = Number(get("majorShare"));
+	return {
+		id: get("id") ?? "",
+		country: get("country"),
+		stage: get("stage"),
+		decision: get("decision") as IAuditListFilters["decision"],
+		georef: get("georef") as IAuditListFilters["georef"],
+		dateReplaced: get("dateReplaced") === "yes" || get("dateReplaced") === "no" ? (get("dateReplaced") as "yes" | "no") : null,
+		majorShare: get("majorShare") !== null && Number.isFinite(major) ? major : null,
+		reviewRequired: get("reviewRequired") === "1",
+		inBenchmark: get("inBenchmark") === "1",
+		reviewedBy: get("reviewedBy"),
+	};
 }
 
-const targetKey = (checkKey: string, layer: string) => `${checkKey}:${layer}`;
-
-/** A result's key in the answers lookup: "dataset:check:layer". */
-export const reviewKey = (r: { dataset_id: number; check_key: string; layer: string }) => `${r.dataset_id}:${targetKey(r.check_key, r.layer)}`;
-
-/** The targets the list has columns for, in audit page order: the layers of every check that has
- * at least one current result. A check that runs nowhere yet gets no column. */
-export function reviewTargets(rows: Pick<IAuditQueueRow, "check_key" | "layer">[]): IReviewTarget[] {
-	const present = new Set(rows.map((r) => targetKey(r.check_key, r.layer)));
-	return AUDIT_SECTIONS.flatMap(({ checkKey, layers, title }) =>
-		checkKey
-			? layers
-					.filter((layer) => present.has(targetKey(checkKey, layer)))
-					.map((layer) => ({
-						key: targetKey(checkKey, layer),
-						checkKey,
-						layer,
-						title: layers.length > 1 ? (LAYER_LABELS[layer] ?? layer) : title,
-					}))
-			: [],
-	);
-}
-
-/** Groups the current results (one per dataset, check and layer) into one row per dataset that
- * has a result going to a person, newest dataset first. `reviews` holds the answers per
- * "dataset:check:layer". */
-export function datasetReviewRows(
-	rows: IAuditQueueRow[],
-	reviews: Record<string, { count: number; mine: boolean }>,
-	targets: IReviewTarget[],
-): IDatasetReviewRow[] {
-	const byDataset = new Map<number, Partial<Record<string, IReviewCell>>>();
-	for (const r of rows) {
-		const cells = byDataset.get(r.dataset_id) ?? {};
-		const answers = reviews[reviewKey(r)];
-		cells[targetKey(r.check_key, r.layer)] = {
-			verdict: r.verdict,
-			needsReview: r.reason !== null,
-			mine: !!answers?.mine,
-		};
-		byDataset.set(r.dataset_id, cells);
+/** The tab and the filters that are set, as URL parameters. */
+export function listParams(tab: AuditListTab, filters: IAuditListFilters): URLSearchParams {
+	const params = new URLSearchParams({ tab });
+	for (const [key, value] of Object.entries(filters) as [keyof IAuditListFilters, IAuditListFilters[keyof IAuditListFilters]][]) {
+		if (value === null || value === "" || value === false) continue;
+		params.set(PARAMS[key], value === true ? "1" : String(value));
 	}
-	return [...byDataset.entries()]
-		.sort(([a], [b]) => b - a)
-		.flatMap(([datasetId, cells]) => {
-			const results = targets.flatMap((target) => {
-				const cell = cells[target.key];
-				return cell ? [{ target, cell }] : [];
-			});
-			const toReview = results.filter((r) => r.cell.needsReview);
-			if (!toReview.length) return [];
-			const open = toReview.find((r) => !r.cell.mine);
-			return [
-				{
-					datasetId,
-					cells,
-					complete: results.length === targets.length,
-					finished: !open,
-					problems: results.filter((r) => r.cell.verdict !== "ok").length,
-					next: (open ?? toReview[0]).target.checkKey,
-				},
-			];
-		});
+	return params;
 }
 
-/** The audit page link that opens a dataset on a check's section. */
-export const reviewHref = (datasetId: number, checkKey: AuditCheckKey) => `/dataset-audit/${datasetId}?section=${sectionOfCheck(checkKey)}`;
+export const activeFilterCount = (filters: IAuditListFilters) =>
+	(Object.keys(filters) as (keyof IAuditListFilters)[]).filter((key) => filters[key] !== NO_FILTERS[key]).length;
+
+function matchesStage(row: IAuditListRow, stage: string): boolean {
+	const done = row.result?.is_processing_done ?? false;
+	if (stage === "finished") return done;
+	if (stage === "unfinished") return !done;
+	return row.result?.current_status === stage;
+}
+
+/** The rows a tab shows with the filters applied, newest dataset first. */
+export function filterRows(rows: IAuditListRow[], tab: AuditListTab, f: IAuditListFilters): IAuditListRow[] {
+	const fixed = TABS.find((t) => t.key === tab)!.test;
+	const id = f.id.trim();
+	return rows
+		.filter((row) => {
+			const r = row.result;
+			if (!fixed(row)) return false;
+			if (id && String(row.id) !== id) return false;
+			if (f.country && row.dataset.admin_level_1 !== f.country) return false;
+			if (f.stage && !matchesStage(row, f.stage)) return false;
+			if (f.decision && (r?.evaluation_decision ?? "none") !== f.decision) return false;
+			if (f.georef && (r?.georef_status ?? "none") !== f.georef) return false;
+			if (f.dateReplaced && r?.date_replace !== (f.dateReplaced === "yes")) return false;
+			if (f.majorShare !== null && !(r && (majorShare(r) ?? -1) >= f.majorShare)) return false;
+			if (f.reviewRequired && !r?.review_required.length) return false;
+			if (f.inBenchmark && !r?.in_benchmark) return false;
+			if (f.reviewedBy && !row.reviewers.includes(f.reviewedBy)) return false;
+			return true;
+		})
+		.sort((a, b) => b.id - a.id);
+}
+
+/** Where Save & Next goes: the next dataset that needs review after this one, in the Pending
+ * audit reviews order (newest first), wrapping round; null when no other one needs review. */
+export function nextPendingReview(results: Pick<IAuditDatasetResult, "dataset_id" | "review_required">[], currentId: number): number | null {
+	const pending = results
+		.filter((r) => r.review_required.length && r.dataset_id !== currentId)
+		.map((r) => r.dataset_id)
+		.sort((a, b) => b - a);
+	return pending.find((id) => id < currentId) ?? pending[0] ?? null;
+}
+
+/** The processing statuses in the rows (besides idle), for the stage filter. */
+export const stagesOf = (rows: IAuditListRow[]) =>
+	[...new Set(rows.map((r) => r.result?.current_status).filter((s): s is string => !!s && s !== "idle"))].sort();

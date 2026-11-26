@@ -234,7 +234,7 @@ export default function DatasetReferencePatchEditor() {
         kind="not-found"
         title="Dataset not found"
         description="It doesn’t exist, or it is private and not shared with your account."
-        actions={<Button onClick={() => navigate("/dataset-audit")}>Back to the audit queue</Button>}
+        actions={<Button onClick={() => navigate("/dataset-audit")}>Back to the Audit Review</Button>}
       />
     );
   }

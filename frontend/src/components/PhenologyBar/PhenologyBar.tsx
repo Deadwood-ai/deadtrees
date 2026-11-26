@@ -11,6 +11,8 @@ interface PhenologyBarProps {
   acquisitionDay?: string | number;
   className?: string;
   showTooltips?: boolean;
+  /** the month letters below the bar show only while the pointer is on it */
+  monthsOnHover?: boolean;
 }
 
 export default function PhenologyBar({
@@ -20,6 +22,7 @@ export default function PhenologyBar({
   acquisitionDay,
   className = "",
   showTooltips = true,
+  monthsOnHover = false,
 }: PhenologyBarProps) {
   const [hoveredDay, setHoveredDay] = useState<number | null>(null);
 
@@ -101,7 +104,7 @@ export default function PhenologyBar({
   }
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`group relative ${className}`}>
       <Tooltip
         title={tooltipContent}
         open={showTooltips && hoveredDay !== null}
@@ -184,7 +187,7 @@ export default function PhenologyBar({
           </div>
 
           {/* Month labels */}
-          <div className="relative mt-0.5">
+          <div className={`relative mt-0.5 ${monthsOnHover ? "opacity-0 transition-opacity group-hover:opacity-100" : ""}`}>
             {monthLabels.map((label, index) => (
               <div
                 key={index}

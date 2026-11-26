@@ -1,94 +1,92 @@
 import { describe, expect, it } from "vitest";
-import type { IAuditQueueRow } from "../types/auditChecks";
-import { datasetReviewRows, reviewHref, reviewTargets } from "./auditReviewList";
+import type { IAuditDatasetResult } from "../types/auditChecks";
+import { NO_FILTERS, TABS, activeFilterCount, filterRows, filtersFromParams, listParams, nextPendingReview, stagesOf, tabOf, type IAuditListRow } from "./auditReviewList";
 
-const row = (
-	dataset_id: number,
-	check_key: IAuditQueueRow["check_key"],
-	layer: IAuditQueueRow["layer"],
-	verdict: IAuditQueueRow["verdict"] = "ok",
-	reason: IAuditQueueRow["reason"] = "review_all",
-): IAuditQueueRow => ({ dataset_id, check_key, layer, run_id: dataset_id * 10, verdict, reason });
+const row = (id: number, result: Partial<IAuditDatasetResult> | null, over: Partial<IAuditListRow> = {}): IAuditListRow => ({
+	id,
+	dataset: { id, admin_level_1: "Germany" } as IAuditListRow["dataset"],
+	result: result && ({ dataset_id: id, review_required: [], is_processing_done: true, current_status: "idle", ...result } as IAuditDatasetResult),
+	reviewers: [],
+	flags: 0,
+	edits: 0,
+	reference: false,
+	...over,
+});
 
-const queue = [
-	row(1, "dataset_evaluation", "image"),
-	row(1, "georef", "georef", "major"),
-	row(1, "prediction_quality", "deadwood", "unsure"),
-	row(1, "prediction_quality", "forest_cover"),
-	// no georeferencing run
-	row(2, "dataset_evaluation", "image"),
-	row(2, "prediction_quality", "deadwood"),
-	row(2, "prediction_quality", "forest_cover"),
+const rows = [
+	row(1, { evaluation_decision: "keep", georef_status: "estimated", date_replace: false, deadwood_total: 10, deadwood_major: 0 }),
+	row(2, { review_required: ["evaluation", "georef"], georef_status: "needs_review", deadwood_total: 10, deadwood_major: 5, in_benchmark: true }, { reviewers: ["a@x.org"] }),
+	row(3, { evaluation_decision: "exclude", date_replace: true, is_processing_done: false, current_status: "cog_processing" }, { flags: 1 }),
+	row(4, null, { reference: true, dataset: { id: 4, admin_level_1: "Spain" } as IAuditListRow["dataset"] }),
 ];
+const ids = (list: IAuditListRow[]) => list.map((r) => r.id);
 
-describe("reviewTargets", () => {
-	it("has a column per check layer in audit page order", () => {
-		expect(reviewTargets(queue).map((t) => [t.key, t.title])).toEqual([
-			["dataset_evaluation:image", "Dataset evaluation"],
-			["georef:georef", "Georeferencing"],
-			["prediction_quality:forest_cover", "Tree cover prediction"],
-			["prediction_quality:deadwood", "Deadwood prediction"],
+describe("tabs", () => {
+	it("are the whole list with one fixed chip each, newest first", () => {
+		expect(ids(filterRows(rows, "all", NO_FILTERS))).toEqual([4, 3, 2, 1]);
+		expect(ids(filterRows(rows, "pending", NO_FILTERS))).toEqual([2]);
+		expect(ids(filterRows(rows, "benchmark", NO_FILTERS))).toEqual([]);
+		expect(ids(filterRows(rows, "edits-flags", NO_FILTERS))).toEqual([3]);
+		expect(ids(filterRows(rows, "reference", NO_FILTERS))).toEqual([4]);
+		expect(TABS.slice(0, 3).map((t) => [t.label, t.chip])).toEqual([
+			["All audits", null],
+			["Pending audit reviews", "Review required"],
+			["Benchmark", null],
 		]);
 	});
 
-	it("gives a check that runs nowhere no column", () => {
-		expect(reviewTargets(queue.filter((r) => r.check_key !== "georef")).map((t) => t.checkKey)).not.toContain("georef");
+	it("falls back to All audits for an unknown tab", () => {
+		expect(tabOf("re-review")).toBe("all");
+		expect(tabOf("pending")).toBe("pending");
 	});
 });
 
-describe("datasetReviewRows", () => {
-	const targets = reviewTargets(queue);
+describe("filters", () => {
+	const only = (patch: Partial<typeof NO_FILTERS>) => ids(filterRows(rows, "all", { ...NO_FILTERS, ...patch }));
 
-	it("groups the results into one row per dataset, newest first", () => {
-		const rows = datasetReviewRows(queue, {}, targets);
-		expect(rows.map((r) => r.datasetId)).toEqual([2, 1]);
-		expect(rows[1].cells["georef:georef"]?.verdict).toBe("major");
+	it("filter by each check's output", () => {
+		expect(only({ decision: "exclude" })).toEqual([3]);
+		expect(only({ decision: "none" })).toEqual([4, 2]);
+		expect(only({ georef: "needs_review" })).toEqual([2]);
+		expect(only({ dateReplaced: "yes" })).toEqual([3]);
+		expect(only({ dateReplaced: "no" })).toEqual([1]);
+		expect(only({ majorShare: 25 })).toEqual([2]);
 	});
 
-	it("marks a dataset complete only when every check ran", () => {
-		const [two, one] = datasetReviewRows(queue, {}, targets);
-		expect(one.complete).toBe(true);
-		expect(two.complete).toBe(false);
-		expect(two.cells["georef:georef"]).toBeUndefined();
+	it("filter by the review and the dataset", () => {
+		expect(only({ reviewRequired: true })).toEqual([2]);
+		expect(only({ inBenchmark: true })).toEqual([2]);
+		expect(only({ reviewedBy: "a@x.org" })).toEqual([2]);
+		expect(only({ id: " 3 " })).toEqual([3]);
+		expect(only({ country: "Spain" })).toEqual([4]);
+		expect(only({ stage: "finished" })).toEqual([2, 1]);
+		expect(only({ stage: "unfinished" })).toEqual([4, 3]);
+		expect(only({ stage: "cog_processing" })).toEqual([3]);
+		expect(stagesOf(rows)).toEqual(["cog_processing"]);
 	});
 
-	it("counts the results that are not ok", () => {
-		const [, one] = datasetReviewRows(queue, {}, targets);
-		expect(one.problems).toBe(2);
+	it("round-trip through the URL and count what is set", () => {
+		const filters = { ...NO_FILTERS, decision: "exclude" as const, majorShare: 10, reviewRequired: true, reviewedBy: "a@x.org" };
+		const params = listParams("pending", filters);
+		expect(params.toString()).toBe("tab=pending&decision=exclude&major=10&review=1&reviewer=a%40x.org");
+		expect(filtersFromParams(params)).toEqual(filters);
+		expect(activeFilterCount(filters)).toBe(4);
+		expect(activeFilterCount(NO_FILTERS)).toBe(0);
+	});
+});
+
+describe("Save & Next", () => {
+	const row = (dataset_id: number, review_required: string[]) => ({ dataset_id, review_required }) as Pick<IAuditDatasetResult, "dataset_id" | "review_required">;
+	const rows = [row(30, ["georef"]), row(20, []), row(15, ["date"]), row(10, ["dataset_evaluation"])];
+
+	it("goes on to the next dataset that needs review, newest first, from any dataset", () => {
+		expect(nextPendingReview(rows, 30)).toBe(15);
+		expect(nextPendingReview(rows, 20)).toBe(15);
+		expect(nextPendingReview(rows, 25)).toBe(15);
 	});
 
-	it("opens the first check you have not answered and is finished when you answered all", () => {
-		const reviews = {
-			"1:dataset_evaluation:image": { count: 2, mine: true },
-			"1:georef:georef": { count: 1, mine: false },
-		};
-		const [, one] = datasetReviewRows(queue, reviews, targets);
-		expect(one.cells["dataset_evaluation:image"]).toEqual({ verdict: "ok", needsReview: true, mine: true });
-		expect(one.finished).toBe(false);
-		expect(reviewHref(one.datasetId, one.next)).toBe("/dataset-audit/1?section=georef");
-
-		const all = Object.fromEntries(queue.filter((r) => r.dataset_id === 1).map((r) => [`1:${r.check_key}:${r.layer}`, { count: 1, mine: true }]));
-		const [, done] = datasetReviewRows(queue, all, targets);
-		expect(done.finished).toBe(true);
-		expect(reviewHref(done.datasetId, done.next)).toBe("/dataset-audit/1?section=evaluation");
-	});
-
-	it("counts a check applied without review as run, and lists only datasets with something to review", () => {
-		const applied = [
-			row(3, "dataset_evaluation", "image", "ok", null),
-			row(3, "georef", "georef", "ok", null),
-			row(3, "prediction_quality", "deadwood", "major", "unsure"),
-			row(3, "prediction_quality", "forest_cover", "ok", null),
-			row(4, "dataset_evaluation", "image", "ok", null),
-		];
-		const rows = datasetReviewRows([...queue, ...applied], {}, targets);
-		const three = rows.find((r) => r.datasetId === 3)!;
-		expect(three.complete).toBe(true);
-		expect(three.cells["georef:georef"]?.needsReview).toBe(false);
-		expect(three.next).toBe("prediction_quality");
-		expect(rows.map((r) => r.datasetId)).not.toContain(4);
-
-		const answered = datasetReviewRows(applied, { "3:prediction_quality:deadwood": { count: 1, mine: true } }, targets);
-		expect(answered[0].finished).toBe(true);
+	it("wraps round, and stops when no other dataset needs review", () => {
+		expect(nextPendingReview(rows, 10)).toBe(30);
+		expect(nextPendingReview([row(10, ["georef"])], 10)).toBeNull();
 	});
 });

@@ -1,10 +1,10 @@
 # Georeferencing check (`georef_check_v1`)
 
 The processor measures how far an orthophoto is placed from where satellite
-imagery shows the same ground, and prefills the audit's georeferencing item
-(`dataset_audit.is_georeferenced`, Good means under 15 m). It works like the
-acquisition-date check (`docs/doy-estimation.md`): the stage only proposes;
-nothing counts as an audit until an auditor saves.
+imagery shows the same ground. The Audit Review reports the result as a status and an
+offset in metres (Passed means within 15 m); a reviewer settles the cases the check
+cannot decide. Like the acquisition-date check (`docs/doy-estimation.md`), it reports and
+never changes the dataset.
 
 ## What runs
 
@@ -42,8 +42,12 @@ nothing counts as an audit until an auditor saves.
      `LINZ_API_KEY`)
 
    A provider with no tiles at the chosen zoom (HTTP 404, common above z18
-   outside cities for Yandex and Esri Clarity) is rendered up to two zoom
-   levels lower.
+   outside cities for Yandex, Esri Clarity and older Wayback releases) is
+   rendered up to two zoom levels lower. The Wayback capture dates come from
+   the release's metadata layer of that zoom, which answers nothing where the
+   release has no imagery at it; the lookup then also goes up to two zoom
+   levels lower, so an older capture is not lost (before, every release without
+   z19 imagery was dropped for small datasets).
 
    Each provider is its own evidence group unless it serves the same imagery as
    another (Wayback and Clarity with Esri). Only services with an open licence for
@@ -79,40 +83,34 @@ nothing counts as an audit until an auditor saves.
 
 ## What it stores
 
-The stage writes everything through `store_georef_check`, in one transaction.
+The stage writes one row through `store_georef_check(p_check)`: `v2_georef_checks`, one
+row per dataset, replaced on rerun. It is the record; the stage writes no audit run.
 
-- `v2_georef_checks`, one row per dataset, replaced on rerun (the audit page reads
-  it until it moves to the `audit` schema):
-  - the decision and evidence level, with the median p90
-  - for each reference: inliers, coverage, p90 and holdout p90s, its vote, and
-    up to 200 matched point pairs in lon/lat
-  - the keyless tile URL of each reference, for the audit viewer
-  - provider errors
-- The audit check base (`docs/audit-checks.md`), check `georef`:
-  - a check version per rules and matcher version, registered on first use as
-    `review_all` and inactive. `georef-rules-v1_romav2.0.1` is the active one
-    (migration `20261110130000`); a later version counts once an operator activates
-    it with `audit.activate_version`;
-  - a `done` run per check, every run kept, with the reference evidence and the
-    judged ortho (`inputs.ortho_sha256`); queue `backfill` for a check-only task,
-    else `upload`;
-  - `audit.current_runs` pointing at it, for a run of the active version;
-  - one dataset-level model assessment, layer `georef`: Good is `ok`, Poor is
-    `major`, uncertain is `unsure`. Georef needs no dataset rule.
-- A Good or Poor call becomes the `is_georeferenced` row in
-  `dataset_audit_suggestions` (source `audit:georef/<version>`, reason =
-  evidence level). An uncertain call removes it.
+- the decision and evidence level, with the median p90
+- for each reference: inliers, coverage, p90 and holdout p90s, its vote, and up to 200
+  matched point pairs in lon/lat
+- the keyless tile URL of each reference, for the audit viewer
+- provider errors
 
 ## How it reaches auditors
 
-- The audit form prefills an empty georeferencing item with the suggestion,
-  marked "suggested".
-- When a newer suggestion disagrees with a saved audit, `audit_review_queue`
-  lists the dataset, and it appears in the Re-review tab. Saving the audit
-  again takes it off.
-- The georeferencing section shows the measurement. Opening it puts the audit map
-  into georeferencing mode: the chosen reference under the drone image, a drone
-  opacity slider, and the matched points coloured by offset.
+`audit.georef_output_v1(v2_georef_checks)` turns the stored check into the Audit Review's
+output (`audit.dataset_outcomes`, `docs/audit-checks.md`), computed when it is read, so a
+rerun of the stage or a new rule shows at once, without a VLM call:
+
+| Status | When | Offset |
+|---|---|---|
+| `estimated` | the deciding references agree (`references_agree`) | their median p90 |
+| `not_passed` | a coordinate looks lost (Poor, `gross`) | none |
+| `no_reference` | no reference qualified | none |
+| `needs_review` | references qualified but none decides, or they conflict (`unstable_near_threshold`, `references_disagree`) | the best supported qualified reference's p90, as evidence |
+
+`needs_review` asks a person: the reviewer answers Passed (within 15 m) or Not passed (an
+`audit.dataset_human_reviews` row, check `georef`), which replaces the status. The answer
+keeps counting while the ortho is the same: a rerun of the stage does not move the image,
+a new ortho does. The georeferencing step shows the measurement; opening it puts the audit
+map into georeferencing mode: the chosen reference under the drone image, a drone opacity
+slider, and the matched points coloured by offset.
 
 ## Operations
 
@@ -122,9 +120,9 @@ The stage writes everything through `store_georef_check`, in one transaction.
   (`UPLOAD_TASK_TYPES` and the upload modal's step list). Stage the model asset
   on each host before the release that adds the stage reaches it.
 
-- Bulk (re)runs: `scripts/requeue_georef_check.py`. Use `--audited` for the
-  backfill against existing audits. It selects datasets without a check or with
-  other rules or another matcher.
+- Bulk (re)runs: `scripts/requeue_georef_check.py`. `--audited` restricts it to
+  datasets with an audit evaluation decision. It selects datasets without a check or
+  with other rules or another matcher.
 - Model asset: `make download-georef-model` (`models/georef_check_v1`, built by
   `scripts/package_georef_check_model.py`).
 - Runtime: about 10 s per dataset on a GPU with 2–4 references. Peak VRAM is

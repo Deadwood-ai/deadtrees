@@ -13,9 +13,9 @@ const VISIBILITY_TAGS: Record<IDataAccess, { color: string; icon: React.ReactNod
 };
 
 /**
- * Who can see one dataset, shown to people with a stake in it: the owner, people it
- * is shared with and operators who can see private data. It only informs; details
- * and sharing are managed from the account page.
+ * Who can see one dataset, as rows of the dataset page's first panel, shown to people with a
+ * stake in it: the owner, people it is shared with and operators who can see private data. It
+ * only informs; details and sharing are managed from the account page.
  */
 export default function DatasetAccessSection({ dataset }: { dataset: IDataset }) {
   const { data: access } = useMyDatasetAccess(dataset.id);
@@ -26,7 +26,7 @@ export default function DatasetAccessSection({ dataset }: { dataset: IDataset })
   const accountLink = datasetAccountLink(access, dataset);
 
   return (
-    <div className="rounded-2xl border border-gray-200/60 bg-white p-5 shadow-sm space-y-3" data-testid="dataset-access-section">
+    <div className="space-y-3" data-testid="dataset-access-section">
       <div className="flex items-center justify-between gap-4">
         <Typography.Text className="text-gray-600">Visibility</Typography.Text>
         <Tag icon={tag.icon} color={tag.color} style={{ margin: 0 }}>

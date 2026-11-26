@@ -108,7 +108,7 @@ def stored_cog(client, dataset_id: int) -> Cog:
 
 
 def ortho_sha256(client, dataset_id: int) -> str:
-	"""The hash of the dataset's ortho: what an audit run's crops and images are stored under."""
+	"""The hash of the dataset's ortho: what an audit run judged (its inputs)."""
 	rows = client.table(settings.orthos_table).select('sha256').eq('dataset_id', dataset_id).execute().data
 	if not rows or not rows[0].get('sha256'):
 		raise ValueError(NO_ORTHO_HASH)

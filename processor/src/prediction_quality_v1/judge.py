@@ -1,4 +1,4 @@
-"""The judge prompt, answer parsing, and how several judges' answers combine.
+"""The judge prompt and answer parsing.
 
 Prompt v5 = the DT-1272 benchmark prompt v4 (failure modes m1-m7, no m8, lying wood never
 deadwood) with an area % next to each mode's likelihood, because adding the model's size to the
@@ -11,6 +11,8 @@ frame and tint without an inner edge, which the judges took for "no gold". It al
 between crowns that the forest covers (m9, common in forest cover; Janusch, 16 Nov 2026) from
 non-tree areas marked as forest (m6); gaps alone make the forest layer minor at most
 (Janusch, 18 Nov 2026).
+
+Prompt v7 adds the verdict ambiguous, as reviewers answer it.
 """
 
 from __future__ import annotations
@@ -22,9 +24,9 @@ from typing import Callable, Sequence
 
 from PIL import Image
 
-PROMPT_VERSION = 'pq-v6'
+PROMPT_VERSION = 'pq-v7'
 LAYERS = ('deadwood', 'forest')
-VERDICTS = ('ok', 'minor', 'major')
+VERDICTS = ('ok', 'minor', 'major', 'ambiguous')
 MODES = {
 	'deadwood': {
 		'm1_dead_missed': 'Dead trees missed: clearly visible standing dead or dying trees (grey, white, burnt or brown), or large dead parts of crowns, have no blue.',
@@ -66,17 +68,20 @@ raw image region by region, list the errors you see, then give the verdict for t
 - "minor": errors exist, but together they would not noticeably change the satellite cover here.
 - "major": all errors in this layer together would noticeably bias the satellite cover here, so
   this layer should be excluded.
+- "ambiguous": no one could reliably tell what is right here, e.g. the shrub to tree transition or
+  an unusual kind of dieback. Use it only then, not when you are merely unsure.
 Count overlapping errors once. Gaps between crowns that the forest covers (m9) are recorded but
 make the forest layer at most "minor": they never make it "major" on their own, so judge "major"
 only from the other forest errors.
 For each error type below, give its likelihood, 0 to 100, that the error is clearly present in the
 layer, and area_pct, the share of the whole crop it affects (0 if absent):
 {_MODE_LINES}
-Also give major_likelihood, 0 to 100, that the layer has a major error.
+Also give major_likelihood, 0 to 100, that the layer has a major error, and a summary: one
+sentence for data users on how well the layer fits the image, without pixel positions.
 
 Return only JSON: {{"assessable": true|false,
- "deadwood": {{"errors": ["..."], "modes": {_MODE_JSON['deadwood']}, "verdict": "ok|minor|major", "major_likelihood": n}},
- "forest": {{"errors": ["..."], "modes": {_MODE_JSON['forest']}, "verdict": "ok|minor|major", "major_likelihood": n}}}}"""
+ "deadwood": {{"errors": ["..."], "modes": {_MODE_JSON['deadwood']}, "verdict": "ok|minor|major|ambiguous", "major_likelihood": n, "summary": "..."}},
+ "forest": {{"errors": ["..."], "modes": {_MODE_JSON['forest']}, "verdict": "ok|minor|major|ambiguous", "major_likelihood": n, "summary": "..."}}}}"""
 
 Backend = Callable[[str, Sequence[Image.Image]], str]
 
@@ -91,6 +96,8 @@ class LayerAnswer:
 	major_likelihood: float
 	modes: dict = field(default_factory=dict)  # mode -> {'likelihood': float, 'area_pct': float}
 	errors: list = field(default_factory=list)
+	# one sentence for data users, without pixel positions (the dataset page shows it)
+	summary: str = ''
 
 	@property
 	def area_pct(self) -> float:
@@ -146,6 +153,7 @@ def parse(judge: str, text: str) -> Answer:
 			major_likelihood=_number(v.get('major_likelihood'), f'{layer} major_likelihood'),
 			modes=modes,
 			errors=[str(e)[:200] for e in (v.get('errors') if isinstance(v.get('errors'), list) else [])][:10],
+			summary=str(v.get('summary') or '').strip()[:300],
 		)
 	assessable = values.get('assessable', True)
 	if isinstance(assessable, str):
@@ -180,17 +188,3 @@ def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: in
 		except AnswerError as e:
 			last = e
 	raise last
-
-
-def combined(answers: Sequence[Answer], layer: str) -> dict:
-	"""The judges' answers for one layer, averaged: what the dataset rule reads. A judge that
-	could not assess the crop does not count, whatever likelihood the reply format made it give."""
-	present = [a.layers[layer] for a in answers if a.assessable]
-	if not present:
-		return {'major_likelihood': None, 'area_pct': None, 'judges': 0}
-	n = len(present)
-	return {
-		'major_likelihood': sum(a.major_likelihood for a in present) / n,
-		'area_pct': sum(a.area_pct for a in present) / n,
-		'judges': n,
-	}

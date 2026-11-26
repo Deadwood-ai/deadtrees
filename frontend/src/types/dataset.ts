@@ -1,4 +1,5 @@
 import { FeatureCollection } from "geojson";
+import type { EvaluationDecision } from "./auditChecks";
 
 export interface IThumbnail {
   file_name: string;
@@ -87,20 +88,9 @@ export interface IDataset {
   // Computed server-side in v2_full_dataset_view (see phenology_probability_at).
   phenology_probability?: number | null;
 
-  // Audit status fields (from database view)
-  final_assessment: "ready" | "fixable_issues" | "no_issues" | "exclude_completely" | null;
-  deadwood_quality: "great" | "sentinel_ok" | "bad" | null;
-  forest_cover_quality: "great" | "sentinel_ok" | "bad" | null;
-  has_major_issue: boolean | null;
-  audit_date: string | null;
-  has_valid_acquisition_date?: boolean | null;
-  has_valid_phenology?: boolean | null;
-  audited_by: string | null;
-  audited_by_email: string | null;
-
-  // Quality flags for frontend display logic
-  show_deadwood_predictions: boolean;
-  show_forest_cover_predictions: boolean;
+  // The dataset evaluation's decision (Audit Review): a reviewer's, an earlier manual audit's or
+  // the check's. Only "exclude" hides a dataset; predictions are never hidden by the audit.
+  audit_decision?: EvaluationDecision | null;
 }
 
 export type IDatasetArchiveItem = Pick<
@@ -133,10 +123,7 @@ export type IDatasetArchiveItem = Pick<
       | "is_deadwood_done"
       | "is_forest_cover_done"
       | "is_audited"
-      | "final_assessment"
-      | "deadwood_quality"
-      | "forest_cover_quality"
-      | "has_major_issue"
+      | "audit_decision"
     >
   > & {
     // Ground sampling distance in cm per pixel, from the COG.

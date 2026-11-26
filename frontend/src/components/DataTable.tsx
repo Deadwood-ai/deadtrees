@@ -18,6 +18,7 @@ import {
   ShareAltOutlined,
 } from "@ant-design/icons";
 import { supabase } from "../hooks/useSupabase";
+import type { EvaluationDecision } from "../types/auditChecks";
 import { useAuth } from "../hooks/useAuthProvider";
 import EditDatasetModal from "./EditDatasetModal";
 import StatusCell from "./DatasetStatus/StatusCell";
@@ -80,12 +81,7 @@ interface Dataset extends ContributorDataset {
   isInPublication?: boolean; // Track if dataset is in publication process
   data_access?: "public" | "private" | "viewonly";
   archived?: boolean;
-  final_assessment?: "ready" | "fixable_issues" | "no_issues" | "exclude_completely" | null;
-  audit_date?: string | null;
-  deadwood_quality?: "great" | "sentinel_ok" | "bad" | null;
-  forest_cover_quality?: "great" | "sentinel_ok" | "bad" | null;
-  has_valid_phenology?: boolean | null;
-  has_valid_acquisition_date?: boolean | null;
+  audit_decision?: EvaluationDecision | null;
 }
 
 interface DataTableProps {
@@ -166,7 +162,7 @@ const DataTable: React.FC<DataTableProps> = ({
   // Dataset is eligible for publishing when processing artifacts and metadata are ready (predictions not required)
   const isDatasetPublishEligible = (record: Dataset): boolean => {
     return !!(
-      record.final_assessment !== "exclude_completely" &&
+      record.audit_decision !== "exclude" &&
       !record.has_error &&
       record.is_upload_done &&
       record.is_ortho_done &&

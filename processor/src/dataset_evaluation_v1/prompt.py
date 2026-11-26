@@ -1,13 +1,32 @@
-"""The question the vision models answer, and the parser that turns a reply into an
-assessment. A changed prompt is a new PROMPT_VERSION (and check version)."""
+"""The question the vision models answer, and the parser that turns a reply into a
+dataset judgement. A changed prompt is a new PROMPT_VERSION (and check version)."""
 
 import json
 import re
+from dataclasses import asdict, dataclass
 
-from .rules import Call
 from .vocabulary import CATEGORIES, FLAGS, MODEL_REASONS, VERDICTS
 
 PROMPT_VERSION = 'v2'
+# A COG or thumbnail issue the model puts at this likelihood or higher is reported.
+ISSUE_AT = 50
+
+
+@dataclass
+class Judgement:
+	"""One model's answer about the whole dataset (audit.dataset_vlm_judgements)."""
+
+	judge: str
+	verdict: str  # audit.verdict
+	likelihood: float  # how likely the dataset must be excluded
+	cog_issue: bool
+	thumbnail_issue: bool
+	exclude_reason: str | None
+	summary: str
+	raw: dict  # the parsed answer: flags 0-100, reason, the image categories, seconds and attempt
+
+	def row(self) -> dict:
+		return asdict(self)
 
 
 class AnswerError(ValueError):
@@ -69,8 +88,8 @@ whole; land_cover is the dominant cover of the image; leaf_state is what the tre
 """
 
 
-def parse_answer(text: str, model: str, prompt_version: str = PROMPT_VERSION) -> Call:
-	"""The model's JSON reply as a dataset-level model assessment."""
+def parse_answer(text: str, model: str) -> Judgement:
+	"""The model's JSON reply as its dataset judgement."""
 	match = re.search(r'\{.*\}', text or '', re.DOTALL)
 	if not match:
 		raise AnswerError('No JSON object in the reply')
@@ -95,18 +114,16 @@ def parse_answer(text: str, model: str, prompt_version: str = PROMPT_VERSION) ->
 		raise AnswerError('The reply does not have the requested fields') from None
 	if not all(0 <= v <= 100 for v in (likelihood, *flags.values())):
 		raise AnswerError('Likelihoods must be 0-100')
-	details = {'reason': None if reason == 'none' else reason}
-	for key, allowed in CATEGORIES.items():
-		# A category outside the fixed list is kept out rather than failing the call.
-		details[key] = value.get(key) if value.get(key) in allowed else None
-	details['summary'] = str(value.get('summary') or '')[:500]
-	return Call(
-		assessor_kind='model',
-		model=model,
-		prompt_version=prompt_version,
+	reason = None if reason == 'none' else reason
+	# A category outside the fixed list is kept out rather than failing the call.
+	categories = {key: value.get(key) if value.get(key) in allowed else None for key, allowed in CATEGORIES.items()}
+	return Judgement(
+		judge=model,
 		verdict=VERDICTS[verdict],
-		major_likelihood=likelihood,
-		modes={k: {'likelihood': v} for k, v in flags.items()},
-		details=details,
-		raw={'text': text[:20000]},
+		likelihood=likelihood,
+		cog_issue=flags['cog_issue'] >= ISSUE_AT,
+		thumbnail_issue=flags['thumbnail_issue'] >= ISSUE_AT,
+		exclude_reason=reason,
+		summary=str(value.get('summary') or '')[:500],
+		raw={'answer': verdict, 'reason': reason, 'flags': flags, **categories},
 	)

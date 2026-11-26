@@ -1,10 +1,10 @@
 """The dataset evaluation as an audit worker handler (audit_worker.worker.HANDLERS).
 
-handle(ctx) reads the stored COG (private datasets too), its CLIP tiles, the
-thumbnail and the duplicate candidates, asks the version's judges, uploads the judged
-images with ctx.put_image and stores crops, images and assessments in one call to
-audit.store_dataset_evaluation. The worker finishes the run with the returned
-evidence, coverage and cost, and points the dataset at it when the version is active.
+handle(ctx) reads the stored COG (private datasets too), its CLIP tiles and the
+thumbnail, asks the version's judges, uploads the judged images with ctx.put_image and
+returns the run's p_result (check.payload), which the worker stores with
+audit.finish_run. Keep or exclude is worked out in the database from the stored answers
+with the version's rules (RULES_CONFIG, audit.evaluation_calls).
 """
 
 import tempfile
@@ -23,15 +23,19 @@ from ..utils.stored_inputs import (
 	stored_cog,
 	tile_rows,
 )
-from .check import CONFIG, evaluate, store_payload
+from .check import CONFIG, evaluate, image_path, payload
 from .inputs import Tile, read_inputs
-from .rules import PHASH_METHOD, phash
 
-# v2: the orthophoto alone. v1 judged inside the AOI and drew its edge on the overview; the
-# AOI is a check of its own (DT-1538).
-VERSION = 'v2'
+# v3: the prompt and images of v2, which judged the orthophoto alone; v1 judged inside the
+# AOI, which is a check of its own (DT-1538).
+VERSION = 'v3'
+# audit.check_rules of the version: the deciding model's verdict (by name prefix) keeps or
+# excludes, a band check at band_major_at or more excludes as not RGB, an empty COG as a
+# broken ortho; the other models are stored and shown, not counted
+RULES = 'rules-v1'
+RULES_CONFIG = {'decider': 'haiku', 'band_major_at': 90}
 
-__all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
+__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
 
 def ready(status: dict) -> bool:
@@ -70,68 +74,22 @@ def handle(ctx) -> dict:
 	):
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
 		seen = read_inputs(cog_source, seed=dataset_id, tiles=tiles(client, dataset_id))
-	# The thresholds the version was registered with (a version before they were recorded runs with today's).
-	config = {**CONFIG, **(getattr(ctx, 'version', None) or {}).get('config', {})}
-	image_hash, candidates = None, []
-	if not seen.empty:  # an empty COG is excluded by rule; there is nothing to compare
-		image_hash = phash(seen.overview, seen.valid)
-		candidates = (
-			client.schema('audit')
-			.rpc(
-				'duplicate_candidates',
-				{
-					'p_dataset_id': dataset_id,
-					'p_hash': image_hash,
-					'p_method': PHASH_METHOD,
-					'p_max_hamming': config['duplicates']['max_hamming'],
-					'p_min_overlap': config['duplicates']['min_overlap'],
-				},
-			)
-			.execute()
-			.data
-		)
-	evaluation = evaluate(
-		seen,
-		ctx.judges,
-		source_profile=(ortho.ortho_info or {}).get('Profile'),
-		image_hash=image_hash,
-		duplicate_candidates=candidates or [],
-		thumbnail=thumbnail,
-		rule_config=config['rule_config'],
-	)
-	payload = store_payload(evaluation, seen, dataset_id, ortho.sha256)
+	evaluation = evaluate(seen, ctx.judges, source_profile=(ortho.ortho_info or {}).get('Profile'), thumbnail=thumbnail)
+	ctx.refresh()  # the judges can take longer than the login lasts
 	# Files first, rows second: a stored row always points at an uploaded image.
-	for image, row in zip(evaluation.images, payload['images']):
-		ctx.put_image(row['storage_path'], image.data, dataset_id)
-	crop_ids = (
-		client.schema('audit')
-		.rpc('store_dataset_evaluation', {'p_run_id': ctx.run['id'], 'p_result': payload})
-		.execute()
-		.data
-	)
-	# The run names what it judged. Crops and images are stored per ortho, and an ortho a
-	# version 1 run judged inside its AOI holds that run's crops and overview too.
-	judged = {
-		'crop_ids': crop_ids or [],
-		'images': [{k: row[k] for k in ('kind', 'crop_index', 'storage_path', 'sha256')} for row in payload['images']],
-	}
-	verdict = evaluation.verdict
+	for image in evaluation.images:
+		ctx.put_image(image_path(dataset_id, ctx.run['id'], image), image.data, dataset_id)
 	logger.info(
-		'Dataset evaluation stored',
+		'Dataset evaluation judged',
 		LogContext(
 			category=LogCategory.PROCESS,
 			dataset_id=dataset_id,
 			token=ctx.token,
-			extra={'run_id': ctx.run['id'], 'verdict': verdict.verdict, 'why': verdict.details.get('why')},
+			extra={'run_id': ctx.run['id'], 'verdicts': {j.judge: j.verdict for j in evaluation.judgements}},
 		),
 	)
-	return {
-		# what was judged, read at run time: the ortho may have changed since the run was queued
-		'inputs': identity(ortho.sha256),
-		'evidence': {**evaluation.evidence, 'judged': judged},
-		'coverage': {'crops': len(seen.crops), 'crop_picker': seen.settings['crop_picker']},
-		'cost': evaluation.cost,
-	}
+	# what was judged, read at run time: the ortho may have changed since the run was queued
+	return payload(evaluation, seen, dataset_id, ctx.run['id'], identity(ortho.sha256))
 
 
 def tile_of(row: dict) -> Tile:

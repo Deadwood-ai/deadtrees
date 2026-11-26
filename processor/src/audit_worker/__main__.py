@@ -31,13 +31,15 @@ def connect():
 		return client, token
 
 
-def sign_in_again(client) -> None:
-	"""Renew the client's login in place: login() hands out a session until 20 minutes before
-	it ends, so a run that takes longer would be written with an expired one."""
+def sign_in_again(client) -> str:
+	"""Renew the client's login in place and return it: login() hands out a session until 20
+	minutes before it ends, so a run that takes longer would be written with an expired one."""
 	from shared.db import login
 	from shared.settings import settings
 
-	client.postgrest.auth(token=login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD))
+	token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD)
+	client.postgrest.auth(token=token)
+	return token
 
 
 def put_image_with(token_source):
@@ -70,13 +72,12 @@ def main(argv: list[str] | None = None) -> int:
 	sub = parser.add_subparsers(dest='command', required=True)
 	run = sub.add_parser('run')
 	run.add_argument('--once', action='store_true', help='process at most one run, then stop')
-	run.add_argument('--benchmark', action='store_true', help='work the benchmark queue only')
 	enqueue = sub.add_parser('enqueue')
 	enqueue.add_argument('--check', required=True)
-	enqueue.add_argument('--queue', choices=('backfill', 'manual', 'benchmark'), default='backfill')
+	enqueue.add_argument('--queue', choices=('backfill', 'manual'), default='backfill')
 	enqueue.add_argument('--dataset-ids', help='comma separated')
 	enqueue.add_argument('--file', help='one dataset id per line')
-	enqueue.add_argument('--force', action='store_true', help='queue even where a run on the same evidence exists')
+	enqueue.add_argument('--force', action='store_true', help='queue even where the latest run judged the same inputs')
 	sub.add_parser('status')
 	probe = sub.add_parser('probe')
 	probe.add_argument('--serve', help='transport:model[:effort] to send one synthetic test image to')
@@ -143,9 +144,8 @@ def main(argv: list[str] | None = None) -> int:
 		connect=fresh,
 		handlers=handlers,
 		put_image=put_image_with(lambda: token_box['token']),
-		benchmark=args.benchmark,
 		once=args.once,
-		refresh=sign_in_again,
+		refresh=lambda client: token_box.update(token=sign_in_again(client)),
 	)
 	print(json.dumps(status))
 	return 0

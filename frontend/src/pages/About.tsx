@@ -1,10 +1,9 @@
-import { Button, Collapse, Tooltip, message, Input, Tabs, Tag, Skeleton } from "antd";
+import { Button, Collapse, Tabs, Tag, Skeleton } from "antd";
 import { TableSkeleton } from "../components/SectionStates";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeftOutlined,
   ExportOutlined,
-  CopyOutlined,
   DownloadOutlined,
   BookOutlined,
   CalendarOutlined,
@@ -17,6 +16,8 @@ import LogoBannerBand from "../components/Home/LogoBanner";
 import RelatedServices from "../components/About/RelatedServices";
 import { useData } from "../hooks/useDataProvider";
 import ReactPlayer from "../components/ReactPlayerCompat";
+import CitationText from "../components/Citation/CitationText";
+import { AERIALSTAMP_CITATION, AERIALSTAMP_REPO } from "../data/citations";
 
 export default function About() {
   const coreTeam = [
@@ -155,15 +156,6 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
 
   const satelliteApa = `Mosig, C., Kattenborn, T., Loaiza, D. M., Vanja-Jehle, J., Brandt, J., Jacobs, N., ... & Mahecha, M. (2026). Sub-pixel mapping of disturbance and tree mortality dynamics from Sentinel-2 time series around the globe.`;
 
-  const handleCopy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      message.success("Copied to clipboard");
-    } catch (err) {
-      message.error("Copy failed");
-    }
-  };
-
   const renderCitationPanel = ({
     intro,
     bibtex,
@@ -179,52 +171,10 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
           {intro}
         </div>
       ) : null}
-
       <div className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-bold uppercase tracking-wider text-gray-500">
-            BibTeX
-          </span>
-          <Tooltip title="Copy BibTeX">
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => handleCopy(bibtex)}
-            >
-              Copy
-            </Button>
-          </Tooltip>
-        </div>
-        <Input.TextArea
-          readOnly
-          value={bibtex}
-          autoSize={{ minRows: 4, maxRows: 12 }}
-          className="custom-scrollbar rounded-lg bg-slate-50 p-4 font-mono text-xs text-slate-700"
-        />
+        <CitationText label="BibTeX" text={bibtex} />
       </div>
-
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-bold uppercase tracking-wider text-gray-500">
-            APA
-          </span>
-          <Tooltip title="Copy APA">
-            <Button
-              size="small"
-              icon={<CopyOutlined />}
-              onClick={() => handleCopy(apa)}
-            >
-              Copy
-            </Button>
-          </Tooltip>
-        </div>
-        <Input.TextArea
-          readOnly
-          value={apa}
-          autoSize={{ minRows: 2, maxRows: 8 }}
-          className="custom-scrollbar rounded-lg bg-slate-50 p-4 font-mono text-sm text-slate-700"
-        />
-      </div>
+      <CitationText label="APA" text={apa} />
     </div>
   );
 
@@ -511,6 +461,38 @@ abstract = {Excessive tree mortality is a global concern and remains poorly unde
                   ),
                   bibtex: satelliteBibtex,
                   apa: satelliteApa,
+                }),
+              },
+              {
+                key: "aerialstamp",
+                label: "4) Acquisition dates",
+                children: renderCitationPanel({
+                  intro: (
+                    <p className="m-0">
+                      For the acquisition dates estimated by AerialStamp,
+                      please cite{" "}
+                      <a
+                        href={AERIALSTAMP_CITATION.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-[#1B5E35] hover:underline"
+                      >
+                        {AERIALSTAMP_CITATION.short}
+                      </a>
+                      . The code is on{" "}
+                      <a
+                        href={AERIALSTAMP_REPO}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-[#1B5E35] hover:underline"
+                      >
+                        GitHub
+                      </a>
+                      .
+                    </p>
+                  ),
+                  bibtex: AERIALSTAMP_CITATION.bibtex,
+                  apa: AERIALSTAMP_CITATION.apa,
                 }),
               },
             ]}
