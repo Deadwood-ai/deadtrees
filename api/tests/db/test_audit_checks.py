@@ -488,6 +488,32 @@ def test_a_review_carries_only_the_columns_of_its_check(db):
 		)
 
 
+def test_operators_queue_runs_of_the_active_version_by_hand(db):
+	"""The worker queues nothing itself (DT-1619): an operator queues the datasets to judge."""
+	operator, auditor = create_operator(db), create_user(db, can_audit=True)
+	first, second = create_dataset(db, create_user(db)), create_dataset(db, create_user(db))
+	version_id = register_version(db)
+
+	def queue(user, ids, again=False):
+		act_as(db, user)
+		return db.execute("SELECT audit.queue_runs('prediction_quality', %s, 'manual', %s)", (ids, again)).fetchone()[0]
+
+	act_as(db, auditor)
+	raises(db, psycopg.errors.InsufficientPrivilege, "SELECT audit.queue_runs('prediction_quality', ARRAY[1]::bigint[])")
+	assert queue(operator, [first, second]) == 2
+	# an open run is not queued twice, a finished one only when asked again
+	assert queue(operator, [first, second]) == 0
+	as_admin(db)
+	db.execute("UPDATE audit.runs SET status='done', finished_at=now() WHERE dataset_id=%s", (first,))
+	assert queue(operator, [first]) == 0 and queue(operator, [first], again=True) == 1
+	as_admin(db)
+	assert db.execute(
+		"SELECT count(*) FROM audit.runs WHERE version_id=%s AND queue='manual' AND status='queued'", (version_id,)
+	).fetchone()[0] == 2
+	act_as(db, operator)
+	raises(db, psycopg.errors.ObjectNotInPrerequisiteState, "SELECT audit.queue_runs('dataset_evaluation', ARRAY[1]::bigint[])")
+
+
 def test_read_policies_evaluate_access_once_per_statement(db):
 	"""A bare function call in USING runs per row; over large tables that hit the statement timeout (DT-1532)."""
 	policies = db.execute(

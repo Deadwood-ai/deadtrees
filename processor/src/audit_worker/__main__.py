@@ -2,13 +2,12 @@
 
 	python -m processor.src.audit_worker probe                 # are the logins there (no model call)
 	python -m processor.src.audit_worker probe --serve codex:gpt-6-luna:medium   # one call, synthetic image
-	python -m processor.src.audit_worker enqueue --check prediction_quality --queue backfill --file ids.txt
 	python -m processor.src.audit_worker status
-	systemd-run --user --scope -p MemoryMax=10G -- python -m processor.src.audit_worker run
+	python -m processor.src.audit_worker run                   # as the service: scripts/audit_worker/start.sh
 
 `run` refuses to start without a memory cap of at most 10 GB, because production ODM runs on
-this host. Enqueueing and running write to the database: the backfill and the first live run
-each need approval.
+this host. It works through the runs operators queue with audit.queue_runs; starting it for real
+needs approval.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import models, runs, worker
+from . import models, worker
 
 
 def connect():
@@ -58,13 +57,6 @@ def put_image_with(token_source):
 	return put
 
 
-def read_ids(args) -> list[int]:
-	ids = [int(i) for i in (args.dataset_ids or '').split(',') if i.strip()]
-	if args.file:
-		ids += [int(line) for line in Path(args.file).read_text().split() if line.strip()]
-	return ids
-
-
 def main(argv: list[str] | None = None) -> int:
 	parser = argparse.ArgumentParser(
 		prog='audit_worker', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -72,12 +64,6 @@ def main(argv: list[str] | None = None) -> int:
 	sub = parser.add_subparsers(dest='command', required=True)
 	run = sub.add_parser('run')
 	run.add_argument('--once', action='store_true', help='process at most one run, then stop')
-	enqueue = sub.add_parser('enqueue')
-	enqueue.add_argument('--check', required=True)
-	enqueue.add_argument('--queue', choices=('backfill', 'manual'), default='backfill')
-	enqueue.add_argument('--dataset-ids', help='comma separated')
-	enqueue.add_argument('--file', help='one dataset id per line')
-	enqueue.add_argument('--force', action='store_true', help='queue even where the latest run judged the same inputs')
 	sub.add_parser('status')
 	probe = sub.add_parser('probe')
 	probe.add_argument('--serve', help='transport:model[:effort] to send one synthetic test image to')
@@ -113,18 +99,6 @@ def main(argv: list[str] | None = None) -> int:
 		print('No check handler is registered yet (worker.HANDLERS); nothing to do.', file=sys.stderr)
 		return 1
 	client, token = connect()
-	if args.command == 'enqueue':
-		if args.check not in handlers:
-			parser.error(f'no handler for {args.check}')
-		active = runs.active_versions(client, [args.check]).get(args.check)
-		if active is None:
-			parser.error(f'{args.check} has no active version; an operator activates one first')
-		ids = read_ids(args)
-		ids, inputs = worker.judged_inputs(handlers[args.check], client, ids)
-		added = runs.enqueue(client, active, ids, args.queue, inputs=inputs, force=args.force)
-		print(json.dumps({'check': args.check, 'version': active['version'], 'queue': args.queue, 'added': len(added)}))
-		return 0
-
 	limit = worker.memory_limit()
 	if limit is None or limit > worker.MEMORY_LIMIT:
 		print(

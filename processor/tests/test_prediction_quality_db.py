@@ -209,7 +209,6 @@ def test_the_handler_runs_on_stored_inputs(
 			judges={'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major')},
 		)
 		out = handler.handle(ctx)
-		assert out['inputs'] == handler.inputs(client, dataset_id)
 		assert out['inputs']['label_ids'] == labels and out['inputs']['ortho_sha256'] == SHA
 		assert out['evidence']['coverage']['tiles'] == 4
 		runs.finish(client, run, out)

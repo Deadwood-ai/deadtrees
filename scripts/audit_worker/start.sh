@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Start or restart the audit worker as a user service (deadtrees-audit-worker.service) on its own
 # code copy, brought to the newest main first (DT-1489, DT-1619). Switching check versions on
-# stays an operator's step (docs/audit-checks.md).
-#
-#   start.sh [ids file]   also queues these datasets in the manual queue for both checks
+# and queueing datasets (audit.queue_runs) stay an operator's steps (docs/audit-checks.md).
 #
 # Once per server, in $DIR: a clone of the repository in code/, a venv with
 # processor/requirements.txt in venv/, and worker.env with the settings the processor uses on
@@ -32,12 +30,3 @@ systemctl --user enable --quiet "$UNIT"
 systemctl --user restart "$UNIT"
 echo "Worker started: systemctl --user status $UNIT, journalctl --user -u $UNIT"
 
-if [ $# -gt 0 ]; then
-	cd "$CODE"
-	set -a
-	. "$DIR/worker.env"
-	set +a
-	for check in dataset_evaluation prediction_quality; do
-		"$DIR/venv/bin/python" -m processor.src.audit_worker enqueue --check "$check" --queue manual --file "$1"
-	done
-fi

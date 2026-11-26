@@ -428,7 +428,7 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 	)
 	out = handler.handle(ctx)
 	labels = {'deadwood': 11, 'forest_cover': 12}
-	assert out['inputs'] == handler.inputs(client, 42) == {'ortho_sha256': SHA, 'aoi': None, 'label_ids': labels}
+	assert out['inputs'] == {'ortho_sha256': SHA, 'aoi': None, 'label_ids': labels}
 	assert out['evidence']['coverage'] == {
 		'mode': 'sampled',
 		'tiles_total': 4,
@@ -455,22 +455,16 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 	assert not {'rule', 'rule_config'} & set(handler.CONFIG)
 
 
-def test_the_handler_waits_for_its_inputs(monkeypatch):
+def test_a_run_needs_the_preferred_predictions_and_a_new_aoi_is_other_inputs():
 	from processor.src.prediction_quality_v1 import handler
 
-	done = {'is_cog_done': True, 'is_embeddings_done': True, 'is_deadwood_done': True, 'is_forest_cover_done': True}
-	assert handler.ready(done) and handler.ready({**done, 'is_deadwood_done': False, 'is_combined_model_done': True})
-	assert not handler.ready({**done, 'is_embeddings_done': False})
-	assert not handler.ready({**done, 'is_forest_cover_done': False})
-	# a dataset without a prediction of the preferred model is left out of the queue (a ValueError)
 	tables = _dataset()
 	tables['v2_labels'] = [row for row in tables['v2_labels'] if row['id'] != 12]
 	with pytest.raises(ValueError, match='no forest_cover prediction'):
-		handler.inputs(_FakeClient(tables), 42)
-	# a new AOI is a new run
+		handler.prediction_labels(_FakeClient(tables), 42)
 	aoi = {'geometry': {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 0]]]}, 'source': 'manual'}
-	with_aoi = handler.inputs(_FakeClient(_dataset([{**aoi, 'dataset_id': 42}])), 42)
-	assert with_aoi['aoi'] and with_aoi != handler.inputs(_FakeClient(_dataset()), 42)
+	labels = {'deadwood': 11, 'forest': 12}
+	assert handler.identity(SHA, aoi, labels)['aoi'] and handler.identity(SHA, aoi, labels) != handler.identity(SHA, None, labels)
 
 
 def test_a_forest_that_fills_the_crop_is_framed_and_its_share_is_in_the_prompt():

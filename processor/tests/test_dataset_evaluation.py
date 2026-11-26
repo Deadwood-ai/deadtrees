@@ -574,8 +574,8 @@ def test_the_handler_uploads_the_images_and_returns_the_rows_to_store(cog, tmp_p
 	]
 	assert 'phash' not in result['evidence'] and result['evidence']['band_check']['likelihood'] == 0
 	assert result['evidence']['coverage'] == {'tiles': 4, 'tile_picker': 'kmeans-inside-v1'}
-	# the run's inputs have the one shape the queueing compares
-	assert result['inputs'] == handler.inputs(client, 42) == {'ortho_sha256': SHA}
+	# what the run judged
+	assert result['inputs'] == {'ortho_sha256': SHA}
 
 
 @pytest.mark.unit
@@ -589,7 +589,7 @@ def test_a_run_of_an_earlier_version_is_not_judged_by_this_code(earlier):
 
 
 @pytest.mark.unit
-def test_the_handler_runs_after_the_cog_thumbnail_and_tiles_and_is_registered():
+def test_the_handler_is_registered():
 	from processor.src.audit_worker import worker
 
 	assert worker.HANDLERS['dataset_evaluation'] == 'processor.src.dataset_evaluation_v1.handler'
@@ -600,8 +600,6 @@ def test_the_handler_runs_after_the_cog_thumbnail_and_tiles_and_is_registered():
 	assert (evaluation.RULES, evaluation.RULES_CONFIG) == ('rules-v1', {'decider': 'haiku', 'band_major_at': 90})
 	assert not {'duplicates', 'phash', 'rules', 'rule_config'} & set(evaluation.CONFIG)
 	assert set(handlers['dataset_evaluation'].CONFIG['models']) == {'luna-medium', 'haiku-5.5'}
-	assert handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': True})
-	assert not handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': False})
 
 
 # ---------------------------------------------------------------------------

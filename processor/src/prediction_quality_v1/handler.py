@@ -19,7 +19,6 @@ from shared.models import LabelDataEnum, LabelSourceEnum
 from shared.pagination import iter_pages_by_creation
 from shared.settings import settings
 
-from ..audit_worker.worker import default_ready
 from ..utils.stored_inputs import (
 	aoi_key,
 	readable_cog,
@@ -55,24 +54,11 @@ LAYERS = {
 	'forest': (LabelDataEnum.forest_cover, settings.forest_cover_geometries_table),
 }
 
-__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
-
-
-def ready(status: dict) -> bool:
-	"""After the COG and both predictions exist (the worker's default), and the CLIP tiles."""
-	return bool(default_ready(status) and status.get('is_embeddings_done'))
-
-
-def inputs(client, dataset_id: int) -> dict:
-	"""What a run judges: a new ortho, AOI or prediction makes a new run (and reopens a review)."""
-	return identity(
-		ortho_sha256(client, dataset_id), stored_aoi(client, dataset_id), prediction_labels(client, dataset_id)
-	)
+__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle']
 
 
 def identity(sha256: str, aoi: dict | None, label_ids: dict) -> dict:
-	"""The one shape of a run's inputs. The worker compares it with the stored run to tell
-	whether a dataset was already judged, so the queueing and the run must build it alike."""
+	"""What a run judged, stored with it (audit.runs.inputs)."""
 	return {
 		'ortho_sha256': sha256,
 		'aoi': aoi_key(aoi),
@@ -83,7 +69,7 @@ def identity(sha256: str, aoi: dict | None, label_ids: dict) -> dict:
 def handle(ctx) -> dict:
 	# The code is the version: a run queued for an earlier version would be judged with this
 	# drawing and prompt but stored under the earlier name. Such a run fails; an operator
-	# activates this version and the worker queues its own runs.
+	# activates this version and queues runs of it.
 	queued_for = (getattr(ctx, 'version', None) or {}).get('version', VERSION)
 	if queued_for != VERSION:
 		raise ValueError(f'the run is of version {queued_for}; this code judges {VERSION}')

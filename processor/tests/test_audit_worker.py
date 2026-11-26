@@ -321,88 +321,6 @@ def test_other_errors_are_retried_then_the_run_fails_with_its_error():
 
 
 @pytest.mark.unit
-def test_finished_datasets_are_queued_once_per_version():
-	client = Client()
-	v = version(client)
-	statuses = client.tables['v2_statuses']
-	for dataset, done in ((1, True), (2, True), (3, False)):
-		statuses.add(
-			{
-				'dataset_id': dataset,
-				'updated_at': '2026-11-02T09:00',
-				'current_status': 'idle',
-				'has_error': False,
-				'is_cog_done': True,
-				'is_combined_model_done': done,
-			}
-		)
-	queued(client, v, 2, 'backfill')  # already has a run of this version
-	h = handler()
-	assert worker.enqueue_ready(client, {'prediction_quality': h}, '2026-11-02T08:00', '2026-11-02T10:00') == {
-		'prediction_quality': 1
-	}
-	assert sorted((r['dataset_id'], r['queue']) for r in client.tables['runs'].rows) == [(1, 'upload'), (2, 'backfill')]
-	assert worker.enqueue_ready(client, {'prediction_quality': h}, '2026-11-02T08:00', '2026-11-02T10:00') == {
-		'prediction_quality': 0
-	}
-
-
-@pytest.mark.unit
-def test_every_finished_dataset_is_queued_however_many_pages_and_shared_timestamps(monkeypatch):
-	monkeypatch.setattr(runs, 'PAGE', 3)
-	client = Client()
-	version(client)
-	# seven datasets, five of them finished in the same second, more than two pages
-	times = ['2026-11-02T09:00'] * 5 + ['2026-11-02T09:01', '2026-11-02T09:02']
-	for dataset, at in zip((14, 3, 9, 1, 22, 5, 8), times):
-		client.tables['v2_statuses'].add(
-			{
-				'dataset_id': dataset,
-				'updated_at': at,
-				'current_status': 'idle',
-				'has_error': False,
-				'is_cog_done': True,
-				'is_combined_model_done': True,
-			}
-		)
-	marks = []
-	added = worker.enqueue_ready(
-		client, {'prediction_quality': handler()}, '2026-11-02T08:00', '2026-11-02T10:00', done=marks.append
-	)
-	assert added == {'prediction_quality': 7}
-	assert sorted(r['dataset_id'] for r in client.tables['runs'].rows) == [1, 3, 5, 8, 9, 14, 22]
-	assert marks == ['2026-11-02T09:00', '2026-11-02T09:01', '2026-11-02T09:02']
-
-
-@pytest.mark.unit
-def test_datasets_finished_while_the_worker_was_down_are_still_queued(tmp_path, monkeypatch):
-	monkeypatch.setattr(worker, 'STATUS_FILE', tmp_path / 'status.json')
-	client = Client()
-	version(client)
-	# the worker last queued at 06:00, then stopped for hours
-	worker.write_watermark('2026-11-02T06:00:00+00:00')
-	client.tables['v2_statuses'].add(
-		{
-			'dataset_id': 7,
-			'updated_at': '2026-11-02T07:30:00+00:00',
-			'current_status': 'idle',
-			'has_error': False,
-			'is_cog_done': True,
-			'is_combined_model_done': True,
-		}
-	)
-	worker.run_forever(
-		connect=lambda: (client, 'token'),
-		handlers={'prediction_quality': handler()},
-		put_image=None,
-		once=True,
-		sleep=lambda s: None,
-	)
-	assert [r['dataset_id'] for r in client.tables['runs'].rows] == [7]
-	assert worker.read_watermark() > '2026-11-02T07:30:00+00:00'
-
-
-@pytest.mark.unit
 def test_the_worker_needs_a_memory_cap_of_its_cgroup(tmp_path):
 	root = tmp_path / 'cgroup'
 	scope = root / 'user.slice' / 'run-1.scope'
@@ -502,24 +420,6 @@ def test_a_run_left_running_by_a_stopped_worker_goes_back_to_the_queue():
 		and 'interrupted' in run_row(client, stranded['id'])['error']
 	)
 	assert run_row(client, last['id'])['status'] == 'failed'
-
-
-@pytest.mark.unit
-def test_a_dataset_is_queued_again_when_the_latest_run_of_the_version_judged_other_inputs():
-	client = Client()
-	v = version(client)
-	first = {'ortho_sha256': 'a' * 64, 'label_ids': {'deadwood': 1}}
-	rerun = {**first, 'label_ids': {'deadwood': 2}}
-	queued(client, v, 1, inputs=first)
-	assert runs.enqueue(client, v, [1], 'upload', inputs={1: first}) == []
-	# predictions were rerun: same version, new labels, new run
-	assert runs.enqueue(client, v, [1], 'upload', inputs={1: rerun}) == [1]
-	assert runs.enqueue(client, v, [1], 'upload', inputs={1: rerun}) == []
-	# back to the first inputs: the latest run judged others, so it is judged again
-	assert runs.enqueue(client, v, [1], 'upload', inputs={1: first}) == [1]
-	# another version's run does not stand in, and force always queues
-	assert runs.enqueue(client, version(client, name='v2'), [1], 'backfill', inputs={1: first}) == [1]
-	assert runs.enqueue(client, v, [1], 'manual', inputs={1: first}, force=True) == [1]
 
 
 class FakeAppServer:
@@ -669,18 +569,3 @@ def test_a_run_records_the_inputs_its_handler_read_again():
 	assert run_row(client, run['id'])['inputs'] == judged
 
 
-@pytest.mark.unit
-def test_a_dataset_whose_inputs_cannot_be_read_is_left_out_without_stopping_the_worker(caplog):
-	"""One dataset without an ortho hash must not end the loop or block the ones after it."""
-
-	def inputs(client, dataset_id):
-		if dataset_id == 2:
-			raise ValueError('dataset has no ortho with a sha256')
-		return {'ortho_sha256': f'sha-{dataset_id}'}
-
-	ids, read = worker.judged_inputs(SimpleNamespace(inputs=inputs), None, [1, 2, 3])
-
-	assert ids == [1, 3] and read == {1: {'ortho_sha256': 'sha-1'}, 3: {'ortho_sha256': 'sha-3'}}
-	assert 'leaves dataset 2 out' in caplog.text
-	# a check without inputs keeps every dataset
-	assert worker.judged_inputs(SimpleNamespace(), None, [1, 2]) == ([1, 2], None)
