@@ -7,6 +7,7 @@ import type {
   AuditCheckKey,
   DatasetReviewInput,
   EvaluationDecision,
+  GeorefAnswer,
   GeorefStatus,
   IAuditDatasetResult,
   ITileCall,
@@ -35,23 +36,42 @@ export const SOURCE_LABELS: Record<string, string> = { reviewer: "a reviewer", l
 export const GEOREF_PASS_M = 15;
 
 export const GEOREF_LABELS: Record<GeorefStatus, string> = {
-  estimated: "Estimated",
-  no_reference: "No reference",
+  estimated: "Estimated offset",
   needs_review: "Needs review",
   passed: `Passed (≤ ${GEOREF_PASS_M} m)`,
   not_passed: `Not passed (> ${GEOREF_PASS_M} m)`,
+  no_reference: "No reference imagery",
 };
+
+/** A person's answers in the georeferencing step, in order. */
+export const GEOREF_ANSWERS: GeorefAnswer[] = ["passed", "not_passed", "no_reference"];
 
 const metres = (m: number) => `${m < 10 ? m.toFixed(1) : Math.round(m)} m`;
 
-/** The georeferencing output in a few words: "8.2 m offset", "No reference", "Needs review (best reference 22 m)". */
+/** The georeferencing output in a few words: "8.2 m offset", "Needs review", "No reference imagery". */
 export function georefText(result: Pick<IAuditDatasetResult, "georef_status" | "georef_offset_m"> | null | undefined): string {
   const status = result?.georef_status;
   if (!status) return "Not run yet";
   const offset = result?.georef_offset_m;
   if (status === "estimated") return offset == null ? "Estimated" : `${metres(offset)} offset`;
-  if (status === "needs_review") return offset == null ? "Needs review" : `Needs review (best reference ${metres(offset)})`;
   return GEOREF_LABELS[status];
+}
+
+/** What the check found, for the georeferencing step; null when it has not run or a person's
+ * answer replaces it. The check estimates an offset and judges none. */
+export function georefCheckSentence(result: Pick<IAuditDatasetResult, "georef_status" | "georef_offset_m" | "georef_source"> | null | undefined): string | null {
+  if (result?.georef_source !== "check") return null;
+  const offset = result.georef_offset_m;
+  switch (result.georef_status) {
+    case "estimated":
+      return offset == null ? "The check estimated the offset." : `Estimated offset: ${metres(offset)}, the references' median on 90% of the matched area.`;
+    case "needs_review":
+      return "The references do not support a reliable offset estimate: their matches are inconsistent or bunched in part of the image. Compare the drone image with them on the map.";
+    case "no_reference":
+      return "No reference imagery matched this dataset.";
+    default:
+      return null;
+  }
 }
 
 /** A share of crops as a whole percentage, or null without crops. */
@@ -154,7 +174,7 @@ export interface IEvaluationAnswer {
 /** The reviewer's answers on the page, held in the form until Save. */
 export interface IReviewDraft extends IEvaluationAnswer {
   evaluationNote?: string;
-  georefStatus?: "passed" | "not_passed" | null;
+  georefStatus?: GeorefAnswer | null;
   georefNote?: string;
   dateReplace?: boolean | null;
   dateNote?: string;
@@ -172,14 +192,13 @@ export function withDraft(result: IAuditDatasetResult, draft: IReviewDraft): IAu
 
 /** What the form starts with: the view's values, so a step left alone stores nothing. */
 export function initialDraft(result: IAuditDatasetResult | null | undefined): IReviewDraft {
-  const georef = result?.georef_source === "reviewer" ? result.georef_status : null;
   return {
     decision: result?.evaluation_decision ?? null,
     excludeReason: null,
     cogIssue: result?.cog_issue ?? false,
     thumbnailIssue: result?.thumbnail_issue ?? false,
     evaluationNote: "",
-    georefStatus: georef === "passed" || georef === "not_passed" ? georef : null,
+    georefStatus: result?.georef_source === "reviewer" ? (GEOREF_ANSWERS.find((a) => a === result.georef_status) ?? null) : null,
     georefNote: "",
     // the date advice changed after a reviewer's answer: the reviewer answers afresh
     dateReplace: result?.review_required.includes("date") ? null : (result?.date_replace ?? null),

@@ -89,14 +89,14 @@ insert into public.v2_orthos (dataset_id, ortho_file_name, version, ortho_file_s
 values ({ds}, 'review.tif', 1, {os.path.getsize(COG)}, '{SHA}', box2d({envelope_sql(X0, Y1 - SIZE_M, X0 + SIZE_M, Y1)}), '{ORTHO_INFO}');
 """)
 
-# --- georeferencing: a poor call decided by Bing alone, with match lines ---------------
+# --- georeferencing: Bing has plenty of matches, bunched in three cells (needs review), with match lines
 lon0, lat0 = LON0 + 0.0002, LAT0 - 0.0002
 pairs = [[lon0 + i * 0.00012, lat0 - j * 0.0001, lon0 + i * 0.00012 + 0.0002, lat0 - j * 0.0001 - 0.00008, 1] for i in range(5) for j in range(4)]
 pairs += [[lon0 + 0.0003, lat0 - 0.0004, lon0 + 0.0004, lat0 - 0.00035, 0]]
 evidence = [
-	{'provider': 'bing', 'group': 'bing', 'matches': 60, 'inliers': 52, 'inlier_fraction': 0.87, 'cells': 14, 'support': 0.9,
-	 'edge_support': 0.8, 'p50_m': 17.2, 'p90_m': 19.8, 'holdout_p90_m': [19.5, 20.1], 'vote': 'poor', 'qualified': True,
-	 'decides': True, 'reason': None, 'sample_pairs': pairs},
+	{'provider': 'bing', 'group': 'bing', 'matches': 600, 'inliers': 520, 'inlier_fraction': 0.87, 'cells': 3, 'support': 0.0,
+	 'edge_support': 0.0, 'p50_m': None, 'p90_m': None, 'holdout_p90_m': [], 'vote': None, 'qualified': False,
+	 'decides': False, 'reason': 'clustered_matches', 'sample_pairs': pairs},
 	{'provider': 'esri', 'group': 'esri', 'matches': 4, 'inliers': 2, 'inlier_fraction': 0.5, 'cells': 1, 'support': 0.1,
 	 'edge_support': 0.1, 'p50_m': None, 'p90_m': None, 'holdout_p90_m': [], 'vote': None, 'qualified': False,
 	 'decides': False, 'reason': 'too_few_matches', 'sample_pairs': []},
@@ -110,7 +110,7 @@ metadata = {'references': {
 psql(f"""
 insert into public.v2_georef_checks (dataset_id, model_version, rules_version, decision, evidence_level, reason, p90_m,
 	evidence_groups, support, edge_support, used_aoi, reference_evidence, reference_errors, metadata)
-values ({ds}, 'romav2.0.1', 'georef-rules-v2', 'poor', 'qualified', 'single_reference', 19.8, 1, 0.9, 0.8, false,
+values ({ds}, 'romav2.0.1', 'georef-rules-v2', 'uncertain', 'insufficient', 'no_qualified_reference', null, 0, 0, 0, false,
 	'{json.dumps(evidence)}', '{{"dop_bw": "too_few_matches"}}', '{json.dumps(metadata)}')""")
 
 # --- check versions, with their rules, and runs ----------------------------------------

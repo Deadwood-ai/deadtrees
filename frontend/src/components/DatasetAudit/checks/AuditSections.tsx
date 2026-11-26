@@ -82,7 +82,7 @@ export default function AuditSections({ dataset, checks, checksFailed, onRetryCh
 			/>
 		),
 		aoi: <AoiStep result={result} editor={panels.aoi} />,
-		georef: <GeorefStep check={panels.georefCheck} />,
+		georef: <GeorefStep check={panels.georefCheck} result={result} />,
 		date: <DateStep dataset={dataset} result={result} estimate={panels.dateEstimate} />,
 		phenology: <PhenologyStep dataset={dataset} result={result} />,
 		forest: predictionBody("forest"),

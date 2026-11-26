@@ -104,7 +104,7 @@ export interface IDatasetReview {
   exclude_reason: string | null;
   cog_issue: boolean | null;
   thumbnail_issue: boolean | null;
-  georef_status: "passed" | "not_passed" | null;
+  georef_status: GeorefAnswer | null;
   date_replace: boolean | null;
   note: string | null;
   in_benchmark: boolean;
@@ -172,7 +172,11 @@ export interface IAuditReviews {
 
 /** What a person still has to look at on a dataset (audit.dataset_outcomes.review_required), in page order. */
 export type ReviewItem = "evaluation" | "aoi" | "georef" | "date";
-export type GeorefStatus = "estimated" | "no_reference" | "needs_review" | "passed" | "not_passed";
+/** A person's georeferencing answer: within 15 m, more than 15 m off, or nothing to compare with. */
+export type GeorefAnswer = "passed" | "not_passed" | "no_reference";
+/** The georeferencing status: the check's estimated offset, needs_review (the references do not
+ * support a reliable estimate) or no_reference, unless a person's answer replaces it. */
+export type GeorefStatus = "estimated" | "needs_review" | GeorefAnswer;
 
 /** One row of audit.dataset_outcomes: every dataset with each check's output (a person's
  * correction included), whether a person still has to review it and where the values come from. */

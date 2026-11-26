@@ -1,10 +1,11 @@
 # Georeferencing check (`georef_check_v1`)
 
 The processor measures how far an orthophoto is placed from where satellite
-imagery shows the same ground. The Audit Review reports the result as a status and an
-offset in metres (Passed means within 15 m); a reviewer settles the cases the check
-cannot decide. Like the acquisition-date check (`docs/doy-estimation.md`), it reports and
-never changes the dataset.
+imagery shows the same ground. The Audit Review shows the estimated offset in metres; the
+check never calls a dataset passed or not passed. Only a reviewer does (Passed means within
+15 m), and only where they choose to, or where the references match too poorly for an
+estimate. Like the acquisition-date check (`docs/doy-estimation.md`), it reports and never
+changes the dataset.
 
 ## What runs
 
@@ -69,8 +70,9 @@ never changes the dataset.
 
    It *decides* when it also supports at least 30% of the AOI. A p90 that
    crosses 15 m under a holdout makes it unstable.
-5. **Call.** The deciding references agree, so the dataset is Good or Poor, or
-   they disagree or are unstable, so it is uncertain. The call is `strong` when
+5. **Processor call**, stored as evidence; the audit does not read it. The
+   deciding references agree, so the dataset is Good or Poor, or they disagree
+   or are unstable, so it is uncertain. The call is `strong` when
    all of these hold:
    - at least 2 independent reference groups decide (Esri and its Wayback
      captures count as one group)
@@ -96,21 +98,23 @@ row per dataset, replaced on rerun. It is the record; the stage writes no audit 
 
 `audit.georef_output_v1(v2_georef_checks)` turns the stored check into the Audit Review's
 output (`audit.dataset_outcomes`, `docs/audit-checks.md`), computed when it is read, so a
-rerun of the stage or a new rule shows at once, without a VLM call:
+rerun of the stage or a new rule shows at once. It reads only each reference's raw numbers,
+not the processor's call, flags or votes (those hold the coverage, holdout and 15 m tests).
+A reference counts when it has at least 100 inliers, at least 50% of its matches agree with
+the fit, its inliers lie in at least 4 of 16 grid cells, and it measured a p90. The
+thresholds sit in one `rules` row at the top of the function (DT-1616).
 
-| Status | When | Offset |
-|---|---|---|
-| `estimated` | the deciding references agree (`references_agree`) | their median p90 |
-| `not_passed` | a coordinate looks lost (Poor, `gross`) | none |
-| `no_reference` | no reference qualified | none |
-| `needs_review` | references qualified but none decides, or they conflict (`unstable_near_threshold`, `references_disagree`) | the best supported qualified reference's p90, as evidence |
+- `estimated`: the median p90 of the references that count.
+- `needs_review`: none counts, but one has at least 100 inliers (plenty of matches, but
+  inconsistent or bunched). This puts the dataset in the review list.
+- `no_reference`: no reference imagery matched.
 
-`needs_review` asks a person: the reviewer answers Passed (within 15 m) or Not passed (an
+A reviewer may answer Passed (within 15 m), Not passed or No reference imagery (an
 `audit.dataset_human_reviews` row, check `georef`), which replaces the status. The answer
-keeps counting while the ortho is the same: a rerun of the stage does not move the image,
-a new ortho does. The georeferencing step shows the measurement; opening it puts the audit
-map into georeferencing mode: the chosen reference under the drone image, a drone opacity
-slider, and the matched points coloured by offset.
+keeps counting while the dataset is the same: a rerun of the stage or of the geotiff does not
+move it. The georeferencing step shows the offset and each reference's numbers; opening it
+puts the audit map into georeferencing mode: the chosen reference under the drone image, a
+drone opacity slider, and the matched points coloured by offset.
 
 ## Operations
 
@@ -129,7 +133,7 @@ slider, and the matched points coloured by offset.
   kernel.
 - Limits:
   - Closed canopy, tundra and dark images often give no confident matches, so
-    the result is uncertain.
+    there is no estimate.
   - Land placed in the ocean is only caught when it sits on the equator or
     prime meridian.
   - Basemaps are references, not surveyed ground truth.

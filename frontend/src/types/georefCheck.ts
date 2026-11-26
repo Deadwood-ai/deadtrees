@@ -1,4 +1,6 @@
-/** One row of v2_georef_checks: the georeferencing check of a dataset. */
+/** One row of v2_georef_checks: the georeferencing check of a dataset. The decision, evidence
+ * level and each reference's vote and flags are the processor's own call, kept as evidence; the
+ * audit's output (audit.georef_output_v1) reads only each reference's matches and offset. */
 export interface IGeorefCheck {
   dataset_id: number;
   model_version: string;
