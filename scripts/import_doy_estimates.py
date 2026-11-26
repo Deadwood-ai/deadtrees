@@ -18,8 +18,9 @@ review given on the other advice (replace / keep) turns stale, as after a
 processor rerun. The dry run counts those.
 
 A row is written only while it still describes the dataset: not archived, the
-recorded date unchanged since the run, and no estimate newer than the row (a
-processor run after the import's run wins). Re-running the same bundle writes
+recorded date unchanged since the run, and no estimate of the same model version
+newer than the row (a v2 processor run after the import's run wins; a later v1
+run does not). Re-running the same bundle writes
 nothing new.
 
 Input: a bundle directory with estimates.jsonl (rows as
@@ -80,7 +81,8 @@ CREATE TEMP TABLE doy_est_in (dataset_id bigint PRIMARY KEY, row jsonb NOT NULL)
 CREATE TEMP TABLE doy_clr_in (dataset_id bigint PRIMARY KEY, row jsonb NOT NULL) ON COMMIT DROP;
 """
 
-# rows that still describe their dataset: not archived, same recorded date, nothing newer stored
+# rows that still describe their dataset: not archived, same recorded date, no newer estimate of the
+# same model version (a newer one of another version, e.g. a v1 rerun, is replaced)
 ELIGIBLE_SQL = """
 CREATE TEMP TABLE doy_ok ON COMMIT DROP AS
 SELECT i.dataset_id, e.model_version AS old_version, e.dataset_id IS NOT NULL AS replaces
@@ -90,7 +92,8 @@ LEFT JOIN public.v2_acquisition_date_estimates e ON e.dataset_id = i.dataset_id
 WHERE NOT coalesce(d.archived, false)
 	AND (d.aquisition_year, d.aquisition_month, d.aquisition_day) IS NOT DISTINCT FROM
 		((i.row->>'recorded_year')::smallint, (i.row->>'recorded_month')::smallint, (i.row->>'recorded_day')::smallint)
-	AND (e.updated_at IS NULL OR e.updated_at < (i.row->>'updated_at')::timestamptz);
+	AND (e.updated_at IS NULL OR e.model_version IS DISTINCT FROM i.row->>'model_version'
+		OR e.updated_at < (i.row->>'updated_at')::timestamptz);
 CREATE TEMP TABLE doy_clr_ok ON COMMIT DROP AS
 SELECT c.dataset_id
 FROM doy_clr_in c
