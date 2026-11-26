@@ -16,12 +16,15 @@ CONFIG['models'] names the judges ({"haiku-5.5": {"transport": "claude", "model"
 
 from __future__ import annotations
 
+import faulthandler
 import importlib
 import json
 import logging
 import os
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -44,6 +47,11 @@ IDLE_SECONDS = 60
 ENQUEUE_SECONDS = 5 * 60
 LIMIT_PAUSE_SECONDS = 30 * 60
 LOGIN_PROBE_SECONDS = 5 * 60
+# The longest run until Nov 2026 took 75 minutes; one still going after this is stuck (DT-1619).
+RUN_DEADLINE_SECONDS = 3 * 60 * 60
+# While a run lasts, where every thread is goes to the log this often, so a slow run shows where.
+STACK_SECONDS = 30 * 60
+TIMEOUT_EXIT = 3  # the worker's exit code after a stuck run; its service starts it again
 
 
 class Paused(Exception):
@@ -142,6 +150,35 @@ def memory_limit(
 	return min(limits) if limits else None
 
 
+@contextmanager
+def deadline(run: dict, client, refresh=None, seconds: float = RUN_DEADLINE_SECONDS, stop=os._exit):
+	"""Bounds one run. Every STACK_SECONDS the stacks of all threads go to stderr (the journal).
+	Past `seconds` the run fails as stuck and the worker stops with TIMEOUT_EXIT: a thread stuck in
+	a C call or a network read cannot be stopped from inside, so the process ends and its service
+	starts it again. A stuck run fails at once, since a retry would most likely get stuck again."""
+
+	def give_up():
+		log.error('Run %s is still going after %.1f h; it fails and the worker stops', run['id'], seconds / 3600)
+		faulthandler.dump_traceback(all_threads=True)
+		try:
+			if refresh:
+				refresh(client)
+			runs.fail(client, run, f'timed out: still running after {seconds / 3600:g} h; its stacks are in the worker log')
+			write_status('stopped', reason=f'run {run["id"]} timed out', run_id=run['id'])
+		finally:
+			stop(TIMEOUT_EXIT)
+
+	timer = threading.Timer(seconds, give_up)
+	timer.daemon = True
+	faulthandler.dump_traceback_later(STACK_SECONDS, repeat=True)
+	timer.start()
+	try:
+		yield
+	finally:
+		timer.cancel()
+		faulthandler.cancel_dump_traceback_later()
+
+
 def process(run: dict, *, client, handler, version_row: dict, put_image, token='', refresh=None) -> str:
 	"""One claimed run to its end state; a pause puts it back and raises Paused.
 
@@ -150,12 +187,13 @@ def process(run: dict, *, client, handler, version_row: dict, put_image, token='
 	if refresh:
 		ctx.refresh = lambda: refresh(client)
 	try:
-		try:
-			ctx.judges = models.judges(version_row['config'].get('models', {}))
-			result = handler.handle(ctx)
-		finally:
-			ctx.refresh()  # the run may have outlived its login; every outcome below is written with a valid one
-		runs.finish(client, run, result)
+		with deadline(run, client, refresh):
+			try:
+				ctx.judges = models.judges(version_row['config'].get('models', {}))
+				result = handler.handle(ctx)
+			finally:
+				ctx.refresh()  # the run may have outlived its login; every outcome below is written with a valid one
+			runs.finish(client, run, result)
 	except models.LoginExpired as exc:
 		runs.release(client, run)
 		raise Paused(str(exc), exc.transport, LOGIN_PROBE_SECONDS) from exc

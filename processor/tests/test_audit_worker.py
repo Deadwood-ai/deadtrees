@@ -4,6 +4,7 @@ import io
 import json
 import queue
 import subprocess
+import threading
 import time
 from types import SimpleNamespace
 
@@ -456,6 +457,36 @@ def test_claude_backend_sends_the_images_inline_without_any_tool_and_maps_login_
 
 		with pytest.raises(error):
 			models.claude_backend('claude-haiku-5-5', run=failing)('judge', [Image.new('RGB', (8, 8))])
+
+
+@pytest.mark.unit
+def test_a_stuck_run_fails_and_stops_the_worker(tmp_path, monkeypatch):
+	"""A run still going past the deadline fails at once and the worker exits for its service to
+	start it again: a thread stuck in a C call cannot be stopped from inside (DT-1619)."""
+	monkeypatch.setattr(worker, 'STATUS_FILE', tmp_path / 'status.json')
+	client = Client()
+	v = version(client)
+	queued(client, v, 1)
+	run = runs.claim_next(client, [v['id']])
+	stopped, codes = threading.Event(), []
+	with worker.deadline(run, client, seconds=0.05, stop=lambda code: (codes.append(code), stopped.set())):
+		assert stopped.wait(5)
+	row = run_row(client, run['id'])
+	assert row['status'] == 'failed' and row['error'].startswith('timed out') and codes == [worker.TIMEOUT_EXIT]
+	assert worker.read_status()['state'] == 'stopped'
+
+
+@pytest.mark.unit
+def test_a_run_that_ends_in_time_is_left_alone():
+	client = Client()
+	v = version(client)
+	queued(client, v, 1)
+	run = runs.claim_next(client, [v['id']])
+	codes = []
+	with worker.deadline(run, client, seconds=0.1, stop=codes.append):
+		pass
+	time.sleep(0.2)
+	assert codes == [] and run_row(client, run['id'])['status'] == 'running'
 
 
 @pytest.mark.unit

@@ -95,9 +95,14 @@ def retry_or_fail(client, run: dict, error: str) -> str:
 			'id', run['id']
 		).execute()
 		return 'queued'
+	return fail(client, run, error)
+
+
+def fail(client, run: dict, error: str) -> str:
+	"""The running run ends failed with its error; a run that got to its end state meanwhile stays."""
 	audit(client).table('runs').update({'status': 'failed', 'finished_at': now(), 'error': error}).eq(
 		'id', run['id']
-	).execute()
+	).eq('status', 'running').execute()
 	return 'failed'
 
 

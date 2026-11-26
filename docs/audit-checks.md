@@ -157,13 +157,26 @@ in the request, so a model cannot read files of the account.
   file (`~/.local/state/deadtrees-audit-worker/status.json`) shows it and the platform
   monitor reports it. Other errors are retried up to three times, then the run fails with
   its error. At start, runs left `running` by a stopped worker go back to the queue.
+- A run still going after 3 hours is stuck: it fails at once ("timed out") and the worker
+  exits with code 3, because a thread stuck in a C call or a network read cannot be
+  stopped from inside. Its service starts it again a minute later. While a run lasts, the
+  stacks of all threads go to the journal every 30 minutes, so a slow run shows where it is.
 - Calls are paced per login (`models.paced`): one call at a time on the Codex login.
 - The worker refuses to start without a memory cap of at most 10 GB, because production
   ODM runs on this host.
 
+The worker runs as the user service `deadtrees-audit-worker` on its own code copy in
+`~/.local/share/deadtrees-audit-worker` (`code/`, `venv/`, and the untracked `worker.env`
+with the host's settings). `scripts/audit_worker/start.sh` brings the copy to the newest
+main, installs `scripts/audit_worker/deadtrees-audit-worker.service` (10 GB memory cap,
+restart on failure, enabled at boot with lingering on) and restarts it; with an ids file it
+also queues those datasets. Switching a check version on stays an operator's step: the
+worker refuses runs queued for a version its code does not run.
+
 ```bash
 python -m processor.src.audit_worker probe            # logins only, no model call
-systemd-run --user --scope -p MemoryMax=10G -- python -m processor.src.audit_worker run
+~/.local/share/deadtrees-audit-worker/code/scripts/audit_worker/start.sh [ids.txt]
+journalctl --user -u deadtrees-audit-worker -f
 python -m processor.src.audit_worker enqueue --check prediction_quality --queue backfill --file ids.txt
 python -m processor.src.audit_worker status
 ```
