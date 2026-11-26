@@ -4,9 +4,9 @@ import MyDatasetsEmpty from "./MyDatasetsEmpty";
 import StatusCell from "./StatusCell";
 import {
   canOpenOwnerMap,
+  imageCheck,
   needsAttention,
   processingStatus,
-  reviewStatus,
   type ContributorDataset,
   type QueueState,
 } from "./status";
@@ -34,7 +34,7 @@ export default function MobileDatasets({ datasets, queueFor, onDetails, onViewMa
     >
       {datasets.map((dataset) => {
         const queue = queueFor(dataset.id);
-        const attention = needsAttention(processingStatus(dataset, queue), reviewStatus(dataset));
+        const attention = needsAttention(processingStatus(dataset, queue), imageCheck(dataset));
         return (
           <li
             key={dataset.id}

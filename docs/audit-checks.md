@@ -76,7 +76,8 @@ through `internal.audit_decisions()`: audit readers see every decision, owners t
 own, the public none. The export view, the factory and the north star read the decision;
 "audited ok" is `keep`. `public.get_dataset_audit_summary(dataset_id)` gives anyone who
 can see the dataset its outcome and the deciding model's reasoning on the tiles it found
-errors on.
+errors on; for an excluded dataset (which only its owner and privileged readers can see) also
+the exclusion's reason code (`evaluation_reason`, the fixed codes only, else `other`).
 
 ## Versions, rules and reruns
 

@@ -1,11 +1,9 @@
 import { Alert, Button, Drawer, Tag } from "antd";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import ReviewFindings from "./ReviewFindings";
+import QualityFindings from "./QualityFindings";
 import {
   canOpenOwnerMap,
-  generatedOutputs,
   processingStatus,
-  reviewStatus,
   statusSummary,
   type ContributorDataset,
   type QueueState,
@@ -26,16 +24,8 @@ interface StatusDrawerProps {
 export default function StatusDrawer({ dataset, queue, onClose, onViewMap }: StatusDrawerProps) {
   const mobile = useIsMobile();
   const processing = processingStatus(dataset, queue);
-  const review = reviewStatus(dataset);
   const summary = statusSummary(dataset, queue);
-  const outputs = generatedOutputs(dataset);
   const mapAvailable = canOpenOwnerMap(dataset);
-  const results = [
-    ["Map image", outputs.map],
-    ["Preview image", outputs.preview],
-    ["Deadwood prediction", outputs.deadwood],
-    ["Tree cover prediction", outputs.treecover],
-  ] as const;
 
   return (
     <Drawer open title="Dataset status" width={mobile ? "100%" : 460} onClose={onClose} destroyOnHidden>
@@ -52,33 +42,11 @@ export default function StatusDrawer({ dataset, queue, onClose, onViewMap }: Sta
       )}
 
       <section className="mb-6 rounded-lg bg-slate-50 p-4" aria-label="Summary">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Tag color={processing.color} className="dt-status-tag m-0">
-            {processing.label}
-          </Tag>
-          <span className="text-sm font-medium" style={{ color: review.color }}>
-            {review.label}
-          </span>
-        </div>
+        <Tag color={processing.color} className="dt-status-tag mb-2">
+          {processing.label}
+        </Tag>
         <p className="m-0 text-sm text-slate-800">{summary.headline}</p>
         {summary.next && <p className="mb-0 mt-2 text-sm text-slate-600">{summary.next}</p>}
-      </section>
-
-      <section className="mb-6" aria-label="Generated results">
-        <h3 className="mb-3 text-sm font-semibold">Generated results</h3>
-        <dl className="m-0 space-y-2">
-          {results.map(([label, generated]) => (
-            <div key={label} className="flex justify-between gap-3 text-sm">
-              <dt className="text-slate-600">{label}</dt>
-              <dd className="m-0 text-right" style={{ color: generated ? "#287254" : "#64748b" }}>
-                {generated ? "Generated" : "Not available"}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <p className="mb-0 mt-3 text-xs text-slate-500">
-          Generated means the file exists. Whether it is good enough is judged in the quality review.
-        </p>
         {mapAvailable && (
           <Button className="mt-3" onClick={() => onViewMap(dataset.id)}>
             View map
@@ -86,21 +54,8 @@ export default function StatusDrawer({ dataset, queue, onClose, onViewMap }: Sta
         )}
       </section>
 
-      <section className="border-t border-slate-100 pt-5" aria-label="Quality review">
-        <h3 className="mb-2 text-sm font-semibold">Quality review</h3>
-        <p className="mb-1 text-sm font-medium" style={{ color: review.color }}>
-          {review.label}
-        </p>
-        {review.kind === "excluded" && (
-          <Alert
-            className="mb-4"
-            type="warning"
-            message="Visible to you, excluded from the public map"
-            description="Your dataset remains in your account so you can read the findings and contact us."
-          />
-        )}
-        <ReviewFindings datasetId={dataset.id} />
-      </section>
+      {/* The checks need the map image; without one there is nothing to show. */}
+      {mapAvailable && <QualityFindings dataset={dataset} />}
 
       <p className="mb-0 mt-7 border-t border-slate-100 pt-4 text-sm text-slate-500">
         Need help?{" "}

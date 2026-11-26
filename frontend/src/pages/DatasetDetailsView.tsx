@@ -18,7 +18,7 @@ import { ILabelData, ILabelSource } from "../types/labels";
 import { useDownload } from "../hooks/useDownloadProvider";
 import { useOverlappingDatasets } from "../hooks/useOverlappingDatasets";
 import { useDatasetDetailsMap } from "../hooks/useDatasetDetailsMapProvider";
-import { usePhenologyData } from "../hooks/usePhenologyData";
+import { useDatasetPhenology } from "../hooks/usePhenologyData";
 import { useAuth } from "../hooks/useAuthProvider";
 import { useCreateFlag } from "../hooks/useDatasetFlags";
 import { useDatasetEditing } from "../hooks/useDatasetEditing";
@@ -28,7 +28,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { hasForestCoverPredictionOutput } from "../utils/predictionAvailability";
 import { observeOwnedResult } from "../utils/observeOwnedResult";
-import { deadwoodPhenologyWarning, phenologyProbabilityAt } from "../utils/phenologyUtils";
+import { deadwoodPhenologyWarning } from "../utils/phenologyUtils";
 
 import DatasetLayerControlPanel from "../components/DatasetDetailsMap/DatasetLayerControlPanel";
 import EditingSidebar from "../components/DatasetDetailsMap/EditingSidebar";
@@ -108,8 +108,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
     labelData: ILabelData.FOREST_COVER,
     enabled: !!dataset?.id,
   });
-  const { data: phenologyData, isLoading: isPhenologyLoading } =
-    usePhenologyData(dataset?.id);
+  const { probability: phenologyProbability } = useDatasetPhenology(dataset);
 
   // Auditor model variant selection (session-only, no DB writes)
   const { data: deadwoodVariants } = useModelVariantLabels(
@@ -134,9 +133,6 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
     selectedForestLabelId ?? preferredForestLabel?.id ?? null;
   // The deadwood layer starts hidden for an image likely taken outside the maximum greenness
   // period, where leafless live crowns can look dead. The audit never hides a prediction.
-  const phenologyProbability =
-    dataset.phenology_probability ??
-    phenologyProbabilityAt(phenologyData?.phenology_curve, dataset.aquisition_year, dataset.aquisition_month, dataset.aquisition_day);
   const deadwoodWarning = deadwoodPhenologyWarning(phenologyProbability);
   useEffect(() => {
     setShowDeadwood(!deadwoodWarning);
@@ -241,9 +237,6 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
       ) : (
         <DatasetInfoSidebar
           dataset={dataset}
-          phenologyData={phenologyData}
-          isPhenologyLoading={isPhenologyLoading}
-          phenologyProbability={phenologyProbability}
           overlappingDatasets={overlappingDatasets || []}
           isLoadingOverlapping={isLoadingOverlapping}
         />
