@@ -8,7 +8,7 @@ import { majorShare } from "./auditReview";
 export interface IAuditListRow {
 	id: number;
 	dataset: AuditDataset;
-	/** the dataset's row of audit.dataset_results; null when the view has none or can't be read */
+	/** the dataset's row of audit.dataset_outcomes; null when the view has none or can't be read */
 	result: IAuditDatasetResult | null;
 	/** who answered on the dataset on this page (emails, else user ids) */
 	reviewers: string[];

@@ -78,7 +78,7 @@ const auditedDataset = {
   id: 3002,
   file_name: "audit-completed-local.tif",
   is_audited: true,
-  audit_decision: "ok",
+  audit_decision: "keep",
 };
 
 const incompleteDataset = {
@@ -96,7 +96,7 @@ const incompleteDataset = {
 
 const datasets = [completeDataset, auditedDataset, incompleteDataset];
 
-/** A row of audit.dataset_results: nothing run, nothing to review, unless overridden. */
+/** A row of audit.dataset_outcomes: nothing run, nothing to review, unless overridden. */
 const datasetResult = (dataset_id: number, over: Record<string, unknown> = {}) => ({
   dataset_id,
   current_status: "idle",
@@ -118,7 +118,6 @@ const datasetResult = (dataset_id: number, over: Record<string, unknown> = {}) =
   date_hdi80_days: null,
   date_model_version: null,
   date_estimated_at: null,
-  date_source: null,
   phenology_probability: 0.8,
   deadwood_total: null,
   deadwood_major: null,
@@ -129,9 +128,7 @@ const datasetResult = (dataset_id: number, over: Record<string, unknown> = {}) =
   forest_cover_minor: null,
   forest_cover_ok: null,
   review_required: [],
-  last_reviewed_at: null,
   in_benchmark: false,
-  checks_run: [],
   ...over,
 });
 
@@ -149,7 +146,7 @@ const datasetResults = [
     review_required: ["evaluation", "aoi", "georef"],
   }),
   datasetResult(auditedDataset.id, {
-    evaluation_decision: "ok",
+    evaluation_decision: "keep",
     evaluation_source: "legacy",
     aoi_exists: true,
     georef_status: "estimated",
@@ -233,7 +230,29 @@ const georefCheck = {
   updated_at: "2026-10-02T06:00:00Z",
 };
 
+// the prediction check's current run on the dataset to review: two tiles, judged by Haiku and Luna
+const square = [[[13.4, 52.5], [13.401, 52.5], [13.401, 52.501], [13.4, 52.501], [13.4, 52.5]]];
+const auditRows: Record<string, Array<Record<string, unknown>>> = {
+  current_runs: [{ dataset_id: completeDataset.id, check_key: "prediction_quality", run_id: 55 }],
+  tiles: [41, 42].map((id) => ({ id, dataset_id: completeDataset.id, geometry: { type: "Polygon", coordinates: square } })),
+  images: [41, 42].flatMap((tile) =>
+    ["raw", "deadwood_overlay"].map((kind, i) => ({ id: tile * 10 + i, run_id: 55, dataset_id: completeDataset.id, tile_id: tile, prediction_label_id: i ? 7001 : null, kind, storage_path: `audit/t/${tile}-${kind}.png`, width: 1, height: 1 })),
+  ),
+  tile_vlm_judgements: [41, 42].flatMap((tile) => [
+    { id: tile, run_id: 55, tile_id: tile, layer: "deadwood", judge: "haiku-4.5", verdict: tile === 41 ? "major" : "ok", problems: { m1_dead_missed: { likelihood: tile === 41 ? 90 : 5 } }, summary: "Dead crowns unmarked." },
+    // Luna shares no prefix with Haiku, but only the call's judgement_id says who decides
+    { id: tile + 100, run_id: 55, tile_id: tile, layer: "deadwood", judge: "luna-medium", verdict: "ok", problems: {}, summary: "Looks fine." },
+  ]),
+};
+/** audit.tile_calls: a person's review of the prediction, else Haiku's answer (its judgement_id). */
+const tileCalls = () =>
+  [41, 42].map((tile) => {
+    const review = savedTileReviews.filter((r) => r.tile_id === tile).at(-1);
+    return { dataset_id: completeDataset.id, run_id: 55, tile_id: tile, layer: "deadwood", prediction_label_id: 7001, verdict: review?.verdict ?? (tile === 41 ? "major" : "ok"), by_person: !!review, review_id: review?.id ?? null, judgement_id: tile };
+  });
+
 let savedAnswerPayloads: Array<Record<string, unknown>> = [];
+let savedTileReviews: Array<Record<string, unknown>> = [];
 let legacyAuditWrites = 0;
 let auditLeaseCalls: Array<{ rpc: string; body: Record<string, unknown> }> = [];
 let auditWriteLeaseHeaders: Array<string | undefined> = [];
@@ -410,21 +429,36 @@ const fulfillSupabaseRequest = async (
     return;
   }
 
-  if (resource === "dataset_results") {
+  if (resource === "dataset_outcomes") {
     const idFilter = url.searchParams.get("dataset_id");
     const row = datasetResults.find((r) => idFilter === `eq.${r.dataset_id}`);
     await fulfillJson(route, idFilter ? (wantsObject ? (row ?? null) : row ? [row] : []) : datasetResults);
     return;
   }
 
-  // the Audit Review stores answers as person rows of audit.assessments
-  if (resource === "assessments" && method === "POST") {
+  // the Audit Review stores answers as people's dataset reviews
+  if (resource === "dataset_human_reviews" && method === "POST") {
     const rows = request.postDataJSON() as Array<Record<string, unknown>>;
     savedAnswerPayloads.push(...rows);
     await fulfillJson(
       route,
-      rows.map((row, i) => ({ id: 900 + savedAnswerPayloads.length + i, crop_id: null, label_id: null, assessor: auditor.id, details: {}, ...row })),
+      rows.map((row, i) => ({ id: 900 + savedAnswerPayloads.length + i, in_benchmark: false, reviewed_by: auditor.id, created_at: "2026-01-06T00:00:00Z", ...row })),
     );
+    return;
+  }
+
+  if (resource && resource in auditRows) {
+    await fulfillJson(route, auditRows[resource]);
+    return;
+  }
+  if (resource === "tile_calls") {
+    await fulfillJson(route, tileCalls());
+    return;
+  }
+  if (resource === "tile_human_reviews") {
+    const review = method === "POST" ? { ...(request.postDataJSON() as Record<string, unknown>) } : null;
+    if (review) savedTileReviews.push({ id: 700 + savedTileReviews.length, created_at: "2026-01-06T00:00:00Z", ...review });
+    await fulfillJson(route, review ? savedTileReviews.at(-1) : savedTileReviews);
     return;
   }
 
@@ -549,6 +583,7 @@ const fulfillJson = async (route: Route, json: unknown) => {
 test.describe("auditor local e2e", () => {
   test.beforeEach(() => {
     savedAnswerPayloads = [];
+    savedTileReviews = [];
     legacyAuditWrites = 0;
     savedAoiPayloads = [];
     auditLeaseCalls = [];
@@ -815,7 +850,39 @@ test.describe("auditor local e2e", () => {
     ).toBeVisible();
   });
 
-  test("auditor answers the review, draws the AOI, and Save stores only person rows", async ({
+  test("the crop review stores a tile answer as a review of the prediction shown, at once", async ({ page }) => {
+    await installAuthenticatedUser(page, { canAudit: true });
+    await page.route("**/audit/images/access", (route) => fulfillJson(route, { files_url: "/audit-files", expires_at: Math.floor(Date.now() / 1000) + 3600 }));
+    await page.route("**/audit-files/**", (route) => route.fulfill({ status: 404 }));
+
+    await page.goto(`/dataset-audit/${completeDataset.id}?section=deadwood`);
+    await dismissCookieBanner(page);
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 1 of 2", { timeout: 20_000 });
+    await expect(page.getByTestId("audit-crop-findings")).toContainText("Haiku (decides)");
+    await expect(page.getByTestId("audit-crop-findings")).not.toContainText("Luna (decides)");
+
+    // the call is major: the answer starts major, with the problem the model saw
+    await page.keyboard.press("Enter");
+    await expect.poll(() => savedTileReviews.length).toBe(1);
+    // the database adds who reviewed (the mock adds the id and time)
+    expect(savedTileReviews[0]).toEqual({
+      id: expect.any(Number),
+      created_at: expect.any(String),
+      dataset_id: completeDataset.id,
+      tile_id: 41,
+      layer: "deadwood",
+      prediction_label_id: 7001,
+      verdict: "major",
+      problems: { m1_dead_missed: true },
+      in_benchmark: false,
+    });
+    // the call now rests on the review, and Enter went on to the next tile
+    await expect(page.getByTestId("crop-position")).toHaveText("Crop 2 of 2");
+    await expect(page.getByRole("button", { name: "Crop 1, answered" })).toBeVisible();
+    expect(savedAnswerPayloads).toHaveLength(0);
+  });
+
+  test("auditor answers the review, draws the AOI, and Save stores only dataset reviews", async ({
     page,
   }) => {
     await installAuthenticatedUser(page, { canAudit: true });
@@ -852,25 +919,18 @@ test.describe("auditor local e2e", () => {
     const claimedLease = auditLeaseCalls.find((call) => call.rpc === "claim_dataset_audit_lock")?.body.p_lease_id;
     expect(claimedLease).toBeTruthy();
     expect(auditWriteLeaseHeaders[0]).toBe(claimedLease);
+    // the database adds who reviewed and on what evidence
     expect(savedAnswerPayloads).toEqual([
-      expect.objectContaining({
+      {
+        dataset_id: completeDataset.id,
         check_key: "dataset_evaluation",
-        dataset_id: completeDataset.id,
-        layer: "image",
-        verdict: "ok",
-        reason_text: "Sharp orthophoto, usable.",
-        output: { cog_issue: false, thumbnail_issue: false },
-        assessor_kind: "person",
-        assessor_user_id: auditor.id,
-      }),
-      expect.objectContaining({
-        check_key: "georef",
-        dataset_id: completeDataset.id,
-        layer: "georef",
-        verdict: null,
-        output: { status: "passed" },
-        assessor_kind: "person",
-      }),
+        decision: "keep",
+        exclude_reason: null,
+        cog_issue: false,
+        thumbnail_issue: false,
+        note: "Sharp orthophoto, usable.",
+      },
+      { dataset_id: completeDataset.id, check_key: "georef", georef_status: "passed", note: null },
     ]);
     expect(legacyAuditWrites).toBe(0);
   });

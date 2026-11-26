@@ -25,7 +25,7 @@ const complete: ContributorDataset = {
   thumbnail_path: "12/thumb.png",
   has_deadwood_prediction: true,
   has_forest_cover_prediction: true,
-  audit_decision: "ok",
+  audit_decision: "keep",
 };
 const emptyQueue: QueueState = { state: "loaded" };
 

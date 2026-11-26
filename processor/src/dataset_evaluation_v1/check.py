@@ -1,6 +1,6 @@
-"""One dataset evaluation run: the images the models see, the model calls, the rules
-and the result as the payload of audit.store_dataset_evaluation; and the rule alone
-over a run's stored answers, for a rule-only run.
+"""One dataset evaluation run: the images the models see, the model calls, the band check,
+and the result as the p_result of audit.finish_run. Keep or exclude is the rules' call, made
+in the database from the stored answers (audit.evaluation_calls).
 
 The judges are the audit worker's backends (audit_worker.models): a function
 (prompt, images) -> answer text per model name, images inline, no tools. Their login
@@ -17,9 +17,9 @@ import numpy as np
 from PIL import Image
 from shapely.geometry import mapping
 
+from .bands import band_check
 from .inputs import CROP_COUNT, CROP_MPP, CROP_PICKER, CROP_PX, GRID_PICKER, MIN_VALID_SHARE, OVERVIEW_PX, Inputs
-from .prompt import PROMPT_VERSION, AnswerError, build_prompt, parse_answer
-from .rules import BAND_RULE, DATASET_RULE, EMPTY_COG_RULE, RULE_CONFIG, Call, band_check, dataset_rule, empty_cog
+from .prompt import ISSUE_AT, PROMPT_VERSION, AnswerError, Judgement, build_prompt, parse_answer
 from .vocabulary import CHECK_KEY
 
 JPEG_QUALITY = 90
@@ -27,7 +27,7 @@ JPEG_QUALITY = 90
 # A judge: (prompt, PIL images) -> answer text (audit_worker.models.Backend).
 Judge = Callable[[str, Sequence], str]
 
-# audit.check_versions.config: everything that changes the result. `models` is the
+# audit.check_versions.config: everything that changes the answers. `models` is the
 # worker's judge spec: Haiku through claude -p, Luna through the Codex login.
 CONFIG = {
 	'models': {
@@ -35,12 +35,7 @@ CONFIG = {
 		'haiku-5.5': {'transport': 'claude', 'model': 'claude-haiku-5-5'},
 	},
 	'prompt_version': PROMPT_VERSION,
-	'rules': {
-		'band': '/'.join(BAND_RULE),
-		'dataset': '/'.join(DATASET_RULE),
-		'empty_cog': '/'.join(EMPTY_COG_RULE),
-	},
-	'rule_config': RULE_CONFIG,
+	'issue_at': ISSUE_AT,
 	'min_valid_share': MIN_VALID_SHARE,
 	'inputs': {
 		'overview_px': OVERVIEW_PX,
@@ -54,51 +49,25 @@ CONFIG = {
 
 @dataclass
 class ImageFile:
-	kind: str  # audit.images kind: overview, raw (a crop), thumbnail
-	stem: str  # what the file shows: overview, crop, thumbnail
+	kind: str  # audit.images kind: overview, raw (a tile), thumbnail
+	stem: str  # what the file shows: overview, tile-<n>, thumbnail
 	data: bytes
 	width: int
 	height: int
 	mpp: float | None
-	crop_index: int | None = None
+	tile_index: int | None = None  # 1-based, into the run's tiles
 
 	@property
 	def sha256(self) -> str:
 		return hashlib.sha256(self.data).hexdigest()
 
-	@property
-	def name(self) -> str:
-		"""The file name inside the ortho's storage folder, named by content. A later run on
-		the same ortho (other tiles, say) then never overwrites a file an earlier
-		run's rows point at, and the same picture is stored once."""
-		return f'{self.stem}-{self.sha256[:16]}.jpg'
-
 
 @dataclass
 class Evaluation:
 	images: list[ImageFile]
-	calls: list[Call]  # the stored assessments: the models, then the dataset verdict as the one rule row
-	evidence: dict  # includes `rules`: the band check the verdict folds in
+	judgements: list[Judgement]  # one per model; none for an empty COG
+	evidence: dict  # includes `empty` and, when the models were asked, the `band_check`
 	cost: dict = field(default_factory=dict)
-
-	@property
-	def verdict(self) -> Call:
-		return self.calls[-1]
-
-
-def rule_evidence(rules: list[Call]) -> dict:
-	"""The folded-in rules by name, for audit.runs.evidence. They are not assessment rows:
-	audit.review_queue reads every dataset-level rule row as a verdict, and only the
-	dataset rule is one."""
-	return {
-		c.model: {
-			'version': c.prompt_version,
-			'verdict': c.verdict,
-			'likelihood': c.major_likelihood,
-			'details': c.details,
-		}
-		for c in rules
-	}
 
 
 def jpeg(rgb: np.ndarray) -> bytes:
@@ -115,9 +84,9 @@ def overview_image(inputs: Inputs) -> np.ndarray:
 def model_images(inputs: Inputs, thumbnail: bytes | None) -> list[ImageFile]:
 	h, w = inputs.overview.shape[:2]
 	files = [ImageFile('overview', 'overview', jpeg(overview_image(inputs)), w, h, inputs.overview_mpp)]
-	for i, crop in enumerate(inputs.crops):
+	for i, crop in enumerate(inputs.crops, start=1):
 		ch, cw = crop.image.shape[:2]
-		files.append(ImageFile('raw', 'crop', jpeg(crop.image), cw, ch, crop.mpp, i))
+		files.append(ImageFile('raw', f'tile-{i}', jpeg(crop.image), cw, ch, crop.mpp, i))
 	if thumbnail:
 		with Image.open(io.BytesIO(thumbnail)) as im:
 			tw, th = im.size
@@ -125,7 +94,7 @@ def model_images(inputs: Inputs, thumbnail: bytes | None) -> list[ImageFile]:
 	return files
 
 
-def ask(name: str, judge: Judge, prompt: str, images: Sequence) -> Call:
+def ask(name: str, judge: Judge, prompt: str, images: Sequence) -> Judgement:
 	"""One judge's answer; a malformed reply is asked once more. Model errors propagate:
 	the worker pauses on login and usage-limit errors and retries the run on others."""
 	for attempt in (1, 2):
@@ -137,7 +106,7 @@ def ask(name: str, judge: Judge, prompt: str, images: Sequence) -> Call:
 			if attempt == 2:
 				raise
 			continue
-		call.raw = {'text': text[:20000], 'seconds': round(time.monotonic() - started, 1), 'attempt': attempt}
+		call.raw.update(seconds=round(time.monotonic() - started, 1), attempt=attempt)
 		return call
 
 
@@ -147,11 +116,9 @@ def evaluate(
 	*,
 	source_profile: dict | None,
 	thumbnail: bytes | None = None,
-	rule_config: dict = RULE_CONFIG,
 ) -> Evaluation:
-	"""Run the rules and the models on one dataset's inputs. `rule_config` is the version's
-	(`CONFIG['rule_config']`), so a registered version runs with the thresholds it was
-	registered with."""
+	"""Ask the models and run the band check on one dataset's inputs. An empty COG is
+	judged by no one: the rules exclude it as a broken ortho."""
 	images = model_images(inputs, thumbnail)
 	evidence = {
 		'settings': inputs.settings,
@@ -161,10 +128,10 @@ def evaluate(
 		'valid_share': round(inputs.valid_share, 4),
 		'footprint': mapping(inputs.footprint),
 		'prompt_version': PROMPT_VERSION,
+		'empty': inputs.empty,
 	}
 	if inputs.empty:
-		# Nothing to look at: the rule decides, no model is asked.
-		return Evaluation(images=images, calls=[empty_cog(inputs.valid_share)], evidence=evidence)
+		return Evaluation(images=images, judgements=[], evidence=evidence)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
 	prompt = build_prompt(inputs.overview_mpp, crop_mpp, thumbnail is not None, crop_count=len(inputs.crops))
 	# Decoded here: the judges run in threads and must not share lazily loading files.
@@ -172,81 +139,53 @@ def evaluate(
 	# Independent calls: the slower model sets the run time.
 	with ThreadPoolExecutor(max_workers=len(judges)) as pool:
 		answers = list(pool.map(lambda item: ask(*item, prompt, pictures), judges.items()))
-	band = band_check(source_profile, inputs.bands, inputs.valid)
 	return Evaluation(
 		images=images,
-		calls=[*answers, dataset_rule(answers, band, rule_config)],
-		evidence={**evidence, 'rules': rule_evidence([band])},
+		judgements=answers,
+		evidence={**evidence, 'band_check': band_check(source_profile, inputs.bands, inputs.valid)},
 		# Subscription calls report no tokens or dollars; time and calls are what is known.
-		cost={a.model: {'seconds': a.raw['seconds'], 'calls': a.raw['attempt'], 'cost_usd': None} for a in answers},
+		cost={a.judge: {'seconds': a.raw['seconds'], 'calls': a.raw['attempt'], 'cost_usd': None} for a in answers},
 	)
 
 
-def rule_only_verdict(rows: list[dict], evidence: dict, rule_config: dict = RULE_CONFIG) -> Call:
-	"""This version's dataset verdict from a run's stored answers, without a model call.
-
-	`rows` are the run's dataset-level model and rule rows (audit.assessments, oldest first),
-	`evidence` its audit.runs.evidence, which holds the band check. A run without model
-	answers judged an empty COG, which stays excluded by rule."""
-	# One answer per model: a store that was retried leaves a later row of the model, which wins.
-	models = {
-		r['model']: Call(
-			assessor_kind='model',
-			model=r['model'],
-			prompt_version=r['prompt_version'],
-			verdict=r['verdict'],
-			major_likelihood=r['major_likelihood'],
-			modes=r['modes'] or {},
-			details=r['details'] or {},
-		)
-		for r in rows
-		if r['assessor_kind'] == 'model'
-	}
-	if models:
-		band = evidence['rules'][BAND_RULE[0]]
-		stored_band = Call(
-			'rule', BAND_RULE[0], band['version'], band['verdict'], band['likelihood'], details=band['details']
-		)
-		return dataset_rule(list(models.values()), stored_band, rule_config)
-	if any(r['model'] == EMPTY_COG_RULE[0] for r in rows):
-		return empty_cog(evidence['valid_share'])
-	raise ValueError('the source run holds no model answers to recompute from')
+def image_path(dataset_id: int, run_id: int, image: ImageFile) -> str:
+	"""Storage path relative to the storage server's data directory; one folder per run."""
+	return f'audit/{CHECK_KEY}/{dataset_id}/run-{run_id}/{image.stem}.jpg'
 
 
-def storage_folder(dataset_id: int, ortho_sha256: str) -> str:
-	"""Where a run's images live, relative to the storage server's data directory.
-	Images are per ortho and named by content, so reruns on the same ortho reuse the stored files."""
-	return f'audit/{CHECK_KEY}/{dataset_id}/{ortho_sha256[:16]}'
-
-
-def store_payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, ortho_sha256: str) -> dict:
-	"""The p_result argument of audit.store_dataset_evaluation: the run's evidence rows.
-	The run row itself (status, evidence, coverage, cost) is the worker's to finish."""
-	folder = storage_folder(dataset_id, ortho_sha256)
-	crops = [
+def payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, run_id: int, judged: dict) -> dict:
+	"""The p_result of audit.finish_run: what the run judged (`judged`, its inputs), its
+	evidence, tiles, images and the models' judgements. The image files are uploaded first,
+	to image_path()."""
+	tiles = [
 		{
-			# the 10 cm CLIP grid window audit.crops keys on; null for crops off the grid
+			# the 10 cm CLIP grid window audit.tiles keys on; null for windows off the grid
 			'pixel_window': list(crop.grid_window) if crop.grid_window else None,
 			'geometry': mapping(crop.footprint),
 			'mpp': round(crop.mpp, 5),
 			'size_px': max(crop.image.shape[:2]),
-			'selection': {
-				'picker': crop.picker,
-				'index': i + 1,
-				'seed': inputs.settings['seed'],
-				**({'cog_window': list(crop.cog_window)} if crop.cog_window else {}),
-			},
 		}
-		for i, crop in enumerate(inputs.crops)
+		for crop in inputs.crops
+	]
+	picked = [
+		{'picker': crop.picker, **({'cog_window': list(crop.cog_window)} if crop.cog_window else {})}
+		for crop in inputs.crops
 	]
 	return {
-		'ortho_sha256': ortho_sha256,
-		'crops': crops,
+		'inputs': judged,
+		'evidence': {
+			**evaluation.evidence,
+			'coverage': {'tiles': len(inputs.crops), 'tile_picker': inputs.settings['crop_picker']},
+			'cost': evaluation.cost,
+			'tiles': picked,
+		},
+		'tiles': tiles,
 		'images': [
 			{
+				'tile_index': f.tile_index,
+				'prediction_label_id': None,
 				'kind': f.kind,
-				'crop_index': None if f.crop_index is None else f.crop_index + 1,
-				'storage_path': f'{folder}/{f.name}',
+				'storage_path': image_path(dataset_id, run_id, f),
 				'content_type': 'image/jpeg',
 				'width': f.width,
 				'height': f.height,
@@ -256,5 +195,6 @@ def store_payload(evaluation: Evaluation, inputs: Inputs, dataset_id: int, ortho
 			}
 			for f in evaluation.images
 		],
-		'assessments': [c.row() for c in evaluation.calls],
+		'dataset_judgements': [j.row() for j in evaluation.judgements],
+		'tile_judgements': [],
 	}

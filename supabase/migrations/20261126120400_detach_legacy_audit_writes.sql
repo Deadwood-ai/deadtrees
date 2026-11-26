@@ -1,16 +1,21 @@
--- Audit Review: the saved legacy audits are detached from every workflow (2 of 2).
+-- Audit Review: the saved legacy audits are detached from every workflow (2 of 2, DT-1606).
 --
 -- - The export view, the factory read model, the factory dataset page and the north star
---   read the evaluation decision ("audited ok" is the decision ok).
+--   read the evaluation decision ("audited ok" is the decision keep).
 -- - Writes stop: the legacy write policy, the lease guard and the date decision trigger on
---   the legacy table, the monitoring role's grant, public.audit_review_queue,
---   the readers of dataset_audit_suggestions (the table goes in a follow-up), and the acquisition date decisions (rows
---   kept as history: the date check only reports replace yes or no and never changes
---   v2_datasets). The review lease (dataset_audit_locks) stays for the Audit Review page.
+--   the legacy table (read-only history now; its decisions live on in
+--   audit.legacy_decisions), the monitoring role's grant, public.audit_review_queue,
+--   public.dataset_audit_suggestions (dropped: the checks report in the audit schema), and
+--   the acquisition date decisions (rows kept as history: the date check only advises
+--   replace or keep and never changes v2_datasets). The review lease
+--   (dataset_audit_locks) stays for the Audit Review page.
+-- - User reports and suggested prediction edits are not part of the audit: they have their
+--   own page (Edits & flags), and an audit lease no longer guards them. The lease still
+--   guards the audit's own writes (the manual AOI).
 set local lock_timeout = '5s';
 
 
--- The export script reads it directly; "audited ok" is the decision ok.
+-- The export script reads it directly; "audited ok" is the decision keep.
 drop view public.v_export_polygon_candidates;
 create view public.v_export_polygon_candidates as
 WITH correction_flags AS (
@@ -295,8 +300,11 @@ begin
       status,created_at,updated_at,left(description,4000) as description,left(auditor_comment,2000) as auditor_comment
       from public.dataset_flags where dataset_id=p_dataset_id order by created_at desc,id desc limit 200) f),'[]'::jsonb),
     'audit_decision',(select to_jsonb(e) from audit.evaluation_decisions e where e.dataset_id=p_dataset_id),
-    'audits',coalesce((select jsonb_agg(to_jsonb(a)) from (select created_at,verdict,imported_from,left(reason_text,4000) as notes
-      from audit.assessments where dataset_id=p_dataset_id and check_key='dataset_evaluation' and crop_id is null and assessor_kind='person'
+    'audits',coalesce((select jsonb_agg(to_jsonb(a)) from (select created_at,decision,source,notes from (
+      select created_at,decision,'reviewer' as source,left(coalesce(exclude_reason||': ','')||coalesce(note,''),4000) as notes,id
+      from audit.dataset_human_reviews where dataset_id=p_dataset_id and check_key='dataset_evaluation'
+      union all
+      select decided_at,decision,'legacy',left(reason,4000),0 from audit.legacy_decisions where dataset_id=p_dataset_id) x
       order by created_at desc,id desc limit 200) a),'[]'::jsonb),
     'corrections',coalesce((select jsonb_agg(to_jsonb(c)) from (select id,layer_type,operation,created_at,review_status,reviewed_at
       from public.v2_geometry_corrections where dataset_id=p_dataset_id order by created_at desc,id desc limit 200) c),'[]'::jsonb),
@@ -307,7 +315,8 @@ begin
       'raw_images',(select count(*) from public.v2_raw_images where dataset_id=p_dataset_id),
       'notifications',(select count(*) from public.processing_notification_events where dataset_id=p_dataset_id),
       'reports',(select count(*) from public.dataset_flags where dataset_id=p_dataset_id),
-      'audits',(select count(*) from audit.assessments where dataset_id=p_dataset_id and check_key='dataset_evaluation' and crop_id is null and assessor_kind='person'),
+      'audits',(select count(*) from audit.dataset_human_reviews where dataset_id=p_dataset_id and check_key='dataset_evaluation')
+        +(select count(*) from audit.legacy_decisions where dataset_id=p_dataset_id),
       'publications',(select count(*) from public.jt_data_publication_datasets where dataset_id=p_dataset_id)),
     'correction_total',(select count(*) from public.v2_geometry_corrections where dataset_id=p_dataset_id)
   ) into result;
@@ -363,7 +372,7 @@ begin
   from timed group by 1
  ), audits as materialized (
   select a.decided_at as audited_at from audit.evaluation_decisions a join public.v2_datasets d on d.id=a.dataset_id
-  where a.decision='ok' and a.decided_at>=week_start and a.decided_at<=now()
+  where a.decision='keep' and a.decided_at>=week_start and a.decided_at<=now()
    and not exists(select 1 from team t where t.user_id=d.user_id)
  ), published as materialized (
   select j.dataset_id,min(p.published_at) as published_at
@@ -455,7 +464,7 @@ begin
    'Complete results count each dataset once, at its first complete result: measured readiness where available, otherwise the first moment processor runs after upload had proven every readiness stage, reconstructed from retained processor logs. Uploads before the first retained processing run are never counted, because their first result is unknown.',
    'Upload times come from direct measurement or upload logs; older datasets fall back to their registration time.',
    'Never reached within 7 days groups uploads by upload week and includes late results. The stage breakdown shows where those uploads stand now, not where they first failed.',
-   'Reference data counts datasets whose audit evaluation decision is ok (a reviewer''s, an imported audit''s or the check''s), by the date of that decision. Excluded datasets are not counted.',
+   'Reference data counts datasets whose audit evaluation decision is keep (a reviewer''s, the old audit''s or the check''s), by the date of that decision. Excluded datasets are not counted.',
    'Downloads are accepted download requests, not completed transfers. Reuse means someone other than the dataset owner. Coverage starts with the first request the API recorded; earlier weeks are unknown, and that first week is a lower bound. Older request logs were written before access checks and are not used.',
    'Activation and retention use monthly cohorts and only count elapsed windows. A return upload must be on a later day, so one batch is one visit. Deleted datasets and accounts are absent.'
   )) into result;
@@ -476,7 +485,7 @@ revoke insert, update, delete, truncate on public.dataset_audit_legacy, public.d
 revoke all on public.dataset_audit_legacy from deadtrees_operator_status;
 drop policy operator_monitoring_read on public.dataset_audit_legacy;
 comment on table public.dataset_audit_legacy is
-	'The saved manual audits before the Audit Review (read-only history; decisions imported into audit.assessments as legacy_audit).';
+	'The saved manual audits before the Audit Review (read-only history; keep or exclude copied into audit.legacy_decisions).';
 comment on view public.dataset_audit is
 	'Read-only history of the saved manual audits (dataset_audit_legacy).';
 
@@ -486,50 +495,9 @@ drop view public.audit_review_queue;
 -- No audit suggestions: the checks report their outputs in the audit schema
 -- ---------------------------------------------------------------------------
 
--- Nothing reads dataset_audit_suggestions any more and the new processor code writes none.
--- The table stays until every processor runs that code: a processor only deploys when idle,
--- and the old date stage still writes it. Drop it in a follow-up migration.
-comment on table public.dataset_audit_suggestions is
-	'Unused since the Audit Review (no readers; old processors may still write). Drop in a follow-up.';
-
--- The georeferencing check stores its row and its audit run. p_suggestion stays in the
--- signature for processors that still send it and is ignored.
-create or replace function public.store_georef_check(p_check jsonb, p_suggestion jsonb, p_queue text default 'upload')
-returns void
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-	v_dataset bigint := (p_check ->> 'dataset_id')::bigint;
-begin
-	if not internal.is_audit_worker() then
-		raise exception 'Only the processor stores georeferencing checks' using errcode = '42501';
-	end if;
-	insert into public.v2_georef_checks
-	-- the column defaults for keys the caller leaves out (populate_record would null them)
-	select * from jsonb_populate_record(
-		null::public.v2_georef_checks,
-		'{"evidence_groups": 0, "support": 0, "edge_support": 0, "used_aoi": false, "reference_evidence": [], "reference_errors": {}, "metadata": {}}'::jsonb
-			|| p_check || jsonb_build_object('created_at', now(), 'updated_at', now()))
-	on conflict (dataset_id) do update set
-		model_version = excluded.model_version,
-		rules_version = excluded.rules_version,
-		decision = excluded.decision,
-		evidence_level = excluded.evidence_level,
-		reason = excluded.reason,
-		p90_m = excluded.p90_m,
-		evidence_groups = excluded.evidence_groups,
-		support = excluded.support,
-		edge_support = excluded.edge_support,
-		used_aoi = excluded.used_aoi,
-		reference_evidence = excluded.reference_evidence,
-		reference_errors = excluded.reference_errors,
-		metadata = excluded.metadata,
-		updated_at = excluded.updated_at;
-	perform internal.store_georef_audit_run(v_dataset, p_queue);
-end;
-$$;
+-- Nothing reads them any more and the processor writes none.
+drop table public.dataset_audit_suggestions;
+drop function public.track_audit_suggestion_change();
 
 -- ---------------------------------------------------------------------------
 -- No acquisition date decisions: AerialStamp's output only says replace yes or no
@@ -559,5 +527,12 @@ drop function public.supersede_acquisition_date_decision(bigint, text);
 revoke insert, update, delete, truncate on public.acquisition_date_decisions from anon, authenticated;
 comment on table public.acquisition_date_decisions is
 	'Acquisition date decisions of the saved audits and the old date check (read-only history).';
+
+-- ---------------------------------------------------------------------------
+-- Edits & flags leave the audit
+-- ---------------------------------------------------------------------------
+
+drop trigger validate_flag_audit_lease on public.dataset_flags;
+drop trigger validate_correction_audit_lease on public.v2_geometry_corrections;
 
 notify pgrst, 'reload schema';

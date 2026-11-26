@@ -154,9 +154,8 @@ with input as (
     -- Audit Review: datasets a reviewer gave an evaluation decision in 7 days, and the excluded ones
     'audits_reviewed_7d', (
       select count(distinct dataset_id)
-      from audit.assessments
-      where check_key = 'dataset_evaluation' and crop_id is null and assessor_kind = 'person'
-        and imported_from is null and created_at >= now() - interval '7 days'
+      from audit.dataset_human_reviews
+      where check_key = 'dataset_evaluation' and decision is not null and created_at >= now() - interval '7 days'
     ),
     'datasets_excluded', (select count(*) from audit.excluded_dataset_ids()),
     'open_flags', (select count(*) from dataset_flags where status is distinct from 'resolved'),

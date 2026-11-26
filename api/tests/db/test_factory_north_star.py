@@ -108,17 +108,23 @@ def test_uploads_before_retained_runs_never_count_as_results(db, operator):
 
 
 def test_only_usable_audits_count_as_reference_data(db, operator):
-	"""Reference data: datasets whose evaluation decision is ok (an earlier "keep, fix" too), dated by that decision."""
+	"""Reference data: datasets whose evaluation decision is keep (a reviewer's or the old audit's), dated by that decision."""
 	before = north_star(db, operator)
 	start = week(before, -3)['start']
 	contributor = user(db)
-	for verdict in ('ok', 'minor', 'major'):
+	for source, decision in (('reviewer', 'keep'), ('legacy', 'keep'), ('reviewer', 'exclude')):
 		row = upload(db, contributor, at(db, start, '-30 days'))
-		db.execute(
-			'INSERT INTO audit.assessments(check_key,dataset_id,layer,assessor_kind,assessor_user_id,verdict,created_at) '
-			"VALUES ('dataset_evaluation',%s,'image','person',%s,%s,%s)",
-			(row, operator, verdict, at(db, start, '1 day')),
-		)
+		if source == 'reviewer':
+			db.execute(
+				'INSERT INTO audit.dataset_human_reviews(check_key,dataset_id,reviewed_by,decision,created_at) '
+				"VALUES ('dataset_evaluation',%s,%s,%s,%s)",
+				(row, operator, decision, at(db, start, '1 day')),
+			)
+		else:
+			db.execute(
+				'INSERT INTO audit.legacy_decisions(dataset_id,decision,decided_at) VALUES (%s,%s,%s)',
+				(row, decision, at(db, start, '1 day')),
+			)
 	after = north_star(db, operator)
 	assert delta(before, after, 'audited_usable', -3) == 2
 

@@ -8,7 +8,7 @@ from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 from shapely.geometry import box
 
-from processor.src.prediction_quality_v1 import judge, rule, tiles
+from processor.src.prediction_quality_v1 import judge, tiles
 from processor.src.prediction_quality_v1.render import CROP_PX, judge_images, render_crop
 
 pytestmark = pytest.mark.unit
@@ -64,17 +64,12 @@ def test_ask_retries_a_malformed_answer_once():
 	assert a.layers['deadwood'].major_likelihood == 30
 
 
-def test_the_deciding_judge_counts_and_the_others_are_shown():
-	answers = [judge.parse('luna', _answer(dw_major=90)), judge.parse('haiku', _answer(dw_major=20))]
-	call = judge.deciding(answers, 'deadwood')
-	assert call['judge'] == 'haiku' and call['major_likelihood'] == 20
-	assert judge.deciding(answers, 'deadwood', 'luna')['major_likelihood'] == 90
-	# Haiku could not assess the crop: no call
+def test_a_judge_may_say_it_cannot_assess_the_tile():
 	blind = json.loads(_answer(dw_major=100))
 	for value in (False, 'false'):
 		blind['assessable'] = value
-		answers[1] = judge.parse('haiku', json.dumps(blind))
-		assert not answers[1].assessable and judge.deciding(answers, 'deadwood')['verdict'] is None
+		assert not judge.parse('haiku', json.dumps(blind)).assessable
+	assert judge.parse('haiku', _answer()).assessable
 
 
 def test_a_judge_may_call_a_layer_ambiguous():
@@ -111,25 +106,8 @@ def test_training_set_is_deterministic_stratified_and_weighted():
 	assert sum(t.weight for t in rare) < 0.1
 
 
-def test_crop_count_follows_the_area():
-	assert tiles.crop_count(4) == 10 and tiles.crop_count(30) == 15 and tiles.crop_count(500) == 40
-
-
-def test_dataset_rule_counts_major_crops_in_the_exclude_set():
-	major = {'judge': 'haiku', 'verdict': 'major', 'major_likelihood': 90}
-	fine = {'judge': 'haiku', 'verdict': 'ok', 'major_likelihood': 5}
-	v = rule.dataset_verdict('forest', [{'combined': major}, {'combined': major}] + [{'combined': fine}] * 8)
-	assert v['verdict'] == 'bad' and v['major_crops'] == 2 and v['rule'] == rule.RULE_VERSION == 'pq-rule-v2'
-	v = rule.dataset_verdict(
-		'forest',
-		[{'combined': major}] + [{'combined': fine}] * 9,
-		[{'combined': major, 'weight': 0.25}, {'combined': fine, 'weight': 0.75}],
-	)
-	assert v['verdict'] == 'ok' and v['training_major_share'] == 0.25
-	assert rule.dataset_verdict('forest', [{'combined': {'verdict': None}}])['verdict'] is None
-	# an ambiguous crop counts for no side
-	assert rule.dataset_verdict('forest', [{'combined': {'verdict': 'ambiguous'}}])['judged_crops'] == 0
-	assert rule.dataset_verdict('deadwood', [{'combined': major}], config={'decider': 'haiku', 'min_major_crops': 1})['verdict'] == 'bad'
+def test_tile_count_follows_the_area():
+	assert tiles.tile_count(4) == 10 and tiles.tile_count(30) == 15 and tiles.tile_count(500) == 40
 
 
 def _ortho(res=0.02, size=3000):
@@ -182,68 +160,69 @@ def test_attach_cover_measures_shares_on_the_tile_square():
 	assert t.deadwood_share == pytest.approx(0.5, abs=0.05) and t.forest_share == 0
 
 
-def test_store_rows_follow_the_audit_base_tables():
-	from processor.src.prediction_quality_v1 import store
-	from processor.src.prediction_quality_v1.check import CheckResult, CropResult
+def test_the_payload_follows_the_audit_tables():
+	from processor.src.prediction_quality_v1 import payload
+	from processor.src.prediction_quality_v1.check import CheckResult, TileResult
 
 	mem = _ortho()
 	square = (X0 + 5, Y0 + 5, X0 + 5 + tiles.TILE_M, Y0 + 5 + tiles.TILE_M)
 	with mem.open() as src:
 		crop = render_crop(src, EPSG, square, {'deadwood': [], 'forest': []})
 	t = _tile(7, dw=0.1, fc=0.5)
+	t.pixel_window = (512, 1024, 1024, 1536)
 	t.sets, t.weight = ['exclude', 'training'], 0.2
-	answers = [judge.parse('luna-medium', _answer(dw_major=70, verdict='major'))]
-	r = CropResult(tile=t, crop=crop, answers=answers, combined={'deadwood': judge.deciding(answers, 'deadwood')})
+	blind = json.loads(_answer())
+	blind['assessable'] = False
+	answers = [
+		judge.parse('luna-medium', _answer(dw_major=70, verdict='major')),
+		judge.parse('haiku-5.5', json.dumps(blind)),
+	]
 	result = CheckResult(
-		dataset_id=42, epsg=EPSG, crops=[r], verdicts={'deadwood': {}, 'forest': {}}, tiles_total=9, seconds=1
+		dataset_id=42, epsg=EPSG, tiles=[TileResult(tile=t, crop=crop, answers=answers)], tiles_total=9, seconds=1
 	)
-	labels = {'deadwood': 11, 'forest': 12}
-	crop_row = store.crop_row(r, 42, 'abc', {'type': 'Polygon', 'coordinates': []})
-	assert crop_row['crop_sets'] == ['exclude', 'training']
-	assert 'weight' not in crop_row['selection']['exclude'] and crop_row['selection']['training']['weight'] == 0.2
-	images = store.image_rows(r, 3, 42, 'abc', labels)
-	assert [(i['kind'], i['label_id'], i['crop_id']) for i, _ in images] == [
-		('raw', None, 3),
-		('deadwood_overlay', 11, 3),
-		('forest_cover_overlay', 12, 3),
+	footprint = {'type': 'Polygon', 'coordinates': []}
+	judged = {'ortho_sha256': 'a' * 64, 'aoi': None, 'label_ids': {'deadwood': 11, 'forest_cover': 12}}
+	out, files = payload.build(5, result, inputs=judged, label_ids={'deadwood': 11, 'forest': 12}, footprints={7: footprint})
+
+	assert set(out) == {'inputs', 'evidence', 'tiles', 'images', 'dataset_judgements', 'tile_judgements'}
+	assert out['inputs'] == judged and out['dataset_judgements'] == []
+	assert out['tiles'] == [{'pixel_window': [512, 1024, 1024, 1536], 'geometry': footprint, 'mpp': crop.mpp, 'size_px': CROP_PX}]
+	assert [(i['tile_index'], i['kind'], i['prediction_label_id']) for i in out['images']] == [
+		(1, 'raw', None),
+		(1, 'deadwood_overlay', 11),
+		(1, 'forest_cover_overlay', 12),
 	]
-	rows = store.assessment_rows(r, 3, 5, 42, labels)
-	assert [(x['layer'], x['label_id'], x['verdict']) for x in rows] == [
-		('image', None, 'ok'),
-		('deadwood', 11, 'major'),
-		('forest_cover', 12, 'major'),
+	# one folder per run; the files are uploaded before finish_run stores the rows
+	assert out['images'][1]['storage_path'] == 'audit/prediction_quality/42/run-5/tile-512-1024/deadwood_overlay-11.jpg'
+	assert [path for path, _ in files] == [i['storage_path'] for i in out['images']]
+	rows = out['tile_judgements']
+	assert [(r['tile_index'], r['judge'], r['layer'], r['verdict']) for r in rows] == [
+		(1, 'luna-medium', 'deadwood', 'major'),
+		(1, 'luna-medium', 'forest_cover', 'major'),
+		(1, 'haiku-5.5', 'deadwood', 'not_assessable'),
+		(1, 'haiku-5.5', 'forest_cover', 'not_assessable'),
 	]
-	assert rows[0]['modes'] == {'m0_not_assessable': {'likelihood': 0}}
-	assert rows[1]['modes']['m1_dead_missed'] == {'likelihood': 5.0, 'area_pct': 1.0}
-	# the layer's summary for data users is stored with its errors; an answer without one has none
-	assert rows[2]['details']['summary'] == 'Gaps are filled.'
-	assert rows[1]['details']['summary'] == ''
-	assert set(crop_row) == {
-		'dataset_id',
-		'ortho_sha256',
-		'crop_sets',
-		'pixel_x0',
-		'pixel_y0',
-		'pixel_x1',
-		'pixel_y1',
-		'geometry',
-		'mpp',
-		'size_px',
-		'selection',
-	}, 'only columns audit.crops has'
-	out = store.summary(result)
-	assert out['coverage']['training_set'] == 1 and out['evidence']['failed_calls'] == 0
+	assert rows[0]['problems']['m1_dead_missed'] == {'likelihood': 5.0, 'area_pct': 1.0} and rows[0]['likelihood'] == 70
+	# the layer's summary for data users; an answer without one has none
+	assert rows[1]['summary'] == 'Gaps are filled.' and rows[0]['summary'] is None
+	assert rows[2]['raw'] == {'assessable': False, 'verdict': 'ok', 'errors': []}
+	assert set(rows[0]) == {'tile_index', 'layer', 'judge', 'verdict', 'likelihood', 'problems', 'summary', 'raw'}
+	evidence = out['evidence']
+	assert evidence['coverage'] == {'mode': 'sampled', 'tiles_total': 9, 'tiles': 1, 'exclude_set': 1, 'training_set': 1}
+	assert evidence['tiles'][0]['sets'] == ['exclude', 'training'] and evidence['tiles'][0]['weight'] == 0.2
+	assert evidence['failed_calls'] == 0 and 'rule' not in evidence['versions']
+	assert not any('a' * 64 in json.dumps(row) for row in out['tiles'] + out['images'])
+	json.dumps(out)  # the RPC argument must serialise
 
 
 class _FakeTable:
-	"""Just enough of the Supabase query builder to serve the handler's reads and record its writes."""
+	"""Just enough of the Supabase query builder to serve the handler's reads; it writes nothing."""
 
 	def __init__(self, db, name):
-		self.db, self.name, self.op, self.payload, self.filters = db, name, 'select', None, []
+		self.db, self.name, self.filters = db, name, []
 		self.after, self.cap, self.span = None, None, None
 
 	def select(self, *_):
-		self.op = 'select'
 		return self
 
 	def or_(self, expression):
@@ -266,18 +245,6 @@ class _FakeTable:
 		self.span = (start, end)
 		return self
 
-	def insert(self, payload):
-		self.op, self.payload = 'insert', payload
-		return self
-
-	def upsert(self, payload, **_):
-		self.op, self.payload = 'upsert', payload
-		return self
-
-	def update(self, payload):
-		self.op, self.payload = 'update', payload
-		return self
-
 	def eq(self, column, value):
 		self.filters.append((column, value))
 		return self
@@ -285,92 +252,20 @@ class _FakeTable:
 	def execute(self):
 		from types import SimpleNamespace
 
-		rows = self.db.setdefault(self.name, [])
-		if self.op == 'select':
-			found = [r for r in rows if all(r.get(c) == v for c, v in self.filters)]
-			if self.after:
-				found = [r for r in found if (r['created_at'], r['id']) > self.after]
-			if self.span:
-				found = found[self.span[0] : self.span[1] + 1]
-			return SimpleNamespace(data=found[: self.cap])
-		if self.op in ('insert', 'upsert'):
-			batch = self.payload if isinstance(self.payload, list) else [self.payload]
-			for r in batch:
-				rows.append({'id': len(rows) + 1, **r})
-			return SimpleNamespace(data=rows[-len(batch) :])
-		self.db.setdefault('updates', []).append((self.name, self.payload, self.filters))
-		return SimpleNamespace(data=[])
+		found = [r for r in self.db.get(self.name, []) if all(r.get(c) == v for c, v in self.filters)]
+		if self.after:
+			found = [r for r in found if (r['created_at'], r['id']) > self.after]
+		if self.span:
+			found = found[self.span[0] : self.span[1] + 1]
+		return SimpleNamespace(data=found[: self.cap])
 
 
 class _FakeClient:
 	def __init__(self, db=None):
 		self.db = db or {}
 
-	def schema(self, name):
-		assert name == 'audit'
-		return self
-
 	def table(self, name):
 		return _FakeTable(self.db, name)
-
-
-def test_write_stores_crops_once_and_links_every_row():
-	from processor.src.prediction_quality_v1 import store
-	from processor.src.prediction_quality_v1.check import CheckResult, CropResult
-
-	mem = _ortho()
-	square = (X0 + 5, Y0 + 5, X0 + 5 + tiles.TILE_M, Y0 + 5 + tiles.TILE_M)
-	with mem.open() as src:
-		crop = render_crop(src, EPSG, square, {'deadwood': [], 'forest': []})
-	t = _tile(7, dw=0.1, fc=0.5)
-	t.sets, t.weight = ['exclude'], None
-	answers = [judge.parse('luna-medium', _answer())]
-	result = CheckResult(
-		dataset_id=42,
-		epsg=EPSG,
-		crops=[CropResult(tile=t, crop=crop, answers=answers)],
-		verdicts={'deadwood': {'verdict': 'ok'}, 'forest': {'verdict': None}},
-		tiles_total=1,
-		seconds=1,
-	)
-	client, stored = _FakeClient(), {}
-	sha = 'a' * 64
-	kw = dict(
-		ortho_sha256=sha,
-		label_ids={'deadwood': 11, 'forest': 12},
-		footprints={7: {}},
-		put_image=lambda path, data, dataset_id: stored.__setitem__(path, data),
-	)
-	out = store.write(client, 5, result, **kw)
-	assert (out['crops'], out['assessments']) == (1, 3)  # gate + 2 layers; no dataset rule rows
-	assert out['judged'] == {'crop_ids': [1], 'exclude': [1], 'training': {}, 'images': []}
-	assert len(stored) == 3 and all(p.startswith(f'audit/prediction_quality/42/{sha[:16]}/crop-1/') for p in stored)
-	# a file is named by its content, so another image of the crop never replaces it
-	assert all(row['sha256'][:16] in row['storage_path'] for row in client.db['images'])
-	assert {r['run_id'] for r in client.db['assessments']} == {5}
-	# crop rows only: the check stores no dataset verdict
-	assert {(r['assessor_kind'], r['crop_id']) for r in client.db['assessments']} == {('model', 1)}
-	# A second run on the same ortho reuses the crop and adds its new set.
-	t.sets = ['exclude', 'training']
-	t.weight = 0.5
-	again = store.write(client, 6, result, **kw)
-	assert len(client.db['crops']) == 1
-	# the images are stored already: nothing is uploaded or inserted twice
-	assert len(stored) == 3 and len(client.db['images']) == 3 and again['judged']['images'] == []
-	# the crop row holds every run's sets; the run says which were its own
-	assert again['judged']['exclude'] == [1] and again['judged']['training'] == {'1': 0.5}
-	crop_updates = client.db['updates']  # the run row stays the worker's
-	assert len(crop_updates) == 1 and crop_updates[0][0] == 'crops' and crop_updates[0][2] == [('id', 1)]
-	assert crop_updates[0][1]['crop_sets'] == ['exclude', 'training']
-	assert set(crop_updates[0][1]['selection']) == {'exclude', 'training'}
-	# With another AOI the judges see the crop darkened elsewhere. The stored row stays the
-	# first, so the run names the files it judged instead.
-	crop.in_aoi = np.zeros(crop.valid.shape, bool)
-	other = store.write(client, 7, result, **kw)
-	assert len(stored) == 6 and len(client.db['images']) == 3
-	own = other['judged']['images']
-	assert [i['kind'] for i in own] == ['raw', 'deadwood_overlay', 'forest_cover_overlay']
-	assert all(i['storage_path'] in stored and i['crop_id'] == 1 for i in own)
 
 
 # ---------------------------------------------------------------------------
@@ -412,21 +307,21 @@ def test_a_dataset_without_an_aoi_is_judged_on_all_its_tiles(ortho_file):
 	dead = _to_wgs(box(*_squares()[0]))
 	predictions = lambda: {'deadwood': [dead], 'forest': []}  # noqa: E731 (the check empties the dict)
 	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, predictions(), judges)
-	assert result.tiles_total == 4 and len(result.crops) == 4
-	assert all(r.crop.in_aoi is None and len(r.answers) == 2 for r in result.crops)
+	assert result.tiles_total == 4 and len(result.tiles) == 4
+	assert all(r.crop.in_aoi is None and len(r.answers) == 2 for r in result.tiles)
 	assert result.cost['haiku-5.5']['calls'] == 4 and result.cost['luna-medium']['cost_usd'] is None
 	# an AOI limits the check to the tiles inside it
 	inside = run_prediction_quality(42, ortho_file, _check_tiles(), _to_wgs(box(*_squares()[0])), predictions(), judges)
-	assert inside.tiles_total == 1 and [r.tile.tile_id for r in inside.crops] == [1]
-	# an AOI smaller than a tile is judged on the tile it touches, not left without crops
+	assert inside.tiles_total == 1 and [r.tile.tile_id for r in inside.tiles] == [1]
+	# an AOI smaller than a tile is judged on the tile it touches, not left without tiles
 	corner = box(*_squares()[1]).centroid.buffer(5)
 	small = run_prediction_quality(
 		42, ortho_file, _check_tiles(), _to_wgs(corner), {'deadwood': [], 'forest': []}, judges
 	)
-	assert [r.tile.tile_id for r in small.crops] == [2]
+	assert [r.tile.tile_id for r in small.tiles] == [2]
 
 
-def test_login_and_limit_errors_reach_the_worker_and_other_errors_stay_with_the_crop(ortho_file):
+def test_login_and_limit_errors_reach_the_worker_and_other_errors_stay_with_the_tile(ortho_file):
 	from processor.src.audit_worker.models import LimitReached, LoginExpired
 	from processor.src.prediction_quality_v1.check import run_prediction_quality
 
@@ -453,10 +348,10 @@ def test_login_and_limit_errors_reach_the_worker_and_other_errors_stay_with_the_
 		with pytest.raises(error):
 			run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': failing})
 	result = run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': flaky})
-	failed = [r for r in result.crops if r.failures]
+	failed = [r for r in result.tiles if r.failures]
 	assert len(failed) == 1 and 'boom' in failed[0].failures['b'] and len(failed[0].answers) == 1
-	# the cuts are calibrated on both judges: a judge that answers no crop fails the run
-	with pytest.raises(RuntimeError, match='b answered no crop: RuntimeError: boom'):
+	# a judge that answers no tile fails the run
+	with pytest.raises(RuntimeError, match='b answered no tile: RuntimeError: boom'):
 		run_prediction_quality(42, ortho_file, _check_tiles(), None, none(), {'a': good, 'b': broken})
 
 
@@ -511,7 +406,7 @@ def _dataset(aois=()):
 	return tables
 
 
-def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_file, monkeypatch):
+def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_file, monkeypatch):
 	from types import SimpleNamespace
 
 	from processor.src.audit_worker import worker
@@ -525,7 +420,7 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	}
 	ctx = SimpleNamespace(
 		run={'id': 5, 'dataset_id': 42},
-		refresh=lambda: refreshed.append(not client.db.get('assessments')),
+		refresh=lambda: refreshed.append(len(stored)),
 		client=client,
 		judges=judges,
 		token='t',
@@ -534,25 +429,30 @@ def test_the_handler_judges_the_preferred_predictions_and_stores_the_run(ortho_f
 	out = handler.handle(ctx)
 	labels = {'deadwood': 11, 'forest_cover': 12}
 	assert out['inputs'] == handler.inputs(client, 42) == {'ortho_sha256': SHA, 'aoi': None, 'label_ids': labels}
-	assert out['coverage'] == {'mode': 'sampled', 'tiles_total': 4, 'crops': 4, 'exclude_set': 4, 'training_set': 4}
-	assert out['cost']['luna-medium']['calls'] == 4
-	assert len(client.db['crops']) == 4 and len(stored) == 12 and len(client.db['images']) == 12
+	assert out['evidence']['coverage'] == {
+		'mode': 'sampled',
+		'tiles_total': 4,
+		'tiles': 4,
+		'exclude_set': 4,
+		'training_set': 4,
+	}
+	assert out['evidence']['cost']['luna-medium']['calls'] == 4
+	assert len(out['tiles']) == 4 and len(stored) == 12 and len(out['images']) == 12
+	assert set(stored) == {i['storage_path'] for i in out['images']}
 	assert all(dataset_id == 42 for dataset_id, _ in stored.values())
-	rows = client.db['assessments']
-	assert len(rows) == 4 * 2 * 3 and {r['run_id'] for r in rows} == {5}
-	# crop answers only (gate, deadwood, forest per crop and judge): no dataset verdict, in rows or evidence
-	assert {r['assessor_kind'] for r in rows} == {'model'} and all(r['crop_id'] for r in rows)
-	assert {r['label_id'] for r in rows if r['layer'] == 'forest_cover'} == {12}
-	assert not {'rule', 'verdicts'} & set(out['evidence'])
-	assert out['evidence']['judged']['images'] == [] and len(out['evidence']['judged']['crop_ids']) == 4
-	assert refreshed == [True], 'the login is renewed before the writes'
+	rows = out['tile_judgements']
+	# tile answers only (deadwood and forest per tile and judge): no dataset verdict
+	assert len(rows) == 4 * 2 * 2 and out['dataset_judgements'] == []
+	assert {i['prediction_label_id'] for i in out['images'] if i['kind'] == 'forest_cover_overlay'} == {12}
+	assert refreshed == [0], 'the login is renewed before the uploads'
 	# only the newest preferred prediction is drawn, without its deleted polygons
-	covered = {c['pixel_x0']: c['selection']['exclude']['predicted']['deadwood'] for c in client.db['crops']}
+	covered = {t['pixel_window'][0]: t['predicted']['deadwood'] for t in out['evidence']['tiles']}
 	assert covered[0] == pytest.approx(1, abs=0.05) and covered[512] == covered[1024] == 0
-	assert client.db['crops'][0]['geometry']['type'] == 'Polygon'
-	assert 'updates' not in client.db, "the run row is the worker's to finish"
+	assert out['tiles'][0]['geometry']['type'] == 'Polygon'
 	assert worker.HANDLERS['prediction_quality'] == handler.__name__
 	assert handler.CONFIG['models'].keys() == judges.keys()
+	assert (handler.RULES, handler.RULES_CONFIG) == ('rules-v1', {'decider': 'haiku'})
+	assert not {'rule', 'rule_config'} & set(handler.CONFIG)
 
 
 def test_the_handler_waits_for_its_inputs(monkeypatch):

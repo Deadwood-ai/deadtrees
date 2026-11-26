@@ -129,9 +129,9 @@ def test_role_inventory_reads_and_effective_privileges(db):
 	settings = db.execute("SELECT rolconfig FROM pg_roles WHERE rolname='team_analyst'").fetchone()[0]
 	assert {'default_transaction_read_only=on', 'statement_timeout=30s', 'lock_timeout=3s'} <= set(settings)
 	tables = db.execute("SELECT schemaname,tablename,cmd FROM pg_policies WHERE policyname='analyst_select'").fetchall()
-	# + v2_acquisition_date_estimates, dataset_audit_suggestions (dropped in a follow-up), acquisition_date_decisions
+	# + v2_acquisition_date_estimates, acquisition_date_decisions
 	# + dataset_access_grants, dataset_access_events, v2_georef_checks, processor_hosts, processor_heartbeats
-	# + the ten tables of the audit schema
+	# + the eleven tables of the audit schema
 	assert len(tables) == 72
 	for schema, table, command in tables:
 		assert command == 'SELECT'

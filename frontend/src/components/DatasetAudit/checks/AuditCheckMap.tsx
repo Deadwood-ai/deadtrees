@@ -5,7 +5,7 @@ import type { Map as OLMap } from "ol";
 import type BaseLayer from "ol/layer/Base";
 import type { IAuditCheckEvidence, IAuditImage } from "../../../types/auditChecks";
 import type { IGeorefCheck } from "../../../types/georefCheck";
-import { orderedCrops, stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
+import { stepCrop, type CropImageKind, type IAuditSectionDef } from "../../../utils/auditChecks";
 import CropImage from "../review/CropImage";
 import AuditCropReview, { type AuditCropReviewProps } from "./AuditCropReview";
 import { georefReferenceOptions, useGeorefLayers } from "./useGeorefLayers";
@@ -24,7 +24,7 @@ export interface IAuditCheckMapProps {
 	cropId: number | null;
 	onSelectCrop: (cropId: number) => void;
 	/** the crop review of a prediction step: where answers go, and the map instead of the crops (M) */
-	cropReview: Pick<AuditCropReviewProps, "datasetId" | "people" | "disabled" | "onNextStep"> & {
+	cropReview: Pick<AuditCropReviewProps, "datasetId" | "reviews" | "judgements" | "disabled" | "onNextStep"> & {
 		mapOnly: boolean;
 		setMapOnly: (mapOnly: boolean) => void;
 	};
@@ -54,9 +54,8 @@ export default function AuditCheckMap({ map, orthoLayer, section, georefCheck, e
 	const references = useMemo(() => (georef ? georefReferenceOptions(georef) : []), [georef]);
 	const shownProvider = provider ?? references[0]?.value;
 	// keyed on the rows, not the evidence object: an answer must not rebuild the squares or move the map
-	const cropRows = evidence?.crops;
-	// the same order the crop review uses
-	const crops = useMemo(() => (cropMode && cropRows?.length ? orderedCrops({ crops: cropRows }) : null), [cropMode, cropRows]);
+	const tiles = evidence?.tiles;
+	const crops = useMemo(() => (cropMode && tiles?.length ? tiles : null), [cropMode, tiles]);
 
 	useSectionLayers(section?.shows ?? null);
 

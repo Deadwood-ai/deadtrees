@@ -113,15 +113,13 @@ def test_datasets_for_publication(auth_token, test_user):
 						{
 							'check_key': 'dataset_evaluation',
 							'dataset_id': dataset_id,
-							'layer': 'image',
-							'assessor_kind': 'person',
-							'assessor_user_id': test_user,
-							'verdict': 'ok',
+							'reviewed_by': test_user,
+							'decision': 'keep',
 						}
 					)
 
 			with use_service_client() as service_client:
-				service_client.schema('audit').table('assessments').insert(audit_rows).execute()
+				service_client.schema('audit').table('dataset_human_reviews').insert(audit_rows).execute()
 
 			yield dataset_ids
 

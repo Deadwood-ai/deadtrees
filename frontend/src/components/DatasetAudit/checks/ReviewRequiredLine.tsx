@@ -4,7 +4,7 @@ import { reviewRequiredText } from "../../../utils/auditReview";
 interface ReviewRequiredLineProps {
 	/** the review items still open, with the ones answered on the page already taken out */
 	items: ReviewItem[];
-	/** audit.dataset_results could not be read: say so instead of "No review required" */
+	/** audit.dataset_outcomes could not be read: say so instead of "No review required" */
 	unknown?: boolean;
 }
 

@@ -8,11 +8,11 @@ import {
 	georefText,
 	layerResult,
 	share,
-	type PredictionReviewLayer,
 } from "../../../utils/auditReview";
 import { formatIsoDate } from "../../../utils/acquisitionDate";
+import type { PredictionLayer } from "../../../types/auditChecks";
 
-const DECISION_COLORS = { ok: "green", exclude: "red" } as const;
+const DECISION_COLORS = { keep: "green", exclude: "red" } as const;
 const NONE = <span className="text-gray-400">—</span>;
 
 const location = (row: IAuditListRow) => [row.dataset.admin_level_3, row.dataset.admin_level_1].filter(Boolean).join(", ") || "Unknown";
@@ -25,7 +25,7 @@ function acquisitionDate(row: IAuditListRow): string {
 
 const numberOr = (value: number | null | undefined, fallback = -1) => (typeof value === "number" ? value : fallback);
 
-function LayerCell({ row, layer }: { row: IAuditListRow; layer: PredictionReviewLayer }) {
+function LayerCell({ row, layer }: { row: IAuditListRow; layer: PredictionLayer }) {
 	const counts = layerResult(row.result, layer);
 	if (!counts) return NONE;
 	return (
@@ -37,7 +37,7 @@ function LayerCell({ row, layer }: { row: IAuditListRow; layer: PredictionReview
 	);
 }
 
-const layerShare = (row: IAuditListRow, layer: PredictionReviewLayer) => {
+const layerShare = (row: IAuditListRow, layer: PredictionLayer) => {
 	const counts = layerResult(row.result, layer);
 	return counts ? (share(counts.major, counts.total) ?? -1) : -1;
 };

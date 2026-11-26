@@ -455,14 +455,12 @@ def _hide_labels_from_non_owners(dataset_id: int, owner: str, rule: str) -> None
 			db_client.table(settings.datasets_table).update({'archived': True}).eq('id', dataset_id).execute()
 		else:
 			# a reviewer's evaluation decision exclude hides the dataset from the public surface
-			db_client.schema('audit').table('assessments').insert(
+			db_client.schema('audit').table('dataset_human_reviews').insert(
 				{
 					'check_key': 'dataset_evaluation',
 					'dataset_id': dataset_id,
-					'layer': 'image',
-					'assessor_kind': 'person',
-					'assessor_user_id': owner,
-					'verdict': 'major',
+					'reviewed_by': owner,
+					'decision': 'exclude',
 				}
 			).execute()
 
@@ -497,7 +495,7 @@ def test_downloads_contain_only_labels_the_user_may_read(
 			assert not [name for name in archive.namelist() if name.startswith('labels_')]
 	finally:
 		with use_service_client() as db_client:
-			db_client.schema('audit').table('assessments').delete().eq('dataset_id', dataset_id).eq('check_key', 'dataset_evaluation').execute()
+			db_client.schema('audit').table('dataset_human_reviews').delete().eq('dataset_id', dataset_id).eq('check_key', 'dataset_evaluation').execute()
 			db_client.table(settings.datasets_table).update({'archived': False}).eq('id', dataset_id).execute()
 		_delete_labels(auth_token, dataset_id)
 		shutil.rmtree(settings.downloads_path / str(dataset_id), ignore_errors=True)

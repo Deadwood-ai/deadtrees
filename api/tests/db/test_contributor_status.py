@@ -33,8 +33,8 @@ def test_excluded_owner_can_read_review_but_other_users_cannot(status_db, archiv
 	db.execute("INSERT INTO public.v2_statuses(dataset_id,has_error,error_message,error_stage) VALUES (%s,true,'PRIVATE DIAGNOSTIC','cog_processing')", (dataset,))
 	# a reviewer's evaluation decision: exclude, with a note and the COG issue
 	db.execute(
-		'INSERT INTO audit.assessments(check_key,dataset_id,layer,assessor_kind,assessor_user_id,verdict,output,reason_text) '
-		"VALUES ('dataset_evaluation',%s,'image','person',%s,'major','{\"cog_issue\": true}','Image is not georeferenced')",
+		'INSERT INTO audit.dataset_human_reviews(check_key,dataset_id,reviewed_by,decision,exclude_reason,note) '
+		"VALUES ('dataset_evaluation',%s,%s,'exclude','not_georeferenced','Image is not georeferenced')",
 		(dataset, other),
 	)
 	db.execute('SET LOCAL ROLE authenticated')

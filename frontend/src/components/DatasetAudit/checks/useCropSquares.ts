@@ -6,7 +6,7 @@ import GeoJSON from "ol/format/GeoJSON";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style, Text } from "ol/style";
-import type { IAuditCrop } from "../../../types/auditChecks";
+import type { IAuditTile } from "../../../types/auditChecks";
 
 const format = new GeoJSON({ dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" });
 const CROP_COLOR = "#7fd3e6";
@@ -14,7 +14,7 @@ const CROP_COLOR = "#7fd3e6";
 interface UseCropSquaresOptions {
 	map: OLMap | null;
 	/** the crops in display order; their number is the position + 1 */
-	crops: IAuditCrop[] | null;
+	crops: IAuditTile[] | null;
 	selectedId: number | null;
 	onSelect: (cropId: number) => void;
 }
@@ -77,7 +77,7 @@ export function useCropSquares({ map, crops, selectedId, onSelect }: UseCropSqua
 }
 
 /** Zoom the map to one crop, keeping some context around it. */
-export function zoomToCrop(map: OLMap | null, crop: IAuditCrop | undefined) {
+export function zoomToCrop(map: OLMap | null, crop: IAuditTile | undefined) {
 	if (!map || !crop) return;
 	const geometry = format.readGeometry(crop.geometry);
 	if (!geometry) return;

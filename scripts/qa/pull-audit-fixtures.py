@@ -2,7 +2,7 @@
 """Copy production datasets with their automated audit results into the isolated local stack,
 for developing the Audit Review page (docs/audit-checks.md) on real check output.
 
-Rows keep their production ids, so a local dataset, run or crop matches production one to one.
+Rows keep their production ids, so a local dataset, run or tile matches production one to one.
 User columns point at the local QA contributor and auditor. The production side runs in a
 read-only transaction as the trusted analyst (docs/playbooks/analyst-database-access.md); the
 local side refuses a database that is not on 127.0.0.1 or localhost. Rerunning replaces the
@@ -39,7 +39,7 @@ ACTIVE_LABELS = 'label_id in (select id from public.v2_labels where dataset_id =
 # Load order: parents first. Deletion runs in reverse.
 TABLES = [
 	('audit', 'check_versions', 'true'),
-	('audit', 'benchmarks', 'true'),
+	('audit', 'check_rules', 'true'),
 	('public', 'v2_datasets', 'id = any(%(ids)s)'),
 	('public', 'v2_statuses', IDS),
 	('public', 'v2_orthos', IDS),
@@ -55,14 +55,16 @@ TABLES = [
 	('public', 'v2_acquisition_date_estimates', IDS),
 	('public', 'acquisition_date_decisions', IDS),
 	('public', 'dataset_audit_legacy', IDS),
+	('audit', 'legacy_decisions', IDS),
 	('audit', 'runs', IDS),
-	('audit', 'current_runs', IDS),
-	('audit', 'crops', IDS),
+	('audit', 'tiles', IDS),
 	('audit', 'images', IDS),
-	('audit', 'assessments', IDS),
-	('audit', 'benchmark_members', IDS),
+	('audit', 'dataset_vlm_judgements', IDS),
+	('audit', 'tile_vlm_judgements', IDS),
+	('audit', 'dataset_human_reviews', IDS),
+	('audit', 'tile_human_reviews', IDS),
 ]
-SHARED = {('audit', 'check_versions'), ('audit', 'benchmarks')}  # copied whole, never deleted
+SHARED = {('audit', 'check_versions'), ('audit', 'check_rules')}  # copied whole, never deleted
 
 
 def local_db() -> str:

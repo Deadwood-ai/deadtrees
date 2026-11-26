@@ -4,9 +4,11 @@ import { auditSettled, cropReasoning, georefFinding, predictionFinding, readable
 
 const summary = (patch: Partial<IDatasetAuditSummary> = {}): IDatasetAuditSummary => ({
   review_required: [],
-  evaluation_decision: "ok",
+  evaluation_decision: "keep",
   georef_status: "estimated",
   georef_offset_m: 2.62,
+  date_replace: null,
+  date_new: null,
   deadwood_total: 16,
   deadwood_major: 0,
   deadwood_minor: 14,

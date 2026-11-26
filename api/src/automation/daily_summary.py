@@ -439,22 +439,19 @@ def fetch_failures(client: Client, period_start: datetime, period_end: datetime)
 def fetch_audit_metrics(client: Client, period_start: datetime) -> tuple[int, list]:
 	"""Audit Review decisions in the period and the reviewers who made them.
 
-	An audit is a reviewer's dataset evaluation answer (a native person row on the dataset
-	in audit.assessments); imported legacy audits are history and do not count.
+	An audit is a reviewer's dataset evaluation answer (audit.dataset_human_reviews); the old
+	manual audits (audit.legacy_decisions) are history and do not count.
 	"""
 	response = (
 		client.schema('audit')
-		.table('assessments')
-		.select('dataset_id, assessor_user_id')
+		.table('dataset_human_reviews')
+		.select('dataset_id, reviewed_by')
 		.eq('check_key', 'dataset_evaluation')
-		.eq('assessor_kind', 'person')
-		.is_('crop_id', 'null')
-		.is_('imported_from', 'null')
 		.gte('created_at', period_start.isoformat())
 		.execute()
 	)
 
-	reviewed = {(row['dataset_id'], row['assessor_user_id']) for row in response.data or []}
+	reviewed = {(row['dataset_id'], row['reviewed_by']) for row in response.data or []}
 	audit_count = len({dataset_id for dataset_id, _ in reviewed})
 	auditor_counts = {}
 	for _, auditor_id in reviewed:

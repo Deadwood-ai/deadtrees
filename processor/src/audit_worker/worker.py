@@ -1,16 +1,16 @@
 """The worker loop: claim a run, hand it to its check's handler, finish it, repeat.
 
 A check plugs in with a handler module listed in HANDLERS:
-	VERSION, CONFIG          the version it runs; registered once (review_all, inactive)
-	handle(ctx) -> dict      writes the run's crops, images and model and rule rows; returns
-	                         optional coverage, cost and evidence for the run row
-	recompute(ctx) -> dict   optional: a rule-only run (run.source_run_id) writes new rule rows
-	                         from the source run's stored model rows; it gets no judges
+	VERSION, CONFIG          the version it runs: what the models are asked; registered once, inactive
+	RULES, RULES_CONFIG      how the database turns the version's answers into results;
+	                         registered once with the version, inactive
+	handle(ctx) -> dict      uploads the run's images and returns the p_result of
+	                         audit.finish_run: inputs, evidence, tiles, images, judgements
 	ready(status) -> bool    optional: whether a dataset's status row lets the check run
 	inputs(client, dataset_id) -> dict
 	                         optional: the evidence a run judges (ortho sha256, prediction label
-	                         ids); a dataset gets a new run when it changes. Without it, one run
-	                         per version and dataset.
+	                         ids); a dataset gets a new run when the latest run of the version
+	                         judged other inputs. Without it, one run per version and dataset.
 CONFIG['models'] names the judges ({"haiku-5.5": {"transport": "claude", "model": ...}}).
 """
 
@@ -61,8 +61,8 @@ class Context:
 	put_image: Callable[[str, bytes], None]
 	token: str = ''
 	extra: dict = field(default_factory=dict)
-	# Renews the client's login in place. The login a run starts with lasts 20 to 60 minutes;
-	# a handler whose model calls can take that long calls this before its writes.
+	# Renews the processor login in place. The login a run starts with lasts 20 to 60 minutes;
+	# a handler whose model calls can take that long calls this before its uploads.
 	refresh: Callable[[], None] = lambda: None
 
 
@@ -142,16 +142,7 @@ def memory_limit(
 	return min(limits) if limits else None
 
 
-def judged(ctx_run: dict, version_row: dict, handler) -> dict:
-	"""The judges a run may call: none for a rule-only run."""
-	if ctx_run.get('source_run_id'):
-		return {}
-	return models.judges(version_row['config'].get('models', {}))
-
-
-def process(
-	run: dict, *, client, handler, version_row: dict, active_id: int | None, put_image, token='', refresh=None
-) -> str:
+def process(run: dict, *, client, handler, version_row: dict, put_image, token='', refresh=None) -> str:
 	"""One claimed run to its end state; a pause puts it back and raises Paused.
 
 	refresh(client) renews the client's login in place (none in tests)."""
@@ -160,15 +151,11 @@ def process(
 		ctx.refresh = lambda: refresh(client)
 	try:
 		try:
-			ctx.judges = judged(run, version_row, handler)
-			if run.get('source_run_id'):
-				if not hasattr(handler, 'recompute'):
-					raise RuntimeError(f'{run["check_key"]} cannot recompute rule-only runs')
-				summary = handler.recompute(ctx) or {}
-			else:
-				summary = handler.handle(ctx) or {}
+			ctx.judges = models.judges(version_row['config'].get('models', {}))
+			result = handler.handle(ctx)
 		finally:
 			ctx.refresh()  # the run may have outlived its login; every outcome below is written with a valid one
+		runs.finish(client, run, result)
 	except models.LoginExpired as exc:
 		runs.release(client, run)
 		raise Paused(str(exc), exc.transport, LOGIN_PROBE_SECONDS) from exc
@@ -177,28 +164,21 @@ def process(
 		raise Paused(str(exc), exc.transport, LIMIT_PAUSE_SECONDS) from exc
 	except Exception as exc:  # anything else counts as an attempt
 		return runs.retry_or_fail(client, run, f'{type(exc).__name__}: {str(exc)[:500]}')
-	runs.finish(client, run, summary, active=run['check_version_id'] == active_id)
 	return 'done'
 
 
-def tick(*, client, handlers: dict, put_image, benchmark: bool = False, token='', refresh=None) -> str | None:
+def tick(*, client, handlers: dict, put_image, token='', refresh=None) -> str | None:
 	"""Take and process one run; None when nothing is queued."""
-	active = runs.active_versions(client, handlers)
-	run = runs.claim_next(client, handlers, benchmark=benchmark)
+	known = runs.versions(client, handlers)
+	run = runs.claim_next(client, known)
 	if run is None:
 		return None
-	active_row = active.get(run['check_key'])
-	version_row = (
-		active_row
-		if active_row and active_row['id'] == run['check_version_id']
-		else runs.version(client, run['check_version_id'])
-	)
+	version_row = known[run['version_id']]
 	return process(
 		run,
 		client=client,
-		handler=handlers[run['check_key']],
+		handler=handlers[version_row['check_key']],
 		version_row=version_row,
-		active_id=active_row['id'] if active_row else None,
 		put_image=put_image,
 		token=token,
 		refresh=refresh,
@@ -242,12 +222,6 @@ def enqueue_ready(client, handlers: dict, since: str, until: str, done=lambda at
 	return added
 
 
-def sweep(client, handlers: dict) -> int:
-	"""Bring current pointers in line with the active versions' runs: after a crash between
-	finishing and pointing, and after an operator promotes a version."""
-	return sum(runs.publish(client, row) for row in runs.active_versions(client, handlers).values())
-
-
 def default_ready(status: dict) -> bool:
 	predictions = status.get('is_combined_model_done') or (
 		status.get('is_deadwood_done') and status.get('is_forest_cover_done')
@@ -256,12 +230,15 @@ def default_ready(status: dict) -> bool:
 
 
 def register(client, handlers: dict) -> dict[str, dict]:
-	return {check: runs.register_version(client, check, h.VERSION, h.CONFIG) for check, h in handlers.items()}
+	"""Each handler's version and its rules, inactive until an operator activates them."""
+	registered = {}
+	for check, h in handlers.items():
+		registered[check] = runs.register_version(client, check, h.VERSION, h.CONFIG)
+		runs.register_rules(client, registered[check], h.RULES, h.RULES_CONFIG)
+	return registered
 
 
-def run_forever(
-	*, connect, handlers: dict, put_image, benchmark: bool = False, once: bool = False, sleep=time.sleep, refresh=None
-):
+def run_forever(*, connect, handlers: dict, put_image, once: bool = False, sleep=time.sleep, refresh=None):
 	"""connect() -> (client, token), called every tick so the processor login stays fresh;
 	refresh(client) renews it in place during and after a long run.
 
@@ -272,7 +249,7 @@ def run_forever(
 	since = read_watermark() or (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 	next_enqueue = 0.0
 	client, _ = connect()
-	runs.recover(client, handlers)
+	runs.recover(client, runs.versions(client, handlers))
 	while True:
 		client, token = connect()
 		status = read_status()
@@ -282,18 +259,16 @@ def run_forever(
 				if once:
 					return status
 				continue
-		if not benchmark and time.monotonic() >= next_enqueue:
+		if time.monotonic() >= next_enqueue:
 			started = runs.now()
 			enqueue_ready(client, handlers, since, started, done=write_watermark)
 			write_watermark(started)
-			sweep(client, handlers)
 			since, next_enqueue = started, time.monotonic() + ENQUEUE_SECONDS
 		try:
 			result = tick(
 				client=client,
 				handlers=handlers,
 				put_image=put_image,
-				benchmark=benchmark,
 				token=token,
 				refresh=refresh,
 			)

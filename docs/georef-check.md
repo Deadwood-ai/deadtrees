@@ -83,33 +83,20 @@ never changes the dataset.
 
 ## What it stores
 
-The stage writes everything through `store_georef_check(p_check, p_suggestion, p_queue)`,
-in one transaction (`p_suggestion` is ignored since the Audit Review).
+The stage writes one row through `store_georef_check(p_check)`: `v2_georef_checks`, one
+row per dataset, replaced on rerun. It is the record; the stage writes no audit run.
 
-- `v2_georef_checks`, one row per dataset, replaced on rerun (the audit page reads
-  it until it moves to the `audit` schema):
-  - the decision and evidence level, with the median p90
-  - for each reference: inliers, coverage, p90 and holdout p90s, its vote, and
-    up to 200 matched point pairs in lon/lat
-  - the keyless tile URL of each reference, for the audit viewer
-  - provider errors
-- The audit check base (`docs/audit-checks.md`), check `georef`:
-  - a check version per rules and matcher version, registered on first use as
-    `review_all` and inactive. `georef-rules-v1_romav2.0.1` is the active one
-    (migration `20261110130000`); a later version counts once an operator activates
-    it with `audit.activate_version`;
-  - a `done` run per check, every run kept, with the reference evidence and the
-    judged ortho (`inputs.ortho_sha256`); queue `backfill` for a check-only task,
-    else `upload`;
-  - `audit.current_runs` pointing at it, for a run of the active version;
-  - one dataset-level model assessment, layer `georef`: Good is `ok`, Poor is
-    `major`, uncertain is `unsure`. Georef needs no dataset rule.
+- the decision and evidence level, with the median p90
+- for each reference: inliers, coverage, p90 and holdout p90s, its vote, and up to 200
+  matched point pairs in lon/lat
+- the keyless tile URL of each reference, for the audit viewer
+- provider errors
 
 ## How it reaches auditors
 
 `audit.georef_output_v1(v2_georef_checks)` turns the stored check into the Audit Review's
-output (`audit.dataset_results`, `docs/audit-checks.md`), computed live, so a new rule is
-a new function version, not a rerun:
+output (`audit.dataset_outcomes`, `docs/audit-checks.md`), computed when it is read, so a
+rerun of the stage or a new rule shows at once, without a VLM call:
 
 | Status | When | Offset |
 |---|---|---|
@@ -118,10 +105,11 @@ a new function version, not a rerun:
 | `no_reference` | no reference qualified | none |
 | `needs_review` | references qualified but none decides, or they conflict (`unstable_near_threshold`, `references_disagree`) | the best supported qualified reference's p90, as evidence |
 
-`needs_review` asks a person: the reviewer answers Passed (within 15 m) or Not passed
-(a person row with output `{"status": "passed" | "not_passed"}`), which replaces the
-status. The georeferencing step shows the measurement; opening it puts the audit map
-into georeferencing mode: the chosen reference under the drone image, a drone opacity
+`needs_review` asks a person: the reviewer answers Passed (within 15 m) or Not passed (an
+`audit.dataset_human_reviews` row, check `georef`), which replaces the status. The answer
+keeps counting while the ortho is the same: a rerun of the stage does not move the image,
+a new ortho does. The georeferencing step shows the measurement; opening it puts the audit
+map into georeferencing mode: the chosen reference under the drone image, a drone opacity
 slider, and the matched points coloured by offset.
 
 ## Operations

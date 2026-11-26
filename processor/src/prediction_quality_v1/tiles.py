@@ -1,7 +1,7 @@
-"""CLIP tile windows as crops, their predicted cover, and the two crop sets.
+"""CLIP tile windows, their predicted cover, and the two tile sets.
 
 The embedding stage tiles each ortho on a 10 cm UTM grid into 512 px squares and stores each
-kept tile's pixel window and WGS84 footprint (v2_tile_embeddings). A crop is one such tile:
+kept tile's pixel window and WGS84 footprint (v2_tile_embeddings). The check judges a tile as
 the square of TILE_M metres centred on the stored footprint, in the dataset's UTM zone.
 """
 
@@ -28,7 +28,7 @@ EXCLUDE_SET_SIZE = 10
 
 @dataclass
 class Tile:
-	"""One CLIP tile: stored pixel window and footprint, plus the derived crop square."""
+	"""One CLIP tile: stored pixel window and footprint, plus the derived square."""
 
 	tile_id: int
 	pixel_window: tuple[int, int, int, int]
@@ -37,7 +37,7 @@ class Tile:
 	deadwood_share: float = 0.0
 	forest_share: float = 0.0
 	sets: list[str] = field(default_factory=list)
-	weight: float | None = None  # area share of the dataset this crop stands for (training set)
+	weight: float | None = None  # area share of the dataset this tile stands for (training set)
 
 	@property
 	def stratum(self) -> tuple[int, int]:
@@ -61,7 +61,7 @@ class Layer:
 
 
 def utm_layer(polygons_4326: Iterable, to_utm: Transformer) -> Layer:
-	"""Project a prediction once; every tile's cover and every crop's overlay read this copy."""
+	"""Project a prediction once; every tile's cover and overlay read this copy."""
 	kept = [g for g in polygons_4326 if g is not None and not g.is_empty]
 	projected = list(project(np.array(kept, dtype=object), to_utm)) if kept else []
 	return Layer(projected, STRtree(projected))
@@ -93,8 +93,8 @@ def attach_cover(tiles: Sequence[Tile], to_utm: Transformer, deadwood: Layer, fo
 			setattr(t, attr, share)
 
 
-def crop_count(hectares: float) -> int:
-	"""1 crop per 2 ha, 10 to 40 per set (plan session 4)."""
+def tile_count(hectares: float) -> int:
+	"""1 tile per 2 ha, 10 to 40 per set (plan session 4)."""
 	return int(min(40, max(10, round(hectares / 2))))
 
 
@@ -110,7 +110,7 @@ def exclude_set(tiles: Sequence[Tile], n: int = EXCLUDE_SET_SIZE) -> list[Tile]:
 def training_set(tiles: Sequence[Tile], n: int, seed: int) -> list[Tile]:
 	"""Stratified tiles over predicted cover, square-root allocation, each with its area weight.
 
-	Rare high-deadwood strata get more crops than their area share; the weight restores the
+	Rare high-deadwood strata get more tiles than their area share; the weight restores the
 	area share, so shares estimated from the set stay unbiased.
 	"""
 	rng = np.random.default_rng(seed)

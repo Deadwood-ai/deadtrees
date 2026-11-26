@@ -13,7 +13,6 @@ import { palette } from "../../theme/palette";
 import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../../utils/biomeDisplay";
 import { useAcquisitionDateDecisions, useAcquisitionDateEstimate } from "../../hooks/useAcquisitionDateEstimate";
 import {
-  datasetDateSuggestion,
   decisionDistribution,
   describeModelType,
   formatDateParts,
@@ -59,14 +58,15 @@ const isoOf = (y: number | null, m: number | null, d: number | null) => (y && m 
 
 /** Acquisition date with its provenance: a date that came from an accepted
  * model suggestion is marked as such, with the reported date and the evidence;
- * a pending suggestion (month missing, or imagery contradicting the reported
- * date) is shown next to the reported date. */
+ * the audit's suggested date (the date check's, or a reviewer's correction of
+ * it) is shown next to the reported date, with the estimate as evidence. */
 const AcquisitionDateRows = ({ dataset, dateText }: { dataset: IDataset; dateText: string }) => {
   const { data: estimate } = useAcquisitionDateEstimate(dataset.id);
   const { data: decisions } = useAcquisitionDateDecisions(dataset.id);
   const applied = modelSuggestedDecision(decisions, dataset);
   const appliedEvidence = decisionDistribution(applied);
-  const suggestion = applied ? null : datasetDateSuggestion(estimate, dataset);
+  const { data: audit } = useDatasetAuditSummary(dataset.id);
+  const suggested = applied || !audit?.date_replace ? null : audit.date_new;
   const reportedIso = isoOf(Number(dataset.aquisition_year), Number(dataset.aquisition_month) || null, Number(dataset.aquisition_day) || null);
 
   return (
@@ -104,7 +104,7 @@ const AcquisitionDateRows = ({ dataset, dateText }: { dataset: IDataset; dateTex
           </Typography.Text>
         </InfoRow>
       )}
-      {estimate && suggestion && (
+      {estimate && suggested && (
         <InfoRow label="Suggested Date">
           <Popover
             trigger="click"
@@ -120,8 +120,8 @@ const AcquisitionDateRows = ({ dataset, dateText }: { dataset: IDataset; dateTex
             }
           >
             <Typography.Text className="cursor-pointer">
-              {suggestion.reason === "mismatch" && <WarningOutlined style={{ color: palette.state.warning, marginRight: 4 }} />}~
-              {formatIsoDate(suggestion.date, { day: "numeric", month: "long", year: "numeric" })}{" "}
+              {estimate.suggestion_reason === "mismatch" && <WarningOutlined style={{ color: palette.state.warning, marginRight: 4 }} />}~
+              {formatIsoDate(suggested, { day: "numeric", month: "long", year: "numeric" })}{" "}
               <Typography.Text type="secondary" underline>
                 why?
               </Typography.Text>

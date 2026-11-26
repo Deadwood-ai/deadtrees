@@ -16,14 +16,12 @@ from shared.testing.fixtures import test_processor_user
 def exclude_by_review(dataset_id, reviewer):
 	"""A reviewer's evaluation decision exclude, the only reason a dataset leaves the public surface."""
 	with use_service_client() as client:
-		client.schema('audit').table('assessments').insert(
+		client.schema('audit').table('dataset_human_reviews').insert(
 			{
 				'check_key': 'dataset_evaluation',
 				'dataset_id': dataset_id,
-				'layer': 'image',
-				'assessor_kind': 'person',
-				'assessor_user_id': reviewer,
-				'verdict': 'major',
+				'reviewed_by': reviewer,
+				'decision': 'exclude',
 			}
 		).execute()
 

@@ -14,7 +14,7 @@ from processor.src.georef_check_v1.evidence import (
 	measure_reference,
 )
 from processor.src.georef_check_v1.references import pick_wayback
-from processor.src.process_georef_check import check_row, flight_date, suggestion_row
+from processor.src.process_georef_check import check_row, flight_date
 
 # a 1400 x 1000 px grid of 0.1 m pixels near Freiburg (EPSG:3857 metres; ~0.066 m on the ground)
 GRID = Grid((870000.0, 6100000.0, 870140.0, 6100100.0), 1400, 1000)
@@ -163,25 +163,6 @@ def _check(decision, level, p90=3.0):
 		seconds=9.5,
 		details={'rules_version': 'georef-rules-v1', 'model_version': 'romav2.0.1'},
 	)
-
-
-@pytest.mark.unit
-def test_good_or_poor_becomes_the_is_georeferenced_suggestion_and_uncertain_none():
-	good = suggestion_row(7, _check('good', 'strong'))
-	assert (good['field'], good['value'], good['reason']) == ('is_georeferenced', True, 'strong')
-	assert good['details']['references'] == ['esri']
-	assert suggestion_row(7, _check('poor', 'qualified', 22.0))['value'] is False
-	assert suggestion_row(7, _check('uncertain', 'insufficient')) is None
-
-
-@pytest.mark.unit
-def test_a_check_only_task_is_an_audit_backfill_and_processing_an_upload():
-	from types import SimpleNamespace
-
-	from processor.src.process_georef_check import audit_queue
-
-	assert audit_queue(SimpleNamespace(task_types=['georef_check_v1'])) == 'backfill'
-	assert audit_queue(SimpleNamespace(task_types=['geotiff', 'cog', 'georef_check_v1'])) == 'upload'
 
 
 @pytest.mark.unit

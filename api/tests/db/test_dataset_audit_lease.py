@@ -1,5 +1,5 @@
 """Audit lease contracts on isolated PostgreSQL: claim, renew, expiry, release and the guard on audit edits
-(manual AOIs, flags and corrections; the Audit Review stores append-only assessments without a lease)."""
+(manual AOIs, flags and corrections; the Audit Review stores insert-only reviews without a lease)."""
 import json
 import threading
 import time

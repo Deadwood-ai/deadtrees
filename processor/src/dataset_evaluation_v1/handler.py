@@ -2,10 +2,9 @@
 
 handle(ctx) reads the stored COG (private datasets too), its CLIP tiles and the
 thumbnail, asks the version's judges, uploads the judged images with ctx.put_image and
-stores crops, images and assessments in one call to audit.store_dataset_evaluation.
-recompute(ctx) runs this version's rule alone over an earlier run's stored answers (a
-rule-only run). The worker finishes the run with the returned evidence, coverage and
-cost, and points the dataset at it when the version is active.
+returns the run's p_result (check.payload), which the worker stores with
+audit.finish_run. Keep or exclude is worked out in the database from the stored answers
+with the version's rules (RULES_CONFIG, audit.evaluation_calls).
 """
 
 import tempfile
@@ -24,16 +23,19 @@ from ..utils.stored_inputs import (
 	stored_cog,
 	tile_rows,
 )
-from .check import CONFIG, evaluate, rule_only_verdict, store_payload
+from .check import CONFIG, evaluate, image_path, payload
 from .inputs import Tile, read_inputs
-from .vocabulary import CHECK_KEY, LAYER
 
-# v3: the dataset rule without the duplicate check, and the COG and thumbnail issues as the
-# rule row's output (the prompt and images of v2). v2 judged the orthophoto alone; v1 judged
-# inside the AOI, which is a check of its own (DT-1538).
+# v3: the prompt and images of v2, which judged the orthophoto alone; v1 judged inside the
+# AOI, which is a check of its own (DT-1538).
 VERSION = 'v3'
+# audit.check_rules of the version: the deciding model's verdict (by name prefix) keeps or
+# excludes, a band check at band_major_at or more excludes as not RGB, an empty COG as a
+# broken ortho; the other models are stored and shown, not counted
+RULES = 'rules-v1'
+RULES_CONFIG = {'decider': 'haiku', 'band_major_at': 90}
 
-__all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready', 'recompute']
+__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
 
 def ready(status: dict) -> bool:
@@ -53,22 +55,12 @@ def identity(sha256: str) -> dict:
 	return {'ortho_sha256': sha256}
 
 
-def version_config(ctx) -> dict:
-	"""The config of the run's version; refuses a run of another version.
-
-	The code is the version: its prompt, sampling and rule under an earlier version's name would
-	mix two behaviours in that version's results. Such a run fails; an operator activates this
-	version. The thresholds are the ones the version was registered with (a version before they
-	were recorded runs with today's)."""
-	version = getattr(ctx, 'version', None) or {}
-	queued_for = version.get('version', VERSION)
+def handle(ctx) -> dict:
+	# The code is the version: its prompt and sampling under an earlier version's name would mix
+	# two behaviours in that version's results. Such a run fails; an operator activates this version.
+	queued_for = (getattr(ctx, 'version', None) or {}).get('version', VERSION)
 	if queued_for != VERSION:
 		raise ValueError(f'the run is of version {queued_for}; this code judges {VERSION}')
-	return {**CONFIG, **version.get('config', {})}
-
-
-def handle(ctx) -> dict:
-	config = version_config(ctx)
 	dataset_id = ctx.run['dataset_id']
 	client = ctx.client
 	log = LogContext(
@@ -82,84 +74,22 @@ def handle(ctx) -> dict:
 	):
 		thumbnail = _thumbnail(client, dataset_id, Path(folder), ctx.token)
 		seen = read_inputs(cog_source, seed=dataset_id, tiles=tiles(client, dataset_id))
-	evaluation = evaluate(
-		seen,
-		ctx.judges,
-		source_profile=(ortho.ortho_info or {}).get('Profile'),
-		thumbnail=thumbnail,
-		rule_config=config['rule_config'],
-	)
-	payload = store_payload(evaluation, seen, dataset_id, ortho.sha256)
+	evaluation = evaluate(seen, ctx.judges, source_profile=(ortho.ortho_info or {}).get('Profile'), thumbnail=thumbnail)
+	ctx.refresh()  # the judges can take longer than the login lasts
 	# Files first, rows second: a stored row always points at an uploaded image.
-	for image, row in zip(evaluation.images, payload['images']):
-		ctx.put_image(row['storage_path'], image.data, dataset_id)
-	crop_ids = (
-		client.schema('audit')
-		.rpc('store_dataset_evaluation', {'p_run_id': ctx.run['id'], 'p_result': payload})
-		.execute()
-		.data
-	)
-	# The run names what it judged. Crops and images are stored per ortho, and an ortho a
-	# version 1 run judged inside its AOI holds that run's crops and overview too.
-	judged = {
-		'crop_ids': crop_ids or [],
-		'images': [{k: row[k] for k in ('kind', 'crop_index', 'storage_path', 'sha256')} for row in payload['images']],
-	}
-	verdict = evaluation.verdict
+	for image in evaluation.images:
+		ctx.put_image(image_path(dataset_id, ctx.run['id'], image), image.data, dataset_id)
 	logger.info(
-		'Dataset evaluation stored',
+		'Dataset evaluation judged',
 		LogContext(
 			category=LogCategory.PROCESS,
 			dataset_id=dataset_id,
 			token=ctx.token,
-			extra={'run_id': ctx.run['id'], 'verdict': verdict.verdict, 'why': verdict.details.get('why')},
+			extra={'run_id': ctx.run['id'], 'verdicts': {j.judge: j.verdict for j in evaluation.judgements}},
 		),
 	)
-	return {
-		# what was judged, read at run time: the ortho may have changed since the run was queued
-		'inputs': identity(ortho.sha256),
-		'evidence': {**evaluation.evidence, 'judged': judged},
-		'coverage': {'crops': len(seen.crops), 'crop_picker': seen.settings['crop_picker']},
-		'cost': evaluation.cost,
-	}
-
-
-def recompute(ctx) -> dict:
-	"""A rule-only run (run.source_run_id): this version's rule over the source run's stored
-	model answers and band check, no model call. It stores only the new rule row;
-	audit.current_assessments adds the source run's model rows to it. The run takes over the
-	source's inputs, evidence and coverage, so it counts as judging the same evidence and the
-	review page finds the crops and images the answers were given on."""
-	config = version_config(ctx)
-	audit = ctx.client.schema('audit')
-	source_id = ctx.run['source_run_id']
-	source = audit.table('runs').select('status, inputs, evidence, coverage').eq('id', source_id).execute().data
-	if not source or source[0]['status'] != 'done':
-		raise ValueError(f'source run {source_id} has not finished; there are no answers to recompute from')
-	rows = (
-		audit.table('assessments')
-		.select('assessor_kind, model, prompt_version, verdict, major_likelihood, modes, details')
-		.eq('run_id', source_id)
-		.is_('crop_id', 'null')
-		.order('id')
-		.execute()
-		.data
-	)
-	verdict = rule_only_verdict(rows, source[0]['evidence'], config['rule_config'])
-	audit.table('assessments').insert(
-		{'check_key': CHECK_KEY, 'dataset_id': ctx.run['dataset_id'], 'run_id': ctx.run['id'], 'layer': LAYER}
-		| verdict.row()
-	).execute()
-	logger.info(
-		'Dataset evaluation recomputed',
-		LogContext(
-			category=LogCategory.PROCESS,
-			dataset_id=ctx.run['dataset_id'],
-			token=ctx.token,
-			extra={'run_id': ctx.run['id'], 'source_run_id': source_id, 'verdict': verdict.verdict},
-		),
-	)
-	return {key: source[0][key] for key in ('inputs', 'evidence', 'coverage')}
+	# what was judged, read at run time: the ortho may have changed since the run was queued
+	return payload(evaluation, seen, dataset_id, ctx.run['id'], identity(ortho.sha256))
 
 
 def tile_of(row: dict) -> Tile:

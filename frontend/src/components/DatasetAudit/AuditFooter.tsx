@@ -12,7 +12,7 @@ interface AuditFooterProps {
 	onSaveAndNext: () => void;
 }
 
-/** Cancel, Save (stores your answers as person rows, then back to the list) and Save & Next (on
+/** Cancel, Save (stores your answers as reviews, then back to the list) and Save & Next (on
  * to the next dataset that needs review). */
 export default function AuditFooter({ nextDatasetId, isSaving, isAOIBusy, onCancel, onSave, onSaveAndNext }: AuditFooterProps) {
 	const nextTip = nextDatasetId !== null ? `Save and go to the next dataset that needs review (#${nextDatasetId})` : "No other dataset needs review";

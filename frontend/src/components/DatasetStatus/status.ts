@@ -171,7 +171,7 @@ export function reviewStatus(dataset: ContributorDataset): ReviewOutcome {
   switch (dataset.audit_decision) {
     case "exclude":
       return { kind: "excluded", label: "Excluded from public map", color: AMBER };
-    case "ok":
+    case "keep":
       return { kind: "accepted", label: "Reviewed · accepted", color: GREEN };
     default:
       return { kind: "none", label: "Not yet reviewed", color: SLATE };

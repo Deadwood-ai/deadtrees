@@ -14,7 +14,7 @@ const row = (id: number, result: Partial<IAuditDatasetResult> | null, over: Part
 });
 
 const rows = [
-	row(1, { evaluation_decision: "ok", georef_status: "estimated", date_replace: false, deadwood_total: 10, deadwood_major: 0 }),
+	row(1, { evaluation_decision: "keep", georef_status: "estimated", date_replace: false, deadwood_total: 10, deadwood_major: 0 }),
 	row(2, { review_required: ["evaluation", "georef"], georef_status: "needs_review", deadwood_total: 10, deadwood_major: 5, in_benchmark: true }, { reviewers: ["a@x.org"] }),
 	row(3, { evaluation_decision: "exclude", date_replace: true, is_processing_done: false, current_status: "cog_processing" }, { flags: 1 }),
 	row(4, null, { reference: true, dataset: { id: 4, admin_level_1: "Spain" } as IAuditListRow["dataset"] }),

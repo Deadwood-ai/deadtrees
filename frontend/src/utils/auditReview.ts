@@ -1,25 +1,21 @@
 /** What the Audit Review page says about a dataset and what Save stores: each step's status from
- * audit.dataset_results, the "Review required for …" line, and the reviewer's answers as person
- * rows (docs/audit-checks.md). Checks report output values; only the dataset evaluation has a
- * verdict (OK or Exclude). */
+ * audit.dataset_outcomes, the "Review required for …" line, and the reviewer's answers as dataset
+ * reviews (docs/audit-checks.md). Checks report output values; only the dataset evaluation has a
+ * decision (OK or Exclude). */
 
 import type {
   AuditCheckKey,
-  AuditVerdict,
+  DatasetReviewInput,
   EvaluationDecision,
   GeorefStatus,
-  IAuditAnswerInput,
-  IAuditChecks,
   IAuditDatasetResult,
+  ITileCall,
+  PredictionLayer,
   ReviewItem,
 } from "../types/auditChecks";
 import { auditSection, type AuditSectionId, type AuditTone } from "./auditChecks";
-import { layerReview } from "./cropAnswers";
-import { cropCalls, type ILayerCounts } from "./cropCalls";
 
-export type PredictionReviewLayer = "deadwood" | "forest_cover";
-
-/** The review items in page order (audit.dataset_results.review_required keeps the same order).
+/** The review items in page order (audit.dataset_outcomes.review_required keeps the same order).
  * The prediction layers are never one: they are reviewed on a sample. */
 export const REVIEW_ITEMS: ReviewItem[] = ["evaluation", "aoi", "georef", "date"];
 
@@ -30,16 +26,8 @@ export const REVIEW_ITEM_LABELS: Record<ReviewItem, string> = {
   date: "Acquisition date",
 };
 
-export const DECISION_LABELS: Record<EvaluationDecision, string> = { ok: "OK", exclude: "Exclude" };
-const DECISION_VERDICT: Record<EvaluationDecision, AuditVerdict> = { ok: "ok", exclude: "major" };
-const DECISION_TONE: Record<EvaluationDecision, AuditTone> = { ok: "ok", exclude: "bad" };
-
-/** The decision an evaluation verdict stands for: major excludes, ok and the minor of earlier rules
- * ("keep, fix") keep; unsure (or none) decides nothing. */
-export function decisionOfVerdict(verdict: AuditVerdict | null | undefined): EvaluationDecision | null {
-  if (verdict === "major") return "exclude";
-  return verdict === "ok" || verdict === "minor" ? "ok" : null;
-}
+export const DECISION_LABELS: Record<EvaluationDecision, string> = { keep: "OK", exclude: "Exclude" };
+const DECISION_TONE: Record<EvaluationDecision, AuditTone> = { keep: "ok", exclude: "bad" };
 
 export const SOURCE_LABELS: Record<string, string> = { reviewer: "a reviewer", legacy: "an earlier manual audit", check: "the check" };
 
@@ -70,8 +58,17 @@ export function georefText(result: Pick<IAuditDatasetResult, "georef_status" | "
 export const share = (part: number | null | undefined, total: number | null | undefined) =>
   total ? Math.round(((part ?? 0) / total) * 100) : null;
 
-/** A prediction layer's crop counts from the view. */
-export function layerResult(result: IAuditDatasetResult | null | undefined, layer: PredictionReviewLayer) {
+/** A prediction layer's tile counts; ambiguous answers are not in the total. */
+export interface ILayerCounts {
+  total: number;
+  major: number;
+  minor: number;
+  ok: number;
+  ambiguous?: number;
+}
+
+/** A prediction layer's tile counts from the view. */
+export function layerResult(result: IAuditDatasetResult | null | undefined, layer: PredictionLayer): ILayerCounts | null {
   if (!result) return null;
   const total = result[`${layer}_total`];
   if (total == null) return null;
@@ -107,14 +104,14 @@ const REVIEW: IAuditSectionStatus = { label: "Review required", tone: "warn" };
 const NOT_RUN: IAuditSectionStatus = { label: "Not run yet", tone: "todo" };
 
 /** A step's badge: "Review required" while it is open for review, else the check's output. */
-export function sectionStatus(id: AuditSectionId, result: IAuditDatasetResult | null | undefined, open: ReviewItem[]): IAuditSectionStatus {
+export function sectionStatus(id: AuditSectionId, result: IAuditDatasetResult | null | undefined, open: ReviewItem[], checksRun: AuditCheckKey[]): IAuditSectionStatus {
   const item = auditSection(id).reviewItem;
   if (item && open.includes(item)) return REVIEW;
   if (!result) return NOT_RUN;
   switch (id) {
     case "evaluation":
       if (result.evaluation_decision) return { label: DECISION_LABELS[result.evaluation_decision], tone: DECISION_TONE[result.evaluation_decision] };
-      return result.checks_run.includes("dataset_evaluation") ? { label: "Undecided", tone: "warn" } : NOT_RUN;
+      return checksRun.includes("dataset_evaluation") ? { label: "Undecided", tone: "warn" } : NOT_RUN;
     case "aoi":
       return result.aoi_exists ? { label: "Set", tone: "ok" } : { label: "Missing", tone: "todo" };
     case "georef": {
@@ -146,12 +143,16 @@ export function sectionStatus(id: AuditSectionId, result: IAuditDatasetResult | 
   }
 }
 
-/** The reviewer's answers on the page, held in the form until Save. */
-export interface IReviewDraft {
+/** The reviewer's dataset evaluation answer, on the review page or the benchmark labeler. */
+export interface IEvaluationAnswer {
   decision?: EvaluationDecision | null;
   excludeReason?: string | null;
   cogIssue?: boolean;
   thumbnailIssue?: boolean;
+}
+
+/** The reviewer's answers on the page, held in the form until Save. */
+export interface IReviewDraft extends IEvaluationAnswer {
   evaluationNote?: string;
   georefStatus?: "passed" | "not_passed" | null;
   georefNote?: string;
@@ -180,34 +181,32 @@ export function initialDraft(result: IAuditDatasetResult | null | undefined): IR
     evaluationNote: "",
     georefStatus: georef === "passed" || georef === "not_passed" ? georef : null,
     georefNote: "",
-    // AerialStamp dated it again after an override: the reviewer answers afresh
+    // the date advice changed after a reviewer's answer: the reviewer answers afresh
     dateReplace: result?.review_required.includes("date") ? null : (result?.date_replace ?? null),
     dateNote: "",
   };
 }
 
-/** A prediction layer as the reviewer left it on this page. Your crop answers are stored at once;
- * nothing of the layer waits for Save. */
-export interface ILayerReview {
-  /** the layer's counts with your crop answers in place of the check's calls */
-  counts: ILayerCounts;
-  /** the prediction the run judged */
-  labelId: number | null;
-  /** how far you are: the run's crops and the ones you answered */
+/** How far the review of a prediction layer goes: the tiles the check called and the ones a person answered. */
+export interface ILayerProgress {
   crops: number;
   answered: number;
+  /** answered ambiguous: no one can reliably tell; not in the layer's counts */
+  ambiguous: number;
 }
 
-export interface IReviewContext {
-  datasetId: number;
-  result: IAuditDatasetResult | null | undefined;
-  /** the current run of each check that has one */
-  runs: Partial<Record<AuditCheckKey, number>>;
-  layers: Partial<Record<PredictionReviewLayer, ILayerReview>>;
+export function layerProgress(calls: ITileCall[], layer: PredictionLayer): ILayerProgress | null {
+  const own = calls.filter((c) => c.layer === layer);
+  if (!own.length) return null;
+  return {
+    crops: own.length,
+    answered: own.filter((c) => c.by_person).length,
+    ambiguous: own.filter((c) => c.verdict === "ambiguous").length,
+  };
 }
 
 export interface IReviewAnswers {
-  answers: IAuditAnswerInput[];
+  reviews: DatasetReviewInput[];
   /** what keeps Save from storing them, e.g. an exclusion without its reason */
   problems: string[];
   /** the review items the answers settle */
@@ -216,76 +215,54 @@ export interface IReviewAnswers {
 
 const text = (value: string | null | undefined) => value?.trim() || null;
 
-/** The person row of the reviewer's evaluation decision and what keeps it from being stored, or
- * null without a decision. Save stores it, and so does adding the dataset to the benchmark. */
-export function evaluationAnswer(draft: IReviewDraft, ctx: Pick<IReviewContext, "datasetId" | "runs">): { row: IAuditAnswerInput; problems: string[] } | null {
-  const { decision } = draft;
+/** The dataset evaluation review of an answer and what keeps it from being stored, or null
+ * without a decision. Save stores it, and so does adding the dataset to the benchmark. */
+export function evaluationReview(answer: IEvaluationAnswer, datasetId: number, note?: string | null): { review: DatasetReviewInput; problems: string[] } | null {
+  const { decision } = answer;
   if (!decision) return null;
+  const keep = decision === "keep";
   return {
-    row: {
+    review: {
+      dataset_id: datasetId,
       check_key: "dataset_evaluation",
-      dataset_id: ctx.datasetId,
-      run_id: ctx.runs.dataset_evaluation ?? null,
-      layer: "image",
-      verdict: DECISION_VERDICT[decision],
-      reason_code: decision === "exclude" ? (draft.excludeReason ?? null) : null,
-      reason_text: text(draft.evaluationNote),
-      output: { cog_issue: !!draft.cogIssue, thumbnail_issue: !!draft.thumbnailIssue },
+      decision,
+      exclude_reason: keep ? null : (answer.excludeReason ?? null),
+      // both issues are outputs of their own, whatever the decision
+      cog_issue: !!answer.cogIssue,
+      thumbnail_issue: !!answer.thumbnailIssue,
+      note: text(note),
     },
-    problems: decision === "exclude" && !draft.excludeReason ? ["Pick why the dataset is excluded."] : [],
+    problems: keep || answer.excludeReason ? [] : ["Pick why the dataset is excluded."],
   };
 }
 
-/** The person rows Save stores: only what the reviewer answered or changed. A step whose draft
- * still holds the view's value stores nothing, unless it is open for review. */
-export function reviewAnswers(draft: IReviewDraft, ctx: IReviewContext): IReviewAnswers {
-  const { datasetId, result, runs } = ctx;
+/** The reviews Save stores: only what the reviewer answered or changed. A step whose draft still
+ * holds the view's value stores nothing, unless it is open for review. */
+export function reviewAnswers(draft: IReviewDraft, datasetId: number, result: IAuditDatasetResult | null | undefined): IReviewAnswers {
   const start = initialDraft(result);
   const required = new Set(result?.review_required ?? []);
-  const answers: IAuditAnswerInput[] = [];
+  const reviews: DatasetReviewInput[] = [];
   const problems: string[] = [];
   const answered: ReviewItem[] = [];
-  const row = (checkKey: AuditCheckKey, layer: IAuditAnswerInput["layer"], fields: Partial<IAuditAnswerInput>): IAuditAnswerInput => ({
-    check_key: checkKey,
-    dataset_id: datasetId,
-    run_id: runs[checkKey] ?? null,
-    layer,
-    verdict: null,
-    ...fields,
-  });
 
-  const evaluation = evaluationAnswer(draft, ctx);
+  const evaluation = evaluationReview(draft, datasetId, draft.evaluationNote);
   const flagsChanged = !!draft.cogIssue !== !!start.cogIssue || !!draft.thumbnailIssue !== !!start.thumbnailIssue;
   if (evaluation && (draft.decision !== start.decision || flagsChanged || required.has("evaluation"))) {
     problems.push(...evaluation.problems);
-    answers.push(evaluation.row);
+    reviews.push(evaluation.review);
     answered.push("evaluation");
   }
 
   if (draft.georefStatus && (draft.georefStatus !== start.georefStatus || required.has("georef"))) {
-    answers.push(row("georef", "georef", { output: { status: draft.georefStatus }, reason_text: text(draft.georefNote) }));
+    reviews.push({ dataset_id: datasetId, check_key: "georef", georef_status: draft.georefStatus, note: text(draft.georefNote) });
     answered.push("georef");
   }
 
   if (typeof draft.dateReplace === "boolean" && (draft.dateReplace !== start.dateReplace || required.has("date"))) {
     if (draft.dateReplace !== result?.date_replace && !text(draft.dateNote)) problems.push("Say in the note why the date check is overridden.");
-    answers.push(row("acquisition_date", "acquisition_date", { output: { replace: draft.dateReplace }, reason_text: text(draft.dateNote) }));
+    reviews.push({ dataset_id: datasetId, check_key: "acquisition_date", date_replace: draft.dateReplace, note: text(draft.dateNote) });
     answered.push("date");
   }
 
-  return { answers, problems, answered };
-}
-
-/** What Save needs besides the draft (the current runs), and each prediction layer with the review's crop decisions. */
-export function reviewContext(datasetId: number, result: IAuditDatasetResult | null | undefined, checks: IAuditChecks | undefined): IReviewContext {
-  const runs: IReviewContext["runs"] = {};
-  for (const [checkKey, evidence] of Object.entries(checks?.checks ?? {})) if (evidence) runs[checkKey as AuditCheckKey] = evidence.run.id;
-  const layers: IReviewContext["layers"] = {};
-  const prediction = checks?.checks.prediction_quality;
-  if (prediction?.crops.length) {
-    for (const layer of ["forest_cover", "deadwood"] as const) {
-      layers[layer] = layerReview(prediction, cropCalls(prediction, [layer]), layer, checks?.people ?? []);
-    }
-  }
-  return { datasetId, result, runs, layers };
+  return { reviews, problems, answered };
 }

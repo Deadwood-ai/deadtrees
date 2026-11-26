@@ -1,70 +1,45 @@
-import type { AuditLayer, AuditVerdict, IAuditAnswerInput, IAuditAssessment, IAuditCheckEvidence } from "../types/auditChecks";
-import { reviewAnswer } from "./auditChecks";
-import type { ILayerReview } from "./auditReview";
-import { LAYER_MODES, cropFindings, layerCounts, type ICropCall, type PredictionLayer } from "./cropCalls";
+import type { AuditVerdict, ITileJudgement, ITileReview, PredictionLayer, ProblemTag, TileReviewInput } from "../types/auditChecks";
+import { LAYER_MODES, cropFindings } from "./tileFindings";
 
-/** A reviewer's answer to one error type on a crop. Left unanswered, it is saved as no. */
+/** A reviewer's answer to one error type on a tile. Left unanswered, it is saved as no. */
 export type ProblemAnswer = "yes" | "no" | "unsure";
 
-/** A reviewer's answer on one prediction layer of a crop, while they work on it. */
+/** A reviewer's answer on one prediction layer of a tile, while they work on it. */
 export interface ILayerDraft {
 	verdict: AuditVerdict;
 	problems: Partial<Record<string, ProblemAnswer>>;
 }
 
-/** A reviewer's answer on a crop: "can't tell what it shows", or one answer per layer. */
-export type CropDraft = { assessable: false } | { assessable: true; layers: Partial<Record<PredictionLayer, ILayerDraft>> };
-
-/** What the reviewer's draft stores, as person rows (the 581 gold rows' format, scripts/audit_import.py
- * person_rows): the crop's image row (assessable: ok with no tags; can't tell: major, tagged
- * m0_not_assessable), then, when assessable, one row per answered layer with the error types
- * they saw tagged true and the ones they were unsure of in details.unsure_modes. */
-export type CropAnswerRow = Pick<IAuditAnswerInput, "layer" | "verdict" | "modes" | "details">;
-
-/** The reviewer's starting point on a crop's layer: the error types a model saw ticked yes, and
- * the verdict major where the check counted the crop major, minor where a model saw a problem,
- * else ok. */
-export function suggestedLayer(automated: IAuditAssessment[], cropId: number, layer: PredictionLayer, checkMajor: boolean | null): ILayerDraft {
-	const findings = cropFindings({ automated }, cropId, layer);
+/** The reviewer's starting point on a tile's layer: the error types a model saw ticked yes, and
+ * the verdict major where the check's call is major, minor where a model saw a problem, else ok. */
+export function suggestedLayer(judgements: ITileJudgement[], tileId: number, layer: PredictionLayer, callMajor: boolean | null): ILayerDraft {
+	const findings = cropFindings(judgements, tileId, layer, null);
 	const seen = new Set(findings.flatMap((f) => f.issues.map((i) => i.key)));
 	const problems: ILayerDraft["problems"] = {};
 	for (const mode of LAYER_MODES[layer]) if (seen.has(mode)) problems[mode] = "yes";
-	const modelMajor = checkMajor ?? findings.some((f) => f.verdict === "major");
-	const verdict: AuditVerdict = modelMajor ? "major" : Object.keys(problems).length ? "minor" : "ok";
+	const major = callMajor ?? findings.some((f) => f.verdict === "major");
+	const verdict: AuditVerdict = major ? "major" : Object.keys(problems).length ? "minor" : "ok";
 	return { verdict, problems };
 }
 
-/** A saved person row back as a draft: its tags yes, its unsure_modes unsure. */
-export function savedLayer(row: IAuditAssessment): ILayerDraft {
+/** A saved review back as a draft: its tags yes or unsure. */
+export function savedLayer(review: Pick<ITileReview, "verdict" | "problems">): ILayerDraft {
 	const problems: ILayerDraft["problems"] = {};
-	for (const [mode, tag] of Object.entries(row.modes ?? {})) if (tag === true) problems[mode] = "yes";
-	const unsure = Array.isArray(row.details?.unsure_modes) ? (row.details.unsure_modes as unknown[]) : [];
-	for (const mode of unsure) if (typeof mode === "string") problems[mode] = "unsure";
-	return { verdict: row.verdict ?? "ok", problems };
+	for (const [mode, tag] of Object.entries(review.problems ?? {})) problems[mode] = tag === true ? "yes" : "unsure";
+	return { verdict: review.verdict, problems };
 }
 
-/** The reviewer said they cannot tell what the crop shows: their latest image row on it. */
-export const cantTell = (imageRow: IAuditAssessment | null | undefined) => imageRow?.verdict === "major";
-
-/** The person rows a draft stores (CropAnswerRow). */
-export function cropAnswerRows(draft: CropDraft): CropAnswerRow[] {
-	if (!draft.assessable) return [{ layer: "image", verdict: "major", modes: { m0_not_assessable: true } }];
-	const layers = Object.entries(draft.layers) as [PredictionLayer, ILayerDraft][];
-	return [
-		{ layer: "image", verdict: "ok", modes: {} },
-		...layers.map(([layer, { verdict, problems }]): CropAnswerRow => {
-			const modes: Record<string, true> = {};
-			const unsure: string[] = [];
-			for (const mode of LAYER_MODES[layer]) {
-				if (problems[mode] === "yes") modes[mode] = true;
-				if (problems[mode] === "unsure") unsure.push(mode);
-			}
-			return { layer: layer as AuditLayer, verdict, modes, details: unsure.length ? { unsure_modes: unsure } : {} };
-		}),
-	];
+/** What a draft stores on the layer: its verdict and the error types seen (true) or unsure. */
+export function draftReview(draft: ILayerDraft, layer: PredictionLayer): Pick<TileReviewInput, "verdict" | "problems"> {
+	const problems: Record<string, ProblemTag> = {};
+	for (const mode of LAYER_MODES[layer]) {
+		if (draft.problems[mode] === "yes") problems[mode] = true;
+		if (draft.problems[mode] === "unsure") problems[mode] = "unsure";
+	}
+	return { verdict: draft.verdict, problems };
 }
 
-/** A layer draft after the reviewer answers one error type: a yes on an ok crop makes it minor. */
+/** A layer draft after the reviewer answers one error type: a yes on an ok tile makes it minor. */
 export function withProblem(draft: ILayerDraft, mode: string, answer: ProblemAnswer): ILayerDraft {
 	const problems = { ...draft.problems, [mode]: answer };
 	return { verdict: answer === "yes" && draft.verdict === "ok" ? "minor" : draft.verdict, problems };
@@ -75,32 +50,4 @@ export function withVerdict(draft: ILayerDraft, verdict: AuditVerdict): ILayerDr
 	if (verdict !== "ok") return { ...draft, verdict };
 	const problems = Object.fromEntries(Object.entries(draft.problems).map(([mode, a]) => [mode, a === "yes" ? "no" : a]));
 	return { verdict, problems };
-}
-
-/** The review's decision on a crop's layer for the layer rating: "unsure" when the reviewer could
- * not tell what the crop shows (it does not count), null when nobody answered. */
-export function reviewCropVerdict(people: IAuditAssessment[], runId: number, layer: AuditLayer) {
-	return (cropId: number): AuditVerdict | null => {
-		const target = (l: AuditLayer) => ({ checkKey: "prediction_quality" as const, layer: l, cropId });
-		if (cantTell(reviewAnswer(people, runId, target("image")))) return "unsure";
-		return reviewAnswer(people, runId, target(layer))?.verdict ?? null;
-	};
-}
-
-/** A prediction layer as you left it on the page: the counts your crop answers give the layer and
- * how many crops you answered. */
-export function layerReview(
-	evidence: IAuditCheckEvidence,
-	calls: Map<number, ICropCall>,
-	layer: PredictionLayer,
-	people: IAuditAssessment[],
-): ILayerReview {
-	const runId = evidence.run.id;
-	const mine = reviewCropVerdict(people, runId, layer);
-	return {
-		counts: layerCounts(evidence, calls, mine),
-		labelId: evidence.automated.find((r) => r.layer === layer && r.label_id !== null)?.label_id ?? null,
-		crops: evidence.crops.length,
-		answered: evidence.crops.filter((c) => mine(c.id) !== null).length,
-	};
 }

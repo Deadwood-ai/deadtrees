@@ -1,24 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { Button, Segmented, Slider, Tag } from "antd";
 import { CheckOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
-import type { AuditLayer, AuditVerdict, IAuditAssessment, IAuditImage } from "../../../types/auditChecks";
+import type { AuditVerdict, IAuditImage, ITileJudgement, ITileReview, PredictionLayer, TileReviewInput } from "../../../types/auditChecks";
 import type { CropImageKind } from "../../../utils/auditChecks";
 import { LAYER_LABELS, stepCrop } from "../../../utils/auditChecks";
-import { LAYER_MODES, cropFindings, type PredictionLayer } from "../../../utils/cropCalls";
-import {
-	cantTell,
-	cropAnswerRows,
-	savedLayer,
-	suggestedLayer,
-	withProblem,
-	withVerdict,
-	type CropAnswerRow,
-	type CropDraft,
-	type ILayerDraft,
-	type ProblemAnswer,
-} from "../../../utils/cropAnswers";
+import { LAYER_MODES, cropFindings } from "../../../utils/tileFindings";
+import { draftReview, savedLayer, suggestedLayer, withProblem, withVerdict, type ILayerDraft, type ProblemAnswer } from "../../../utils/cropAnswers";
 import { useAuditShortcuts } from "../checks/useAuditShortcuts";
-import CropAnswerPanel, { PREDICTION_LABELS } from "./CropAnswerPanel";
+import CropAnswerPanel, { OVERLAY, PREDICTION_LABELS } from "./CropAnswerPanel";
 import CropImage from "./CropImage";
 import CropImages from "./CropImages";
 import { usePredictionOpacity } from "./usePredictionOpacity";
@@ -27,7 +16,7 @@ import type { IBenchmarkToggle } from "../benchmark/useBenchmarkToggle";
 /** A crop to review, in review order. */
 export interface ICropReviewItem {
 	id: number;
-	/** the check's call on the crop; null when it has none (or the review is blind) */
+	/** the call on the tile (audit.tile_calls); null when it has none (or the review is blind) */
 	verdict: AuditVerdict | null;
 }
 
@@ -37,19 +26,17 @@ export interface CropReviewerProps {
 	layer: PredictionLayer;
 	/** the crop's stored image: raw, or a layer's prediction over it */
 	imageOf: (cropId: number, kind: CropImageKind) => IAuditImage | null;
-	/** the models' rows: what they saw, and the problems that come ticked */
-	automated: IAuditAssessment[];
-	/** the deciding model (a model name prefix): its verdict is the crop's call, the others are greyed */
-	decider?: string;
-	/** the answer a crop has on a layer ("image" holds "can't tell"): in the audit your latest row,
-	 * in the benchmark the crop's label */
-	mine: (cropId: number, layer: AuditLayer) => IAuditAssessment | null;
-	/** whether the check counted the crop major: then major is the suggestion */
-	checkMajor?: (cropId: number) => boolean | null;
+	/** the models' answers: what they saw, and the problems that come ticked */
+	judgements: ITileJudgement[];
+	/** the answer a tile's call rests on (audit.tile_calls.judgement_id): marked as deciding, the others are greyed */
+	decidingJudgement?: (cropId: number) => number | null;
+	/** the answer a tile has on the layer: in the audit the review its call rests on, in the
+	 * benchmark the tile's label */
+	mine: (cropId: number) => Pick<ITileReview, "verdict" | "problems"> | null;
 	cropId: number | null;
 	onSelectCrop: (cropId: number) => void;
-	/** stores the rows of one crop; false when nothing was saved */
-	onAnswer: (cropId: number, rows: CropAnswerRow[]) => Promise<boolean>;
+	/** stores the answer on one tile, ticked for the layer's benchmark or not; false when nothing was saved */
+	onAnswer: (cropId: number, answer: Pick<TileReviewInput, "verdict" | "problems">, inBenchmark: boolean) => Promise<boolean>;
 	/** Enter once every crop has your answer: the next step */
 	onDone?: () => void;
 	/** B: the crop goes into the layer's benchmark or out of it again (operators) */
@@ -67,10 +54,8 @@ export interface CropReviewerProps {
 	onSkip?: () => void;
 }
 
-const OVERLAY: Record<PredictionLayer, CropImageKind> = { deadwood: "deadwood_overlay", forest_cover: "forest_cover_overlay" };
-
-/** The strip's colours: OK green, minor amber, major red, ambiguous purple; nothing yet grey. */
-const VERDICT_COLOR: Record<AuditVerdict, string> = { ok: "#16a34a", minor: "#f59e0b", major: "#dc2626", ambiguous: "#9333ea", unsure: "#9ca3af" };
+/** The strip's colours: OK green, minor amber, major red, ambiguous purple, can't tell grey; nothing yet light grey. */
+const VERDICT_COLOR: Record<AuditVerdict, string> = { ok: "#16a34a", minor: "#f59e0b", major: "#dc2626", ambiguous: "#9333ea", not_assessable: "#9ca3af" };
 const NO_CALL = "#d1d5db";
 
 /** The crop review: a crop large with its prediction, the strip of all crops, what the models saw
@@ -79,36 +64,38 @@ const NO_CALL = "#d1d5db";
  * V side by side, - + prediction opacity (also [ ]), ↑ ↓ error type, Y N U yes no unsure, 1 2 3 4 decision and save,
  * Enter save and on, B benchmark in or out, M map. */
 export default function CropReviewer(props: CropReviewerProps) {
-	const { crops, layer, imageOf, automated, decider, mine, checkMajor, cropId, onSelectCrop, onAnswer, onDone, benchmark, onShowMap, header, active, disabled, blind, onSkip } =
-		props;
+	const { crops, layer, imageOf, judgements, decidingJudgement, mine, cropId, onSelectCrop, onAnswer, onDone, benchmark, onShowMap, header, active, disabled, blind, onSkip } = props;
 	const [sideBySide, setSideBySide] = useState(true);
 	const [showPrediction, setShowPrediction] = useState(true);
 	const { opacity, setOpacity, weaker, stronger } = usePredictionOpacity();
 	const [saving, setSaving] = useState(false);
 	// what you changed on a crop and not saved yet
-	const [edits, setEdits] = useState<Map<number, CropDraft>>(new Map());
+	const [edits, setEdits] = useState<Map<number, ILayerDraft>>(new Map());
 	const [focusIndex, setFocusIndex] = useState(0);
 
 	const index = crops.findIndex((c) => c.id === cropId);
 	const crop = index >= 0 ? crops[index] : null;
-	const answered = (id: number) => cantTell(mine(id, "image")) || !!mine(id, layer);
+	const answered = (id: number) => !!mine(id);
 
 	// the error types the arrow keys walk through
 	const problems: readonly string[] = LAYER_MODES[layer];
 	const focus = problems[Math.min(focusIndex, problems.length - 1)];
 
-	/** Your answer on a crop: what you saved, else the suggestion. */
-	const savedOrSuggested = (id: number): CropDraft => {
-		const row = mine(id, layer);
-		return { assessable: true, layers: { [layer]: row ? savedLayer(row) : suggestedLayer(automated, id, layer, checkMajor?.(id) ?? null) } };
+	/** The starting point on a tile: the models' findings, major where the call is major. */
+	const suggested = (id: number): ILayerDraft => {
+		const call = crops.find((c) => c.id === id)?.verdict;
+		return suggestedLayer(judgements, id, layer, call ? call === "major" : null);
 	};
-	/** Your answer on a crop as it stands: what you changed, else "can't tell", else the layer. */
-	const draftOf = (id: number): CropDraft => edits.get(id) ?? (cantTell(mine(id, "image")) ? { assessable: false } : savedOrSuggested(id));
+	/** Your answer on a tile as it stands: what you changed, else what was saved, else the suggestion. */
+	const draftOf = (id: number): ILayerDraft => {
+		const saved = mine(id);
+		return edits.get(id) ?? (saved ? savedLayer(saved) : suggested(id));
+	};
 	const draft = crop ? draftOf(crop.id) : null;
-	const layerDraft: ILayerDraft = (draft?.assessable && draft.layers[layer]) || { verdict: "ok", problems: {} };
-	const edit = (change: (d: ILayerDraft) => ILayerDraft): CropDraft | null => {
+	const layerDraft: ILayerDraft = draft ?? { verdict: "ok", problems: {} };
+	const edit = (change: (d: ILayerDraft) => ILayerDraft): ILayerDraft | null => {
 		if (!crop || disabled) return null;
-		const next: CropDraft = { assessable: true, layers: { [layer]: change(layerDraft) } };
+		const next = change(layerDraft);
 		setEdits((m) => new Map(m).set(crop.id, next));
 		return next;
 	};
@@ -129,11 +116,11 @@ export default function CropReviewer(props: CropReviewerProps) {
 		return null;
 	};
 
-	/** Stores a crop's answer; false when nothing was saved. */
-	const store = async (answer: CropDraft | null = draft) => {
+	/** Stores a tile's answer; false when nothing was saved. */
+	const store = async (answer: ILayerDraft | null = draft, inBenchmark = false) => {
 		if (!crop || !answer || disabled || saving) return false;
 		setSaving(true);
-		const saved = await onAnswer(crop.id, cropAnswerRows(answer)).finally(() => setSaving(false));
+		const saved = await onAnswer(crop.id, draftReview(answer, layer), inBenchmark).finally(() => setSaving(false));
 		if (saved)
 			setEdits((m) => {
 				const rest = new Map(m);
@@ -143,31 +130,28 @@ export default function CropReviewer(props: CropReviewerProps) {
 		return saved;
 	};
 	/** Saves a crop's answer and goes to the next crop without one (or the next step). */
-	const save = async (answer: CropDraft | null = draft) => {
+	const save = async (answer: ILayerDraft | null = draft) => {
 		if (!(await store(answer))) return;
 		// after the last crop without your answer, stay: Enter then goes on to the next step
 		const next = nextOpen();
 		if (next !== null) goTo(next);
 	};
-	/** B: the crop goes into the benchmark labeled with your answer, which is saved first when it is
-	 * not yet, or out of it again. */
+	/** B: the tile goes into the benchmark, your answer stored as its label, or out of it again. */
 	const toggleBenchmark = async () => {
 		if (!benchmark || !crop) return;
-		if (!benchmark.isMember(crop.id) && (!answered(crop.id) || edits.has(crop.id)) && !(await store())) return;
-		await benchmark.toggle(crop.id);
+		await benchmark.toggle(crop.id, () => store(draft, true));
 	};
 	/** A crop's colour in the strip: your answer, else the check's call (the deciding model's
 	 * verdict). Blind: nothing before your answer. */
 	const stripColor = (id: number): string => {
-		const own = mine(id, layer);
-		if (cantTell(mine(id, "image"))) return VERDICT_COLOR.unsure;
-		if (own?.verdict) return VERDICT_COLOR[own.verdict];
+		const own = mine(id);
+		if (own) return VERDICT_COLOR[own.verdict];
 		const call = blind ? null : crops.find((c) => c.id === id)?.verdict;
 		return call ? VERDICT_COLOR[call] : NO_CALL;
 	};
 	// one crop alone (a random benchmark tile) has nothing to step through
 	const several = crops.length > 1;
-	const benchmarkName = `${LAYER_LABELS[layer]!.toLowerCase()} benchmark`;
+	const benchmarkName = `${LAYER_LABELS[layer].toLowerCase()} benchmark`;
 	/** A verdict saves the crop. */
 	const verdictKey = (verdict: AuditVerdict) => () => void save(edit((d) => withVerdict(d, verdict)));
 	const problemKey = (answer: ProblemAnswer) => () => {
@@ -316,18 +300,18 @@ export default function CropReviewer(props: CropReviewerProps) {
 				</div>
 			</div>
 			<aside className="flex w-80 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-gray-100 pl-3">
-				{crop && draft && !draft.assessable && (
+				{crop && draft?.verdict === "not_assessable" && (
 					<div className="rounded bg-amber-50 p-2 text-xs text-amber-900">
 						You said you can't tell what this crop shows. It does not count for the layer.{" "}
-						<Button size="small" type="link" className="!p-0" onClick={() => setEdits((m) => new Map(m).set(crop.id, savedOrSuggested(crop.id)))}>
+						<Button size="small" type="link" className="!p-0" onClick={() => setEdits((m) => new Map(m).set(crop.id, suggested(crop.id)))}>
 							Answer it after all
 						</Button>
 					</div>
 				)}
-				{crop && draft?.assessable && (
+				{crop && draft && draft.verdict !== "not_assessable" && (
 					<CropAnswerPanel
 						layer={layer}
-						findings={cropFindings({ automated }, crop.id, layer, decider)}
+						findings={cropFindings(judgements, crop.id, layer, decidingJudgement?.(crop.id) ?? null)}
 						draft={layerDraft}
 						focus={focus}
 						onFocus={(mode) => setFocusIndex(problems.indexOf(mode))}

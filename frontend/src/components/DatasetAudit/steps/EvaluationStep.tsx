@@ -1,75 +1,46 @@
-import { Form, Image, Input, Radio, Tag, message } from "antd";
-import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
-import type { EvaluationDecision, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
-import { EXCLUDE_REASONS, automatedRows, reviewAnswer } from "../../../utils/auditChecks";
-import { modelName } from "../../../utils/cropCalls";
-import { DECISION_LABELS, decisionOfVerdict, evaluationAnswer, type IReviewContext, type IReviewDraft } from "../../../utils/auditReview";
+import { Form, Image, Input, Radio, Tag } from "antd";
+import type { IAuditChecks, EvaluationDecision } from "../../../types/auditChecks";
+import { EXCLUDE_REASONS, judgeName, judgementText } from "../../../utils/auditChecks";
+import { evaluationReview, type IReviewDraft } from "../../../utils/auditReview";
 import BenchmarkToggle from "../benchmark/BenchmarkToggle";
 import ChoiceRow, { YES_NO } from "./ChoiceRow";
 import CogFacts, { type CogFactsProps } from "./CogFacts";
 
 interface EvaluationStepProps {
-	/** the dataset evaluation's current run, when it has one */
-	evidence: IAuditCheckEvidence | undefined;
-	people: IAuditAssessment[];
+	datasetId: number;
+	/** the dataset evaluation's current run and what each model said, when it has run */
+	checks: IAuditChecks | undefined;
 	cog: CogFactsProps;
 	thumbnailUrl: string | null;
-	/** the dataset and its current runs, for the benchmark label */
-	review: Pick<IReviewContext, "datasetId" | "runs">;
 	/** B adds the dataset to the benchmark while the step is open */
 	active: boolean;
 }
 
-const DECISIONS = (["ok", "exclude"] as EvaluationDecision[]).map((d) => ({ label: DECISION_LABELS[d], value: d }));
-const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+const DECISIONS: { label: string; value: EvaluationDecision }[] = [
+	{ label: "OK", value: "keep" },
+	{ label: "Exclude", value: "exclude" },
+];
 
 /** A small heading inside a step. */
 export const StepHeading = ({ children }: { children: string }) => (
 	<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">{children}</div>
 );
 
-/** One answer of the evaluation in words: "OK", "Exclude (blurry)" or "Unsure". */
-function answerWords(row: IAuditAssessment): string {
-	const decision = decisionOfVerdict(row.verdict);
-	if (!decision) return "Unsure";
-	const reason = decision === "exclude" ? EXCLUDE_REASONS.find((r) => r.code === row.details.reason)?.label : null;
-	return reason ? `${DECISION_LABELS[decision]} (${reason.toLowerCase()})` : DECISION_LABELS[decision];
-}
-
 /** Step 1: the map image (COG) and the thumbnail, each with its facts and an issue (yes or no),
  * then the dataset's decision: OK or Exclude. Both issues are output values, independent of the
  * decision; the form starts with the current values and Save stores what you change. Operators add the
  * dataset to the dataset evaluation benchmark here, labeled with the decision. */
-export default function EvaluationStep({ evidence, people, cog, thumbnailUrl, review, active }: EvaluationStepProps) {
+export default function EvaluationStep({ datasetId, checks, cog, thumbnailUrl, active }: EvaluationStepProps) {
 	const form = Form.useFormInstance<IReviewDraft>();
 	const decision = Form.useWatch("decision", form);
-	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
-	// each model's answer and reasoning; the rule's only where no model answered (e.g. no valid pixels)
-	const automated = automatedRows(evidence, "image");
-	const models = automated.filter((a) => a.assessor_kind === "model");
-	const said = models.length ? models : automated.slice(0, 1);
-	// the model whose answer is the check's decision (the rule row names it, else Haiku); the others are shown only
-	const named = automated.find((a) => a.assessor_kind === "rule")?.details.decider;
-	const decides = (model: string | null) => !!model && model.startsWith(typeof named === "string" ? named : "haiku");
-
-	/** The benchmark keeps your decision as the dataset's label: stored now, unless your latest
-	 * answer on the run already says it. */
-	const storeLabel = async () => {
-		const answer = evaluationAnswer(form.getFieldsValue(true), review);
-		const problem = !answer ? "Pick OK or Exclude first: it is the dataset's label in the benchmark." : answer.problems[0];
-		if (!answer || problem) {
-			message.error(problem);
-			return false;
-		}
-		const mine = reviewAnswer(people, answer.row.run_id ?? undefined, { checkKey: "dataset_evaluation", layer: "image", cropId: null });
-		if (mine && mine.verdict === answer.row.verdict && mine.reason_code === answer.row.reason_code) return true;
-		try {
-			await saveAnswers([answer.row]);
-			return true;
-		} catch {
-			message.error("Your decision was not saved, so the dataset was not added to the benchmark.");
-			return false;
-		}
+	// each model's answer and reasoning; the one the check's call rests on (audit.evaluation_calls) first
+	const deciding = checks?.evaluationJudgementId ?? null;
+	const judgements = [...(checks?.datasetJudgements ?? [])].sort((a, b) => Number(b.id === deciding) - Number(a.id === deciding));
+	/** The dataset's label in the benchmark: your decision as on the page. */
+	const label = () => {
+		const draft = form.getFieldsValue(true) as IReviewDraft;
+		const answer = evaluationReview(draft, datasetId, draft.evaluationNote);
+		return answer ? { review: answer.review, problem: answer.problems[0] } : { problem: "Pick OK or Exclude first: it is the dataset's label in the benchmark." };
 	};
 
 	return (
@@ -101,18 +72,18 @@ export default function EvaluationStep({ evidence, people, cog, thumbnailUrl, re
 			<section data-testid="audit-evaluation-decision">
 				<StepHeading>Decision</StepHeading>
 				<div className="mb-1.5 flex flex-col gap-1 text-xs text-gray-700" data-testid="audit-evaluation-models">
-					{!said.length && "The evaluation has not run yet."}
-					{said.map((row) => (
-						<div key={row.id}>
+					{!judgements.length && (checks?.checks.dataset_evaluation ? "No model answered on this run." : "The evaluation has not run yet.")}
+					{judgements.map((j) => (
+						<div key={j.id}>
 							<b>
-								{row.assessor_kind === "model" ? modelName(row.model) : "Check"}
-								{row.assessor_kind === "model" && decides(row.model) ? " (decides)" : ""}: {answerWords(row)}.
+								{judgeName(j.judge)}
+								{j.id === deciding ? " (decides)" : ""}: {judgementText(j)}.
 							</b>
-							{text(row.details.summary) && <> Reasoning: {text(row.details.summary)}</>}
+							{j.summary?.trim() && <> Reasoning: {j.summary.trim()}</>}
 						</div>
 					))}
 				</div>
-				<BenchmarkToggle datasetId={review.datasetId} beforeAdd={storeLabel} active={active}>
+				<BenchmarkToggle datasetId={datasetId} label={label} active={active}>
 					<div className="flex flex-col gap-1.5">
 						<ChoiceRow label="Decision">
 							<Form.Item name="decision" noStyle>

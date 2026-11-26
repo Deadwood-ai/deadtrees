@@ -15,9 +15,10 @@ routes:
 
 ## Purpose
 
-Verify the Audit Review page (DT-1486): the seven steps in order, each check's map mode,
-answers stored as person rows in `audit.assessments`, the stored images the checks
-judged, the evaluation decision (OK or Exclude) and the list tabs.
+Verify the Audit Review page (DT-1486, data model DT-1606): the seven steps in order, each
+check's map mode, answers stored as reviews in `audit.dataset_human_reviews` and
+`audit.tile_human_reviews`, the stored images the checks judged, the evaluation decision
+(OK or Exclude) and the list tabs.
 
 ## Preconditions
 
@@ -38,8 +39,8 @@ judged, the evaluation decision (OK or Exclude) and the list tabs.
    "The evaluation could not decide", and the decision OK or Exclude (no Fix).
 4. Open `5. Phenology`: the probability and, where the site has a curve, the phenology
    indicator bar with the acquisition date.
-5. Open `7. Deadwood prediction`: the crop review opens on the crop the judges disagree
-   on; answer it with 4 (Ambiguous) and see the counts list it apart.
+5. Open `7. Deadwood prediction`: the crop review opens on the first tile; answer it with
+   4 (Ambiguous) and see "Answered 1 of" and the Ambiguous count in the step.
 6. Pick OK, add a note and save.
 
 ## Expected Observations
@@ -47,23 +48,27 @@ judged, the evaluation decision (OK or Exclude) and the list tabs.
 - Steps read: 1 Dataset evaluation, 2 Area of interest, 3 Georeferencing, 4 Acquisition
   date ("Not run yet" without an estimate), 5 Phenology, 6 Tree cover prediction,
   7 Deadwood prediction.
-- Each answer is a new `audit.assessments` row with `assessor_kind = 'person'` and the
-  current `run_id`; the evaluation answer has verdict `ok` or `major`.
-- Crop answers carry `crop_id` and the layer, stored at once; Ambiguous is verdict
-  `ambiguous`.
+- Save adds one `audit.dataset_human_reviews` row per answered step (`check_key`
+  `dataset_evaluation` with `decision` `keep` or `exclude`, `georef` with
+  `georef_status`); `reviewed_by` is the auditor and `evidence_key` was filled by the
+  database.
+- A tile answer is a new `audit.tile_human_reviews` row, stored at once, with the tile,
+  the layer and the `prediction_label_id` the tile showed; Ambiguous is verdict
+  `ambiguous`. `audit.tile_calls` then shows `by_person` for that tile.
 - Images load through `/api/v1/audit/images/files/<ticket>/...`.
-- `audit.dataset_results` for the dataset reflects the answers: the evaluation decision
-  `ok` and its source `reviewer`, and the answered checks leave `review_required`.
+- `audit.dataset_outcomes` for the dataset reflects the answers: the evaluation decision
+  `keep` and its source `reviewer`, and the answered checks leave `review_required`.
 
 ## Failure Signals
 
 - A section's map mode leaves layers behind after closing it, or the drone opacity
   stays changed.
-- An answer is stored without a run, or on the wrong layer or crop.
+- A tile answer is stored on the wrong layer, tile or prediction.
 - Images are requested from a static path or fail for an auditor.
 
 ## Evidence To Capture
 
 - URL of the section opened.
 - Screenshots of the georef, evaluation and prediction map modes.
-- Focused DB rows from `audit.assessments` and `audit.dataset_results` for the dataset.
+- Focused DB rows from `audit.dataset_human_reviews`, `audit.tile_human_reviews` and
+  `audit.dataset_outcomes` for the dataset.

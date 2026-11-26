@@ -36,7 +36,7 @@ CROP_MPP = 0.05  # grid crops render at 5 cm, or native when coarser
 # The crop centres are found on a sample of the eligible overview pixels.
 MAX_CANDIDATES = 4000
 KMEANS_ROUNDS = 10
-# Below this share of valid overview pixels the COG holds no usable image (empty_cog rule).
+# Below this share of valid overview pixels the COG holds no usable image: no model is asked.
 MIN_VALID_SHARE = 0.005
 # Footprint padding without a mask: solid white or black (the thresholds of utils/nodata.py)
 WHITE_FILL_MIN = 250

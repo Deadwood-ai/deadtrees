@@ -4,7 +4,7 @@
 # Simple Batch Extract Audited Deadwood Labels
 # =============================================================================
 # Extracts all labels from datasets whose Audit Review evaluation decision is
-# ok (audit.evaluation_decisions: a reviewer's, an imported audit's or the check's)
+# ok (audit.evaluation_decisions: a reviewer's, the old manual audit's or the check's)
 # Creates GeoPackages with aoi, deadwood, and forest_cover layers
 # Only processes datasets that don't already have geopackages
 # =============================================================================
@@ -98,7 +98,7 @@ ogr2ogr -f "CSV" \
             d.file_name as dataset_name
           FROM audit.evaluation_decisions e
           JOIN v2_datasets d ON e.dataset_id = d.id
-          WHERE e.decision = 'ok'
+          WHERE e.decision = 'keep'
           ORDER BY e.dataset_id" \
     "$TEMP_CSV" \
     "$DB_CONN"
@@ -183,7 +183,7 @@ while IFS=',' read -r dataset_id dataset_name; do
               FROM v_export_polygon_candidates
               WHERE dataset_id = $dataset_id
                 AND layer_type = 'deadwood'
-                AND audit_decision = 'ok'" \
+                AND audit_decision = 'keep'" \
         "$output_file" \
         "$DB_CONN" 2>/dev/null
 
@@ -205,7 +205,7 @@ while IFS=',' read -r dataset_id dataset_name; do
               FROM v_export_polygon_candidates
               WHERE dataset_id = $dataset_id
                 AND layer_type = 'forest_cover'
-                AND audit_decision = 'ok'" \
+                AND audit_decision = 'keep'" \
         "$output_file" \
         "$DB_CONN" 2>/dev/null
 

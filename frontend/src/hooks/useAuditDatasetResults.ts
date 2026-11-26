@@ -2,9 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { AUDIT_RESULTS_KEY, SCHEMA_NOT_EXPOSED, allRows, audit, withEmails } from "./useAuditChecks";
-import type { IAuditAssessment, IAuditDatasetResult } from "../types/auditChecks";
+import type { IAuditDatasetResult } from "../types/auditChecks";
 
-/** The columns of audit.dataset_results the page reads (all of them, named so a renamed column fails loudly). */
+/** The columns of audit.dataset_outcomes the page reads (all of them, named so a renamed column fails loudly). */
 const RESULT_COLUMNS = [
   "dataset_id",
   "current_status",
@@ -26,7 +26,6 @@ const RESULT_COLUMNS = [
   "date_hdi80_days",
   "date_model_version",
   "date_estimated_at",
-  "date_source",
   "phenology_probability",
   "deadwood_total",
   "deadwood_major",
@@ -37,9 +36,7 @@ const RESULT_COLUMNS = [
   "forest_cover_minor",
   "forest_cover_ok",
   "review_required",
-  "last_reviewed_at",
   "in_benchmark",
-  "checks_run",
 ].join(", ");
 
 export const datasetResultKey = (datasetId: number | undefined) => [...AUDIT_RESULTS_KEY, datasetId];
@@ -54,7 +51,7 @@ export function useAuditDatasetResult(datasetId: number | undefined) {
     queryKey: datasetResultKey(datasetId),
     queryFn: async () => {
       const { data, error } = await audit()
-        .from("dataset_results")
+        .from("dataset_outcomes")
         .select(RESULT_COLUMNS)
         .eq("dataset_id", datasetId!)
         .maybeSingle()
@@ -72,7 +69,7 @@ export interface IAuditResultsList {
   rows: IAuditDatasetResult[];
 }
 
-/** Every dataset's row of audit.dataset_results, read page by page (auditors only). */
+/** Every dataset's row of audit.dataset_outcomes, read page by page (auditors only). */
 export function useAuditDatasetResults() {
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
@@ -82,7 +79,7 @@ export function useAuditDatasetResults() {
       try {
         const rows = await allRows<IAuditDatasetResult>((from, to) =>
           audit()
-            .from("dataset_results")
+            .from("dataset_outcomes")
             .select(RESULT_COLUMNS)
             .order("dataset_id", { ascending: false })
             .range(from, to)
@@ -99,28 +96,20 @@ export function useAuditDatasetResults() {
   });
 }
 
-/** Who gave native answers on each dataset (dataset level), with their emails: the list's
- * "reviewed by" filter. Imported legacy audits are not reviews of this page. */
+/** Who reviewed each dataset (its dataset-level answers), with their emails: the list's
+ * "reviewed by" filter. */
 export function useAuditReviewers() {
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
   return useQuery({
     queryKey: [...AUDIT_RESULTS_KEY, "reviewers"],
     queryFn: async () => {
-      const rows = await allRows<Pick<IAuditAssessment, "id" | "dataset_id" | "assessor_user_id" | "assessor">>((from, to) =>
-        audit()
-          .from("latest_assessments")
-          .select("id, dataset_id, assessor_user_id, assessor")
-          .eq("assessor_kind", "person")
-          .is("crop_id", null)
-          .is("imported_from", null)
-          .order("id")
-          .range(from, to),
+      const rows = await allRows<{ id: number; dataset_id: number; reviewed_by: string | null }>((from, to) =>
+        audit().from("dataset_human_reviews").select("id, dataset_id, reviewed_by").order("id").range(from, to),
       );
-      const named = await withEmails(rows as IAuditAssessment[]);
       const byDataset = new Map<number, Set<string>>();
-      for (const row of named) {
-        const who = row.assessor_email ?? row.assessor_user_id;
+      for (const row of await withEmails(rows)) {
+        const who = row.reviewer_email ?? row.reviewed_by;
         if (who) byDataset.set(row.dataset_id, (byDataset.get(row.dataset_id) ?? new Set()).add(who));
       }
       return byDataset;
@@ -129,4 +118,3 @@ export function useAuditReviewers() {
     staleTime: RESULTS_STALE_MS,
   });
 }
-

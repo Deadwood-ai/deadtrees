@@ -15,26 +15,6 @@ type DatasetDate = {
 const asNumber = (v: number | string | null | undefined) =>
   v === null || v === undefined || v === "" ? null : Number(v);
 
-/** The estimate was assessed against the date the dataset still carries. */
-export function isEstimateCurrent(estimate: IAcquisitionDateEstimate, dataset: DatasetDate): boolean {
-  return (
-    estimate.recorded_year === asNumber(dataset.aquisition_year) &&
-    estimate.recorded_month === asNumber(dataset.aquisition_month) &&
-    estimate.recorded_day === asNumber(dataset.aquisition_day)
-  );
-}
-
-/** The model's suggested date for the dataset page, or null when there is none
- * or the dataset date changed since (for example after an accepted suggestion). */
-export function datasetDateSuggestion(
-  estimate: IAcquisitionDateEstimate | null | undefined,
-  dataset: DatasetDate,
-): { date: string; reason: "missing_month" | "mismatch" } | null {
-  if (!estimate?.suggested_date || !estimate.suggestion_reason) return null;
-  if (!isEstimateCurrent(estimate, dataset)) return null;
-  return { date: estimate.suggested_date, reason: estimate.suggestion_reason };
-}
-
 /** Day-of-year fraction [0, 1) of an ISO date, on the model's 365-bin circle. */
 export function dateToYearFraction(iso: string): number {
   const [y, m, d] = iso.split("-").map(Number);

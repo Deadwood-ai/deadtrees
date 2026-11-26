@@ -1,114 +1,61 @@
 import { describe, expect, it } from "vitest";
-import type { IAuditAssessment } from "../types/auditChecks";
-import { cropAnswerRows, layerReview, reviewCropVerdict, savedLayer, suggestedLayer, withProblem, withVerdict } from "./cropAnswers";
+import type { ITileJudgement } from "../types/auditChecks";
+import { draftReview, savedLayer, suggestedLayer, withProblem, withVerdict } from "./cropAnswers";
 
-const row = (overrides: Partial<IAuditAssessment>): IAuditAssessment =>
-	({
-		id: 1,
-		check_key: "prediction_quality",
-		dataset_id: 7,
-		crop_id: 3,
-		run_id: 10,
-		layer: "deadwood",
-		label_id: null,
-		assessor_kind: "model",
-		assessor_user_id: null,
-		model: "luna",
-		prompt_version: null,
-		assessor: "luna",
-		verdict: "minor",
-		reason_code: null,
-		reason_text: null,
-		details: {},
-		...overrides,
-	}) as IAuditAssessment;
+const judgement = (over: Partial<ITileJudgement>): ITileJudgement => ({
+	id: 1,
+	run_id: 10,
+	tile_id: 3,
+	layer: "deadwood",
+	judge: "luna",
+	verdict: "minor",
+	problems: null,
+	summary: null,
+	...over,
+});
 
-describe("cropAnswerRows: the gold rows' format", () => {
-	it("stores an image row, then the layer with the problems you saw tagged and the unsure ones in details", () => {
-		const rows = cropAnswerRows({
-			assessable: true,
-			layers: { deadwood: { verdict: "minor", problems: { m1_dead_missed: "yes", m4_dw_on_lying_wood: "unsure", m2_dw_on_live_vegetation: "no" } } },
-		});
-		expect(rows).toEqual([
-			{ layer: "image", verdict: "ok", modes: {} },
-			{ layer: "deadwood", verdict: "minor", modes: { m1_dead_missed: true }, details: { unsure_modes: ["m4_dw_on_lying_wood"] } },
-		]);
+describe("draftReview: what a tile review stores", () => {
+	it("keeps the verdict and tags the problems you saw true, the unsure ones unsure", () => {
+		const review = draftReview({ verdict: "minor", problems: { m1_dead_missed: "yes", m4_dw_on_lying_wood: "unsure", m2_dw_on_live_vegetation: "no" } }, "deadwood");
+		expect(review).toEqual({ verdict: "minor", problems: { m1_dead_missed: true, m4_dw_on_lying_wood: "unsure" } });
 	});
 
-	it("stores can't tell as the image row only: major, tagged not assessable", () => {
-		expect(cropAnswerRows({ assessable: false })).toEqual([{ layer: "image", verdict: "major", modes: { m0_not_assessable: true } }]);
+	it("leaves out problems of the other layer", () => {
+		expect(draftReview({ verdict: "ok", problems: { m5_fc_trees_missed: "yes" } }, "deadwood").problems).toEqual({});
 	});
 });
 
 describe("suggestedLayer", () => {
 	const models = [
-		row({ modes: { m1_dead_missed: { likelihood: 80, area_pct: 12 }, m3_dw_on_non_vegetation: { likelihood: 20 } } }),
-		row({ id: 2, model: "haiku", verdict: "ok", modes: { m4_dw_on_lying_wood: { likelihood: 55 } } }),
-		row({ id: 3, crop_id: 9, modes: { m2_dw_on_live_vegetation: { likelihood: 99 } } }),
+		judgement({ problems: { m1_dead_missed: { likelihood: 80, area_pct: 12 }, m3_dw_on_non_vegetation: { likelihood: 20 } } }),
+		judgement({ id: 2, judge: "haiku", verdict: "ok", problems: { m4_dw_on_lying_wood: { likelihood: 55 } } }),
+		judgement({ id: 3, tile_id: 9, problems: { m2_dw_on_live_vegetation: { likelihood: 99 } } }),
 	];
 
-	it("ticks what a model saw (50 or more) and takes major from the check", () => {
+	it("ticks what a model saw (50 or more) and takes major from the call", () => {
 		expect(suggestedLayer(models, 3, "deadwood", true)).toEqual({ verdict: "major", problems: { m1_dead_missed: "yes", m4_dw_on_lying_wood: "yes" } });
 	});
 
-	it("is minor when a model saw a problem the check did not count major, ok when none saw one", () => {
+	it("is minor when a model saw a problem the call is not major for, ok when none saw one", () => {
 		expect(suggestedLayer(models, 3, "deadwood", false).verdict).toBe("minor");
 		expect(suggestedLayer(models, 3, "forest_cover", false)).toEqual({ verdict: "ok", problems: {} });
 	});
 });
 
 describe("editing a layer answer", () => {
-	it("reads a saved row back", () => {
-		const saved = row({ assessor_kind: "person", verdict: "major", modes: { m1_dead_missed: true }, details: { unsure_modes: ["m7_dw_artifact"] } });
-		expect(savedLayer(saved)).toEqual({ verdict: "major", problems: { m1_dead_missed: "yes", m7_dw_artifact: "unsure" } });
+	it("reads a saved review back", () => {
+		expect(savedLayer({ verdict: "major", problems: { m1_dead_missed: true, m7_dw_artifact: "unsure" } })).toEqual({
+			verdict: "major",
+			problems: { m1_dead_missed: "yes", m7_dw_artifact: "unsure" },
+		});
 	});
 
-	it("makes an ok crop minor when you see a problem, and ok clears the problems you saw", () => {
+	it("makes an ok tile minor when you see a problem, and ok clears the problems you saw", () => {
 		const minor = withProblem({ verdict: "ok", problems: {} }, "m1_dead_missed", "yes");
 		expect(minor).toEqual({ verdict: "minor", problems: { m1_dead_missed: "yes" } });
 		expect(withVerdict({ ...minor, problems: { m1_dead_missed: "yes", m7_dw_artifact: "unsure" } }, "ok")).toEqual({
 			verdict: "ok",
 			problems: { m1_dead_missed: "no", m7_dw_artifact: "unsure" },
 		});
-	});
-});
-
-describe("reviewCropVerdict", () => {
-	const person = (layer: IAuditAssessment["layer"], verdict: IAuditAssessment["verdict"], crop_id = 3) =>
-		row({ assessor_kind: "person", assessor_user_id: "me", model: null, layer, verdict, crop_id });
-
-	it("gives your layer verdict, and unsure (not counted) when you can't tell what the crop shows", () => {
-		const mine = reviewCropVerdict([person("deadwood", "major"), person("image", "major", 4), person("deadwood", "ok", 4)], 10, "deadwood");
-		expect(mine(3)).toBe("major");
-		expect(mine(4)).toBe("unsure");
-		expect(mine(5)).toBeNull();
-	});
-});
-
-describe("layerReview", () => {
-	const person = (layer: IAuditAssessment["layer"], verdict: IAuditAssessment["verdict"], crop_id: number | null) =>
-		row({ assessor_kind: "person", assessor_user_id: "me", model: null, layer, verdict, crop_id });
-	const crop = (id: number) => ({ id, ortho_sha256: "x", crop_sets: ["exclude"], geometry: { type: "Polygon" as const, coordinates: [] } });
-	const evidence = {
-		run: { id: 10, check_key: "prediction_quality" as const, inputs: {}, evidence: {} },
-		automated: [row({ crop_id: 1, label_id: 55 })],
-		crops: [crop(1), crop(2), crop(3)],
-		images: [],
-	};
-	const calls = new Map([
-		[1, { verdict: "minor" as const }],
-		[2, { verdict: "ok" as const }],
-		[3, { verdict: "major" as const }],
-	]);
-
-	it("counts the layer with your crop answers and says how far you are", () => {
-		const review = layerReview(evidence, calls, "deadwood", [person("deadwood", "ok", 1)]);
-		expect(review).toEqual({ counts: { total: 3, major: 1, minor: 0, ok: 2, ambiguous: 0 }, labelId: 55, crops: 3, answered: 1 });
-	});
-
-	it("counts your ambiguous crops apart, outside the total", () => {
-		const review = layerReview(evidence, calls, "deadwood", [person("deadwood", "ambiguous", 3)]);
-		expect(review.counts).toEqual({ total: 2, major: 0, minor: 1, ok: 1, ambiguous: 1 });
-		expect(review.answered).toBe(1);
 	});
 });

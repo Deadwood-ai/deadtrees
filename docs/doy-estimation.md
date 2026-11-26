@@ -101,8 +101,8 @@ Calibrated on out-of-fold predictions of the deployed recipes
 ## Audit Review output
 
 `audit.acquisition_date_output_v1(v2_acquisition_date_estimates)` turns the stored
-estimate into the Audit Review's output (`audit.dataset_results`,
-`docs/audit-checks.md`), computed live:
+estimate into the Audit Review's output (`audit.dataset_outcomes`,
+`docs/audit-checks.md`), computed when it is read:
 
 - **Confident**: one mode and an 80 % range of at most 90 days (the accept
   recommendation above).
@@ -112,13 +112,15 @@ estimate into the Audit Review's output (`audit.dataset_results`,
 - Also reported: the predicted date, the 80 % range in days, the modes, the model
   version and when it was estimated.
 
-The date never needs review. A reviewer may override replace yes or no with a note (a
-person row with output `{"replace": bool}` and `reason_text`); the latest reviewer
-answer wins. Nothing writes `v2_datasets`: the stage stores estimates only, without
-audit suggestions or decisions (`DOY_AUTO_DECIDE` is gone). The earlier
-`acquisition_date_decisions` stay as read-only history, and a dataset whose date was
-replaced by an accepted suggestion keeps `aquisition_date_source = 'model_suggestion'`
-until its date is edited by hand.
+A reviewer may override replace yes or no with a note (an `audit.dataset_human_reviews`
+row, check `acquisition_date`, with `date_replace`); the newest answer wins, and the
+suggested date of the dataset page includes it. The answer records the advice it was
+given on (replace or keep): it keeps counting after a rerun as long as the advice is the
+same, and only an estimate whose advice flips asks for a date review again. Nothing
+writes `v2_datasets`: the stage stores the estimate only, without audit rows, suggestions
+or decisions. The earlier `acquisition_date_decisions` stay as read-only history, and a
+dataset whose date was replaced by an accepted suggestion keeps
+`aquisition_date_source = 'model_suggestion'` until its date is edited by hand.
 
 ## Rerun for all datasets
 
@@ -130,4 +132,4 @@ python3 scripts/requeue_doy_estimation.py --all              # everything with a
 ```
 
 Queued at priority 1 (behind uploads), task `doy_estimation_v1` only. A rerun
-replaces the estimate, and with it the Audit Review output.
+replaces the estimate, and with it the Audit Review output at once; no VLM check runs.

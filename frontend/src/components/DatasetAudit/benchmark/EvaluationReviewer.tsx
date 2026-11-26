@@ -2,38 +2,44 @@ import { useState } from "react";
 import { Button, Checkbox, Input, Tag } from "antd";
 import { useAuditImageAccess } from "../../../hooks/useAuditChecks";
 import { auditImageUrl } from "../../../api/auditImages";
-import type { AuditVerdict, IAuditAnswerInput, IAuditAssessment, IAuditImage } from "../../../types/auditChecks";
-import { EVALUATION_FLAGS, EXCLUDE_REASONS, evaluationAnswerText, keepsDataset, type EvaluationFlag } from "../../../utils/auditChecks";
-import { emptyEvaluationDraft, evaluationAnswerRow, evaluationDraftFromRow, type IEvaluationDraft } from "../../../utils/benchmarkLabels";
-import { modeScore } from "../../../utils/cropCalls";
+import type { DatasetReviewInput, IAuditImage, IDatasetJudgement, IDatasetReview, EvaluationDecision } from "../../../types/auditChecks";
+import { EVALUATION_FLAGS, EXCLUDE_REASONS, judgeName, judgementText, type EvaluationFlag } from "../../../utils/auditChecks";
+import { evaluationReview, type IEvaluationAnswer } from "../../../utils/auditReview";
 import { useAuditShortcuts, type AuditKeyMap } from "../checks/useAuditShortcuts";
 import LabeledBy from "./LabeledBy";
 
 const REASONS = EXCLUDE_REASONS;
 // q w e r t i o: the old labeler's row, without Y and U (yes and unsure elsewhere in the audit)
 const REASON_KEYS = ["q", "w", "e", "r", "t", "i", "o"];
-const FLAG_KEYS: Record<EvaluationFlag, string> = { cog_issue: "a", thumbnail_issue: "s", reprocess: "d" };
-// no 2 any more: it was "keep, fix", and a habit must not exclude
-const CALLS: { verdict: AuditVerdict; label: string; key: string }[] = [
-	{ verdict: "ok", label: "OK", key: "1" },
-	{ verdict: "major", label: "Exclude", key: "2" },
-	{ verdict: "unsure", label: "Unsure", key: "U" },
+const FLAG_KEYS: Record<EvaluationFlag, string> = { cog_issue: "a", thumbnail_issue: "s" };
+const FLAG_FIELD: Record<EvaluationFlag, "cogIssue" | "thumbnailIssue"> = { cog_issue: "cogIssue", thumbnail_issue: "thumbnailIssue" };
+const CALLS: { decision: EvaluationDecision; label: string; key: string }[] = [
+	{ decision: "keep", label: "OK", key: "1" },
+	{ decision: "exclude", label: "Exclude", key: "2" },
 ];
+
+type Draft = IEvaluationAnswer & { note: string };
+
+const draftOf = (label: IDatasetReview | null): Draft => ({
+	decision: label?.decision ?? null,
+	excludeReason: label?.exclude_reason ?? null,
+	cogIssue: !!label?.cog_issue,
+	thumbnailIssue: !!label?.thumbnail_issue,
+	note: label?.note ?? "",
+});
 
 export interface EvaluationReviewerProps {
 	datasetId: number;
-	/** the run that judged the dataset, stored with the answer; null when none did */
-	runId: number | null;
-	/** the dataset's overview, thumbnail and evaluation crops (audit.images) */
+	/** the dataset's overview, thumbnail and evaluation tiles (audit.images) */
 	images: IAuditImage[];
-	/** the dataset's label: the latest answer, whoever gave it; a new answer replaces it */
-	label: IAuditAssessment | null;
-	/** the check's model and rule rows on the dataset */
-	models: IAuditAssessment[];
+	/** the dataset's label: the newest review, whoever gave it; a new answer replaces it */
+	label: IDatasetReview | null;
+	/** each model's answer on the dataset */
+	models: IDatasetJudgement[];
 	/** benchmark labeling: the models stay hidden until the dataset has a label */
 	blind: boolean;
 	/** stores the answer and resolves false when nothing was saved */
-	onSave: (row: IAuditAnswerInput) => Promise<boolean>;
+	onSave: (review: DatasetReviewInput) => Promise<boolean>;
 	saving: boolean;
 	/** more keys while it is shown, e.g. stepping between datasets */
 	keys?: AuditKeyMap;
@@ -44,55 +50,48 @@ export interface EvaluationReviewerProps {
 }
 
 /** The dataset evaluation of one dataset, as the old gold labeler asked it: overview, four
- * crops and the thumbnail; OK (1), exclude (2) or unsure (U), the exclude reasons
- * (Q W E R T I O) and the issues of a kept dataset (A S D); Enter saves, Shift+Space keeps and saves.
+ * tiles and the thumbnail; OK (1) or exclude (2), the exclude reasons (Q W E R T I O) and the
+ * issues of a kept dataset (A S); Enter saves, Shift+Space keeps and saves.
  * Mount it with key={datasetId}. */
-export default function EvaluationReviewer({ datasetId, runId, images, label, models, blind, onSave, saving, keys = {}, active = true, onSkip }: EvaluationReviewerProps) {
-	const [draft, setDraft] = useState<IEvaluationDraft>(evaluationDraftFromRow(label) ?? emptyEvaluationDraft());
+export default function EvaluationReviewer({ datasetId, images, label, models, blind, onSave, saving, keys = {}, active = true, onSkip }: EvaluationReviewerProps) {
+	const [draft, setDraft] = useState<Draft>(draftOf(label));
 	const [problem, setProblem] = useState<string | null>(null);
 	const revealed = !blind || !!label;
 
-	const save = async (next: IEvaluationDraft) => {
-		const result = evaluationAnswerRow(next, datasetId, runId);
-		if ("missing" in result) {
-			setProblem(result.missing);
+	const save = async (next: Draft) => {
+		const answer = evaluationReview(next, datasetId, next.note);
+		const missing = !answer ? "Pick OK (1) or exclude (2)" : answer.problems.length ? "Excluding needs a reason" : null;
+		if (missing || !answer) {
+			setProblem(missing);
 			return false;
 		}
 		setProblem(null);
-		return onSave(result.row);
+		return onSave(answer.review);
 	};
-	const change = (next: Partial<IEvaluationDraft>) => {
+	const change = (next: Partial<Draft>) => {
 		setDraft((d) => ({ ...d, ...next }));
 		setProblem(null);
 	};
-	const pickReason = (code: string) => change({ verdict: "major", reason: code, flags: [] });
+	const decide = (decision: EvaluationDecision) =>
+		change(decision === "keep" ? { decision, excludeReason: null } : { decision, cogIssue: false, thumbnailIssue: false });
+	const pickReason = (code: string) => change({ decision: "exclude", excludeReason: code, cogIssue: false, thumbnailIssue: false });
+	// an issue belongs to a kept dataset
 	const toggleFlag = (flag: EvaluationFlag) =>
-		setDraft((d) => {
-			const flags = d.flags.includes(flag) ? d.flags.filter((f) => f !== flag) : [...d.flags, flag];
-			return { ...d, flags, verdict: keepsDataset(d.verdict) || d.verdict === null ? "ok" : d.verdict, reason: null };
-		});
+		setDraft((d) => ({ ...d, [FLAG_FIELD[flag]]: !d[FLAG_FIELD[flag]], decision: "keep", excludeReason: null }));
 
 	useAuditShortcuts(
 		saving
 			? keys
 			: {
 					...keys,
-					...Object.fromEntries(CALLS.flatMap((c) => [c.key, c.key.toLowerCase()].map((k) => [k, () => change({ verdict: c.verdict, reason: c.verdict === "major" ? draft.reason : null })]))),
+					...Object.fromEntries(CALLS.map((c) => [c.key, () => decide(c.decision)])),
 					...Object.fromEntries(REASONS.map((r, i) => [REASON_KEYS[i], () => pickReason(r.code)])),
 					...Object.fromEntries(EVALUATION_FLAGS.map((f) => [FLAG_KEYS[f.flag], () => toggleFlag(f.flag)])),
 					Enter: () => void save(draft),
-					"shift+ ": () => void save({ ...draft, verdict: "ok", reason: null }),
+					"shift+ ": () => void save({ ...draft, decision: "keep", excludeReason: null }),
 				},
 		active,
 	);
-
-	const describe = (row: IAuditAssessment) => {
-		const named = Object.entries(row.modes ?? {})
-			.filter(([, m]) => (modeScore(m).likelihood ?? 0) >= 50)
-			.map(([key]) => key.replace(/_/g, " "));
-		return `${evaluationAnswerText(row)}${named.length ? ` · ${named.join(", ")}` : ""}`;
-	};
-	const tone = (row: IAuditAssessment) => (!label ? "default" : keepsDataset(row.verdict) === keepsDataset(label.verdict) ? "green" : "red");
 
 	return (
 		<div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_380px]" data-testid="benchmark-evaluation">
@@ -102,7 +101,7 @@ export default function EvaluationReviewer({ datasetId, runId, images, label, mo
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Call</div>
 					<div className="flex flex-wrap gap-1">
 						{CALLS.map((c) => (
-							<Button key={c.verdict} size="small" type={draft.verdict === c.verdict ? "primary" : "default"} danger={c.verdict === "major" && draft.verdict === "major"} onClick={() => change({ verdict: c.verdict, reason: c.verdict === "major" ? draft.reason : null })}>
+							<Button key={c.decision} size="small" type={draft.decision === c.decision ? "primary" : "default"} danger={c.decision === "exclude" && draft.decision === "exclude"} onClick={() => decide(c.decision)}>
 								<kbd className="mr-1">{c.key}</kbd>
 								{c.label}
 							</Button>
@@ -113,7 +112,7 @@ export default function EvaluationReviewer({ datasetId, runId, images, label, mo
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Exclude because</div>
 					<div className="flex flex-wrap gap-1">
 						{REASONS.map((r, i) => (
-							<Tag.CheckableTag key={r.code} checked={draft.reason === r.code} onChange={() => pickReason(r.code)}>
+							<Tag.CheckableTag key={r.code} checked={draft.excludeReason === r.code} onChange={() => pickReason(r.code)}>
 								<kbd className="mr-1">{REASON_KEYS[i].toUpperCase()}</kbd>
 								{r.label}
 							</Tag.CheckableTag>
@@ -124,7 +123,7 @@ export default function EvaluationReviewer({ datasetId, runId, images, label, mo
 					<div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Issues</div>
 					<div className="flex flex-wrap gap-2">
 						{EVALUATION_FLAGS.map((f) => (
-							<Checkbox key={f.flag} checked={draft.flags.includes(f.flag)} disabled={draft.verdict === "major"} onChange={() => toggleFlag(f.flag)}>
+							<Checkbox key={f.flag} checked={!!draft[FLAG_FIELD[f.flag]]} disabled={draft.decision === "exclude"} onChange={() => toggleFlag(f.flag)}>
 								<kbd className="mr-1">{FLAG_KEYS[f.flag].toUpperCase()}</kbd>
 								{f.label}
 							</Checkbox>
@@ -141,17 +140,18 @@ export default function EvaluationReviewer({ datasetId, runId, images, label, mo
 					Save → next <kbd className="ml-1">Enter</kbd>
 				</Button>
 				{problem && <div className="text-xs text-red-600">{problem}</div>}
-				{label && <LabeledBy row={label} />}
+				{label && <LabeledBy review={label} />}
 				{revealed ? (
 					<div className="flex flex-col gap-1" data-testid="benchmark-reveal">
 						<div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">The models</div>
 						{models.length === 0 && <div className="text-xs text-gray-500">No model judged this dataset.</div>}
-						{models.map((row) => (
-							<div key={row.id} className="flex items-baseline gap-2 text-xs">
-								<Tag color={tone(row)} className="m-0">
-									{row.assessor.replace("/", " ")}
-								</Tag>
-								<span>{describe(row)}</span>
+						{models.map((j) => (
+							<div key={j.id} className="flex items-baseline gap-2 text-xs">
+								<Tag className="m-0">{judgeName(j.judge)}</Tag>
+								<span>
+									{judgementText(j)}
+									{j.summary?.trim() && ` · ${j.summary.trim()}`}
+								</span>
 							</div>
 						))}
 					</div>

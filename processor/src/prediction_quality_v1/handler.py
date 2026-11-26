@@ -1,9 +1,10 @@
 """The prediction quality check as an audit worker handler (audit_worker.worker.HANDLERS).
 
 handle(ctx) reads the stored COG (private datasets too), the dataset's CLIP tiles, its AOI
-and the preferred deadwood and forest predictions, asks the version's judges per crop, and
-stores crops, images and assessments (store.write). The worker finishes the run with the
-returned evidence, coverage and cost, and points the dataset at it when the version is active.
+and the preferred deadwood and forest predictions, asks the version's judges per tile, uploads
+the images they saw and returns the run's p_result (payload.build), which the worker stores
+with audit.finish_run. Which judge decides is the rules' (RULES_CONFIG), applied in the
+database (audit.tile_calls).
 """
 
 import tempfile
@@ -28,11 +29,10 @@ from ..utils.stored_inputs import (
 	stored_cog,
 	tile_rows,
 )
-from . import store
+from . import payload
 from .check import run_prediction_quality
 from .judge import PROMPT_VERSION
 from .render import CROP_PX, RENDER_VERSION
-from .rule import RULE_CONFIG, RULE_VERSION
 from .tiles import EXCLUDE_SET_SIZE, TILE_M, Tile
 
 VERSION = 'v2'
@@ -43,17 +43,19 @@ CONFIG = {
 	},
 	'prompt_version': PROMPT_VERSION,
 	'render': RENDER_VERSION,
-	'rule': RULE_VERSION,
-	'rule_config': RULE_CONFIG,
-	'crops': {'picker': store.SELECTED_BY, 'exclude_set': EXCLUDE_SET_SIZE, 'tile_m': TILE_M, 'crop_px': CROP_PX},
+	'tiles': {'picker': payload.PICKER, 'exclude_set': EXCLUDE_SET_SIZE, 'tile_m': TILE_M, 'crop_px': CROP_PX},
 }
+# audit.check_rules of the version: a tile's call is the deciding judge's verdict (by name prefix);
+# the other judges are stored and shown, not counted
+RULES = 'rules-v1'
+RULES_CONFIG = {'decider': 'haiku'}
 # The check's layer names and where each layer's prediction lives.
 LAYERS = {
 	'deadwood': (LabelDataEnum.deadwood, settings.deadwood_geometries_table),
 	'forest': (LabelDataEnum.forest_cover, settings.forest_cover_geometries_table),
 }
 
-__all__ = ['CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
+__all__ = ['CONFIG', 'RULES', 'RULES_CONFIG', 'VERSION', 'handle', 'inputs', 'ready']
 
 
 def ready(status: dict) -> bool:
@@ -74,7 +76,7 @@ def identity(sha256: str, aoi: dict | None, label_ids: dict) -> dict:
 	return {
 		'ortho_sha256': sha256,
 		'aoi': aoi_key(aoi),
-		'label_ids': {store.LAYER_NAMES[layer]: label_id for layer, label_id in label_ids.items()},
+		'label_ids': {payload.LAYER_NAMES[layer]: label_id for layer, label_id in label_ids.items()},
 	}
 
 
@@ -106,8 +108,6 @@ def handle(ctx) -> dict:
 		for r in rows
 	]
 	predictions = {layer: prediction_polygons(client, table, label_ids[layer]) for layer, (_, table) in LAYERS.items()}
-	# The run stores the crop answers only: the audit counts each layer's crop calls by the deciding
-	# model of the version's config (rule_config.decider, Haiku).
 	with (
 		tempfile.TemporaryDirectory(prefix='prediction-quality-') as folder,
 		readable_cog(cog, Path(folder), ctx.token, dataset_id, log) as cog_source,
@@ -116,32 +116,31 @@ def handle(ctx) -> dict:
 			dataset_id, cog_source, tiles, shape(aoi) if aoi else None, predictions, ctx.judges
 		)
 	ctx.refresh()  # the judges can take longer than the login lasts
-	stored = store.write(
-		client,
+	p_result, files = payload.build(
 		ctx.run['id'],
 		result,
-		ortho_sha256=sha256,
+		# what was judged, read at run time: the ortho, AOI or predictions may have changed since queueing
+		inputs=identity(sha256, aoi, label_ids),
 		label_ids=label_ids,
 		footprints={r['id']: mapping(r['geometry']) for r in rows},
-		put_image=ctx.put_image,
 	)
-	judged = stored.pop('judged')
+	# Files first, rows second: a stored row always points at an uploaded image.
+	for path, data in files:
+		ctx.put_image(path, data, dataset_id)
 	logger.info(
-		'Prediction quality stored',
+		'Prediction quality judged',
 		LogContext(
 			category=LogCategory.PROCESS,
 			dataset_id=dataset_id,
 			token=ctx.token,
-			extra={'run_id': ctx.run['id'], **stored},
+			extra={
+				'run_id': ctx.run['id'],
+				'tiles': len(p_result['tiles']),
+				'judgements': len(p_result['tile_judgements']),
+			},
 		),
 	)
-	summary = store.summary(result)
-	return {
-		# what was judged, read at run time: the ortho, AOI or predictions may have changed since queueing
-		'inputs': identity(sha256, aoi, label_ids),
-		**summary,
-		'evidence': {**summary['evidence'], 'judged': judged},
-	}
+	return p_result
 
 
 def prediction_labels(client, dataset_id: int) -> dict:

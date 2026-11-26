@@ -202,7 +202,7 @@ const getDatasetVisualSpec = (dataset: DatasetMapItem, mode: DatasetMapColorMode
       marker: "#DC2626",
     };
   }
-  if (decision === "ok") {
+  if (decision === "keep") {
     return {
       fill: palette.forest[500],
       stroke: palette.forest[700],

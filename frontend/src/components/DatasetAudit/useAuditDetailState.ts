@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Form, message, notification } from "antd";
 import confetti from "canvas-confetti";
@@ -10,9 +10,9 @@ import { useAuditNavigationGuard } from "../../hooks/useAuditNavigationGuard";
 import { describeAuditLockDenial, isAuditLeaseConflict, useAuditLock } from "../../hooks/useAuditLock";
 import { useAuditNavigation } from "../../hooks/useAuditNavigation";
 import { useAcquisitionDateEstimate, useGeorefCheck } from "../../hooks/useAcquisitionDateEstimate";
-import { useAuditChecks, useSaveAuditAnswers } from "../../hooks/useAuditChecks";
+import { useAuditChecks, useAuditReviews, useSaveDatasetReviews } from "../../hooks/useAuditChecks";
 import { useAuditDatasetResult, useAuditDatasetResults } from "../../hooks/useAuditDatasetResults";
-import { initialDraft, reviewAnswers, reviewContext, type IReviewDraft } from "../../utils/auditReview";
+import { initialDraft, reviewAnswers, type IReviewDraft } from "../../utils/auditReview";
 import { nextPendingReview } from "../../utils/auditReviewList";
 import { trackAppEvent } from "../../utils/analytics";
 import { useAuditAOIState } from "./useAuditAOIState";
@@ -54,7 +54,7 @@ function draftChanged(start: IReviewDraft, now: IReviewDraft): boolean {
 
 /** Everything the Audit Review detail page holds: the dataset's check results and outputs, the
  * reviewer's draft (an antd form of IReviewDraft), the review lease, the AOI editor and Save,
- * which stores only audit.assessments person rows (utils/auditReview reviewAnswers). */
+ * which stores only dataset reviews (utils/auditReview reviewAnswers). */
 export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 	const navigate = useNavigate();
 	const [form] = Form.useForm<IReviewDraft>();
@@ -62,15 +62,15 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 	const { isDownloading, startDownload, finishDownload, currentDownloadId } = useDownload();
 
 	const aoi = useAuditAOIState(dataset.id);
-	const { mutateAsync: saveAnswers } = useSaveAuditAnswers();
+	const { mutateAsync: saveReviews } = useSaveDatasetReviews();
 	const { data: cogMetadata, isLoading: isCogLoading } = useCogMetadata(dataset.id);
 	const { data: dateEstimate } = useAcquisitionDateEstimate(dataset.id);
 	const { data: georefCheck } = useGeorefCheck(dataset.id);
 	const auditChecksQuery = useAuditChecks(dataset.id);
 	const auditChecks = auditChecksQuery.data;
+	const auditReviewsQuery = useAuditReviews(dataset.id);
 	const resultQuery = useAuditDatasetResult(dataset.id);
 	const result = resultQuery.data;
-	const review = useMemo(() => reviewContext(dataset.id, result, auditChecks), [dataset.id, result, auditChecks]);
 
 	const { listPath } = useAuditNavigation();
 	// Save & Next goes on to the next dataset that needs review, whichever list this was opened from
@@ -147,14 +147,14 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 			message.error(text);
 		};
 		if (aoi.isDirty) return stop("Please save the AOI edits before saving the review.");
-		const { answers, problems } = reviewAnswers(values, review);
+		const { reviews, problems } = reviewAnswers(values, dataset.id, result);
 		if (problems.length) return stop(problems[0]);
 		if (!requireAuditLease()) return stop("Nothing was saved.");
 
 		setIsSubmitting(true);
 		try {
-			if (answers.length) {
-				await saveAnswers(answers);
+			if (reviews.length) {
+				await saveReviews(reviews);
 				trackAppEvent("audit_completed", { dataset_id: dataset.id, final_assessment: values.decision ?? "unchanged" });
 			}
 			// the next draft starts from what is stored now
@@ -162,7 +162,7 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 			form.resetFields();
 			form.setFieldsValue(initialDraft(stored ?? result));
 			setStartDraft(initialDraft(stored ?? result));
-			if (answers.length) thankYou();
+			if (reviews.length) thankYou();
 			else message.info("Nothing changed, so nothing was saved.");
 			leave();
 		} catch (error) {
@@ -198,15 +198,16 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 
 		result,
 		resultFailed: resultQuery.isError,
-		review,
+		auditReviews: auditReviewsQuery.data,
 		cogMetadata,
 		isCogLoading,
 		dateEstimate,
 		georefCheck,
 		auditChecks,
-		auditChecksFailed: auditChecksQuery.isError,
+		auditChecksFailed: auditChecksQuery.isError || auditReviewsQuery.isError,
 		retryChecks: () => {
 			void auditChecksQuery.refetch();
+			void auditReviewsQuery.refetch();
 			void resultQuery.refetch();
 		},
 

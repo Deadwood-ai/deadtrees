@@ -2,10 +2,10 @@ import type { ComponentProps, ReactNode } from "react";
 import { Form } from "antd";
 import type { IDataset } from "../../../types/dataset";
 import type { IAcquisitionDateEstimate } from "../../../types/acquisitionDate";
-import type { IAuditChecks, IAuditDatasetResult, ReviewItem } from "../../../types/auditChecks";
+import type { AuditCheckKey, IAuditChecks, IAuditDatasetResult, IAuditReviews, ReviewItem } from "../../../types/auditChecks";
 import type { IGeorefCheck } from "../../../types/georefCheck";
 import { AUDIT_SECTIONS, auditSection, type AuditSectionId, type IAuditSectionDef } from "../../../utils/auditChecks";
-import { openReviewItems, reviewAnswers, sectionStatus, withDraft, type IReviewContext, type IReviewDraft } from "../../../utils/auditReview";
+import { layerProgress, openReviewItems, reviewAnswers, sectionStatus, withDraft, type IReviewDraft } from "../../../utils/auditReview";
 import { InlineLoadError } from "../../SectionStates";
 import type AuditAOICard from "../AuditAOICard";
 import AoiStep from "../steps/AoiStep";
@@ -27,11 +27,11 @@ interface AuditSectionsProps {
 	/** the check results failed to load: say so instead of "Not run yet" */
 	checksFailed: boolean;
 	onRetryChecks: () => void;
-	/** the dataset's row of audit.dataset_results */
+	/** people's answers as they count now, and the tile calls */
+	reviews: IAuditReviews | undefined;
+	/** the dataset's row of audit.dataset_outcomes */
 	result: IAuditDatasetResult | null | undefined;
 	resultFailed: boolean;
-	/** what Save needs besides the draft; the review line reads it too */
-	review: IReviewContext;
 	hasAOI: boolean;
 	/** each step's evidence besides the results */
 	panels: {
@@ -48,10 +48,9 @@ interface AuditSectionsProps {
 /** The Audit Review sidebar: what still needs a person, user reports and the seven steps in order.
  * Opening a step puts the map into that check's mode. The benchmark toggles sit in the steps their
  * check's benchmark labels: the dataset in the evaluation step, each crop in the crop review. */
-export default function AuditSections({ dataset, checks, checksFailed, onRetryChecks, result, resultFailed, review, hasAOI, panels, view, setView }: AuditSectionsProps) {
+export default function AuditSections({ dataset, checks, checksFailed, onRetryChecks, reviews, result, resultFailed, hasAOI, panels, view, setView }: AuditSectionsProps) {
 	const form = Form.useFormInstance<IReviewDraft>();
 	const draft = Form.useWatch((values: IReviewDraft) => values, { form, preserve: true }) ?? {};
-	const people = checks?.people ?? [];
 	const evidenceOf = (s: IAuditSectionDef) => (s.checkKey ? checks?.checks[s.checkKey] : undefined);
 	const openSection = view.section ? auditSection(view.section) : null;
 	const cropReview = cropReviewOpen(view, openSection, openSection ? evidenceOf(openSection) : undefined);
@@ -59,25 +58,26 @@ export default function AuditSections({ dataset, checks, checksFailed, onRetryCh
 	useAuditStepper({ view, setView, cropReview });
 
 	// the line follows the page: answers in the draft and a drawn AOI settle their items before Save
-	const answered: ReviewItem[] = [...reviewAnswers(draft, review).answered, ...(hasAOI ? (["aoi"] as const) : [])];
+	const answered: ReviewItem[] = [...reviewAnswers(draft, dataset.id, result).answered, ...(hasAOI ? (["aoi"] as const) : [])];
 	const openItems = openReviewItems(result?.review_required, answered);
 	// the step badges show your answers on the page, and an AOI drawn here, before Save
 	const shown = result && withDraft({ ...result, aoi_exists: result.aoi_exists || hasAOI }, draft);
+	const checksRun = Object.keys(checks?.checks ?? {}) as AuditCheckKey[];
 	const toggle = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null, mapOnly: false });
 	const predictionBody = (id: "forest" | "deadwood") => {
 		const layer = id === "deadwood" ? "deadwood" : "forest_cover";
-		const mapOnly = view.section === id && view.mapOnly && !!review.layers[layer];
-		return <PredictionStep layer={layer} result={result} review={review.layers[layer]} onOpenCrops={mapOnly ? () => setView({ mapOnly: false }) : undefined} />;
+		const progress = layerProgress(reviews?.tileCalls ?? [], layer);
+		const mapOnly = view.section === id && view.mapOnly && !!progress;
+		return <PredictionStep layer={layer} result={result} progress={progress} onOpenCrops={mapOnly ? () => setView({ mapOnly: false }) : undefined} />;
 	};
 
 	const bodies: Record<AuditSectionId, ReactNode> = {
 		evaluation: (
 			<EvaluationStep
-				evidence={checks?.checks.dataset_evaluation}
-				people={people}
+				datasetId={dataset.id}
+				checks={checks}
 				cog={panels.cog}
 				thumbnailUrl={panels.thumbnailUrl}
-				review={review}
 				active={view.section === "evaluation"}
 			/>
 		),
@@ -92,7 +92,7 @@ export default function AuditSections({ dataset, checks, checksFailed, onRetryCh
 	return (
 		<>
 			<ReviewRequiredLine items={openItems} unknown={resultFailed || result === null} />
-			<ReviewChanges people={people} result={result} />
+			<ReviewChanges reviews={reviews} result={result} />
 			{(checksFailed || resultFailed) && (
 				<div className="mb-2">
 					<InlineLoadError message="The automated check results couldn’t load." onRetry={onRetryChecks} />
@@ -106,7 +106,7 @@ export default function AuditSections({ dataset, checks, checksFailed, onRetryCh
 					key={s.id}
 					number={i + 1}
 					title={s.title}
-					status={sectionStatus(s.id, shown, openItems)}
+					status={sectionStatus(s.id, shown, openItems, checksRun)}
 					open={view.section === s.id}
 					onToggle={() => toggle(s.id)}
 				>

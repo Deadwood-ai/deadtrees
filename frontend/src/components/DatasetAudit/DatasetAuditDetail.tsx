@@ -87,9 +87,9 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 						checks={auditChecks}
 						checksFailed={state.auditChecksFailed}
 						onRetryChecks={state.retryChecks}
+						reviews={state.auditReviews}
 						result={state.result}
 						resultFailed={state.resultFailed}
-						review={state.review}
 						hasAOI={aoi.hasAOI && !aoi.isDirty}
 						view={checkView}
 						setView={updateCheckView}
@@ -159,7 +159,8 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 							onSelectCrop: (cropId) => updateCheckView({ cropId }),
 							cropReview: {
 								datasetId: dataset.id,
-								people: auditChecks?.people ?? [],
+								reviews: state.auditReviews,
+								judgements: auditChecks?.tileJudgements ?? [],
 								disabled: !auditLeaseId,
 								mapOnly: checkView.mapOnly,
 								setMapOnly: (mapOnly) => updateCheckView({ mapOnly }),

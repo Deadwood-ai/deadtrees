@@ -3,7 +3,7 @@
 The benchmark's way to run the check without the audit worker and without writing anything:
 inputs from production through the analyst role (read-only transaction), the COG streamed over
 HTTPS, judges Luna (OpenAI Responses API key) and Haiku (the worker's Claude Code backend). Writes
-<out>/<dataset>/result.json and the crop images the judges saw. Production runs go through
+<out>/<dataset>/result.json and the tile images the judges saw. Production runs go through
 the audit worker (processor/src/prediction_quality_v1/handler.py).
 Run under a memory cap on the processing server (production ODM shares it):
 
@@ -151,13 +151,13 @@ def read_key(path):
 
 def save(out, result, label_ids):
 	out.mkdir(parents=True, exist_ok=True)
-	crops = []
-	for r in result.crops:
-		folder = out / f'crop-{r.tile.tile_id}'
+	judged = []
+	for r in result.tiles:
+		folder = out / f'tile-{r.tile.tile_id}'
 		folder.mkdir(exist_ok=True)
 		for name, im in zip(('raw', 'deadwood', 'forest'), judge_images(r.crop)):
 			im.save(folder / f'{name}.jpg', quality=88)
-		crops.append(
+		judged.append(
 			{
 				'tile_id': r.tile.tile_id,
 				'pixel_window': r.tile.pixel_window,
@@ -182,7 +182,6 @@ def save(out, result, label_ids):
 					for a in r.answers
 				],
 				'failures': r.failures,
-				'combined': r.combined,
 			}
 		)
 	(out / 'result.json').write_text(
@@ -194,8 +193,7 @@ def save(out, result, label_ids):
 				'label_ids': label_ids,
 				'tiles_total': result.tiles_total,
 				'seconds': result.seconds,
-				'verdicts': result.verdicts,
-				'crops': crops,
+				'tiles': judged,
 			},
 			indent=1,
 		)
@@ -239,11 +237,10 @@ if __name__ == '__main__':
 		print(
 			{
 				'dataset': dataset_id,
-				'crops': len(result.crops),
+				'judged': len(result.tiles),
 				'tiles': result.tiles_total,
 				'seconds': result.seconds,
-				'verdicts': {k: v['verdict'] for k, v in result.verdicts.items()},
-				'failures': sum(len(r.failures) for r in result.crops),
+				'failures': sum(len(r.failures) for r in result.tiles),
 			},
 			flush=True,
 		)

@@ -1,11 +1,10 @@
-"""Fixed answer vocabulary of the dataset evaluation, shared by the models, the rules,
-the labeling page and the audit page. Changing a list is a new check version."""
+"""Fixed answer vocabulary of the dataset evaluation, shared by the models, the labeling
+page and the audit page. Changing a list is a new check version."""
 
 CHECK_KEY = 'dataset_evaluation'
-LAYER = 'image'
 
-# The model's word for each verdict of audit.verdict.
-VERDICTS = {'keep': 'ok', 'fix': 'minor', 'exclude': 'major', 'unsure': 'unsure'}
+# The model's word for each verdict of audit.verdict; "unsure" is a model that cannot tell.
+VERDICTS = {'keep': 'ok', 'fix': 'minor', 'exclude': 'major', 'unsure': 'not_assessable'}
 
 # Exclude reasons (the audit's fixed list). Georeferencing and season are decided by their
 # own checks and duplicates are refused at upload, so the models never name them.

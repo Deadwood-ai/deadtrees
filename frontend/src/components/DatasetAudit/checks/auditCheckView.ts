@@ -18,13 +18,13 @@ export const cropReviewOpen = (view: Pick<IAuditCheckView, "mapOnly">, section: 
 
 /** The open step answers per crop and its check stored crops: the crop review can show them. */
 export const canReviewCrops = (section: IAuditSectionDef | null, evidence: IAuditCheckEvidence | undefined) =>
-	!!section?.cropAnswers && !!evidence?.crops.length;
+	!!section?.layer && !!evidence?.tiles.length;
 
 /** The stored image the model saw: the selected crop's (falling back to its raw image), else the dataset overview. */
 export function modelViewImage(evidence: IAuditCheckEvidence | undefined, cropId: number | null, kind: CropImageKind): IAuditImage | null {
 	const images = evidence?.images ?? [];
 	if (cropId !== null) {
-		return images.find((i) => i.crop_id === cropId && i.kind === kind) ?? images.find((i) => i.crop_id === cropId && i.kind === "raw") ?? null;
+		return images.find((i) => i.tile_id === cropId && i.kind === kind) ?? images.find((i) => i.tile_id === cropId && i.kind === "raw") ?? null;
 	}
 	return images.find((i) => i.kind === "overview") ?? images.find((i) => i.kind === "thumbnail") ?? null;
 }

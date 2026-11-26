@@ -31,7 +31,7 @@ const ready = {
   is_thumbnail_done: true,
   is_deadwood_done: true,
   is_forest_cover_done: true,
-  audit_decision: "ok",
+  audit_decision: "keep",
   cog_path: "qa/forest.tif",
   thumbnail_path: "qa/forest.png",
   has_deadwood_prediction: true,
@@ -99,7 +99,7 @@ test("desktop shows a stopped run with its map and the prior review side by side
   await installStatus(page, {
     has_error: true,
     error_stage: "deadwood_treecover_combined_segmentation",
-    audit_decision: "ok",
+    audit_decision: "keep",
   });
   await page.goto("/profile");
   await expect(

@@ -1,5 +1,4 @@
-import { share } from "../../../utils/auditReview";
-import type { ILayerCounts } from "../../../utils/cropCalls";
+import { share, type ILayerCounts } from "../../../utils/auditReview";
 
 interface LayerCountsProps {
 	counts: ILayerCounts | null;

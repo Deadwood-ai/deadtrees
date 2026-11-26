@@ -1,4 +1,4 @@
-"""The judge prompt, answer parsing, and how several judges' answers combine.
+"""The judge prompt and answer parsing.
 
 Prompt v5 = the DT-1272 benchmark prompt v4 (failure modes m1-m7, no m8, lying wood never
 deadwood) with an area % next to each mode's likelihood, because adding the model's size to the
@@ -188,13 +188,3 @@ def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: in
 		except AnswerError as e:
 			last = e
 	raise last
-
-
-def deciding(answers: Sequence[Answer], layer: str, decider: str = 'haiku') -> dict:
-	"""The deciding judge's answer on one layer (by name prefix): what the rule reads. Empty when it
-	could not assess the crop or gave no answer; the other judges are stored and shown, not counted."""
-	answer = next((a for a in answers if a.judge.startswith(decider) and a.assessable), None)
-	if answer is None:
-		return {'judge': None, 'verdict': None, 'major_likelihood': None}
-	layer_answer = answer.layers[layer]
-	return {'judge': answer.judge, 'verdict': layer_answer.verdict, 'major_likelihood': layer_answer.major_likelihood}

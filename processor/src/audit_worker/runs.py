@@ -1,8 +1,9 @@
-"""The worker's reads and writes on audit.runs and audit.current_runs (Supabase, as the processor).
+"""The worker's reads and writes on audit.runs (Supabase, as the processor).
 
-New uploads go first, then manual runs, then the backfill; benchmark runs only in a benchmark
-session and they never become current. A run is claimed by moving it from queued to running,
-so a second worker could never take the same run.
+New uploads go first, then manual runs, then the backfill. A run is claimed by moving it from
+queued to running, so a second worker could never take the same run. A finished run is stored
+by audit.finish_run in one transaction; which run counts for a dataset is the database's view
+audit.current_runs, so the worker points nothing.
 """
 
 from __future__ import annotations
@@ -21,19 +22,18 @@ def audit(client):
 	return client.schema('audit')
 
 
+def versions(client, checks) -> dict[int, dict]:
+	"""Every version of these checks, by id."""
+	rows = audit(client).table('check_versions').select('*').in_('check_key', list(checks)).execute().data
+	return {row['id']: row for row in rows}
+
+
 def active_versions(client, checks) -> dict[str, dict]:
-	rows = (
-		audit(client).table('check_versions').select('*').eq('is_active', True).in_('check_key', list(checks)).execute()
-	)
-	return {row['check_key']: row for row in rows.data}
-
-
-def version(client, version_id: int) -> dict:
-	return audit(client).table('check_versions').select('*').eq('id', version_id).single().execute().data
+	return {row['check_key']: row for row in versions(client, checks).values() if row['is_active']}
 
 
 def register_version(client, check_key: str, name: str, config: dict) -> dict:
-	"""The handler's version, inserted once (review_all, inactive); an operator activates it."""
+	"""The handler's version, inserted once and inactive; an operator activates it."""
 	table = audit(client).table('check_versions')
 	found = table.select('*').eq('check_key', check_key).eq('version', name).execute().data
 	if found:
@@ -41,17 +41,26 @@ def register_version(client, check_key: str, name: str, config: dict) -> dict:
 	return table.insert({'check_key': check_key, 'version': name, 'config': config}).execute().data[0]
 
 
-def claim_next(client, checks, benchmark: bool = False) -> dict | None:
-	"""The oldest queued run of the most urgent queue for one of these checks, now running."""
-	queues = ('benchmark',) if benchmark else QUEUE_ORDER
-	for name in queues:
+def register_rules(client, version_row: dict, name: str, config: dict) -> dict:
+	"""The version's rules, inserted once and inactive; an operator activates them
+	(audit.activate_rules). The database applies them to the stored answers."""
+	table = audit(client).table('check_rules')
+	found = table.select('*').eq('version_id', version_row['id']).eq('name', name).execute().data
+	if found:
+		return found[0]
+	return table.insert({'version_id': version_row['id'], 'name': name, 'config': config}).execute().data[0]
+
+
+def claim_next(client, version_ids) -> dict | None:
+	"""The oldest queued run of the most urgent queue for one of these versions, now running."""
+	for name in QUEUE_ORDER:
 		candidates = (
 			audit(client)
 			.table('runs')
 			.select('*')
 			.eq('status', 'queued')
 			.eq('queue', name)
-			.in_('check_key', list(checks))
+			.in_('version_id', list(version_ids))
 			.order('created_at')
 			.order('id')
 			.limit(5)
@@ -92,148 +101,26 @@ def retry_or_fail(client, run: dict, error: str) -> str:
 	return 'failed'
 
 
-def finish(client, run: dict, summary: dict, active: bool) -> None:
-	"""Done; the run counts for its dataset when its version is the active one.
-
-	The pointer is a second request. If it does not land, publish() puts it right on the
-	next sweep with the same rule.
-	"""
-	update = {'status': 'done', 'finished_at': now(), 'error': None}
-	# `inputs` only when the handler read them again: the run then records what it judged
-	for key in ('inputs', 'coverage', 'cost', 'evidence'):
-		if summary.get(key):
-			update[key] = summary[key]
-	audit(client).table('runs').update(update).eq('id', run['id']).execute()
-	if active and run['queue'] != 'benchmark':
-		point(client, run)
+def finish(client, run: dict, result: dict) -> None:
+	"""Store the run's tiles, images and judgements and mark it done, all or nothing.
+	result is the handler's p_result (audit.finish_run)."""
+	audit(client).rpc('finish_run', {'p_run_id': run['id'], 'p_result': result}).execute()
 
 
-def replaces(pointed: dict | None, run: dict) -> bool:
-	"""The pointer rule, for a done run of the active version.
-
-	It replaces a missing pointer, or one at another version's run (a promotion wins
-	whatever the ids), and within its own version only an older run: the run created
-	later judged the later evidence, whichever finished first.
-	"""
-	if pointed is None or pointed['check_version_id'] != run['check_version_id']:
-		return True
-	return run['id'] > pointed['id']
-
-
-def point(client, run: dict) -> bool:
-	"""Apply the pointer rule. The update only lands if the pointer is still the one read,
-	so two writers cannot undo each other; on a lost race it reads again."""
-	pointers = audit(client).table('current_runs')
-	for _ in range(3):
-		current = (
-			pointers.select('run_id')
-			.eq('dataset_id', run['dataset_id'])
-			.eq('check_key', run['check_key'])
-			.execute()
-			.data
-		)
-		if not current:
-			try:
-				pointers.insert(
-					{
-						'dataset_id': run['dataset_id'],
-						'check_key': run['check_key'],
-						'run_id': run['id'],
-						'updated_at': now(),
-					}
-				).execute()
-				return True
-			except Exception:  # someone else pointed first: decide again on what is there now
-				continue
-		old = current[0]['run_id']
-		pointed = audit(client).table('runs').select('id, check_version_id').eq('id', old).execute().data
-		if not replaces(pointed[0] if pointed else None, run):
-			return False
-		moved = (
-			pointers.update({'run_id': run['id'], 'updated_at': now()})
-			.eq('dataset_id', run['dataset_id'])
-			.eq('check_key', run['check_key'])
-			.eq('run_id', old)
-			.execute()
-			.data
-		)
-		if moved:
-			return True
-	return False
-
-
-def publish(client, version_row: dict) -> int:
-	"""Reconcile pointers with the active version's runs, by state and without an age limit.
-
-	Walks every done production run of the version by (dataset_id, id), takes each
-	dataset's newest one, and applies the pointer rule where the pointer is missing, at
-	another version, or at an older run of this version. Pointers are read per page.
-	"""
-
-	def base():
-		return (
-			audit(client)
-			.table('runs')
-			.select('id, dataset_id, check_key, check_version_id, queue')
-			.eq('check_version_id', version_row['id'])
-			.eq('status', 'done')
-			.neq('queue', 'benchmark')
-		)
-
-	fixed, held = 0, None
-	# 500 per page: the pointer lookups put the page's ids into the request URL
-	for rows in keyset_pages(base, 'dataset_id', 'id', page=500):
-		newest = {}
-		if held:
-			newest[held['dataset_id']] = held
-		for run in rows:
-			newest[run['dataset_id']] = run  # ascending ids: the last one wins
-		# the page's last dataset may continue on the next page
-		held = newest.pop(rows[-1]['dataset_id'])
-		fixed += reconcile(client, version_row['check_key'], newest)
-	if held:
-		fixed += reconcile(client, version_row['check_key'], {held['dataset_id']: held})
-	return fixed
-
-
-def reconcile(client, check_key: str, newest: dict[int, dict]) -> int:
-	if not newest:
-		return 0
-	pointed = {
-		row['dataset_id']: row['run_id']
-		for row in audit(client)
-		.table('current_runs')
-		.select('dataset_id, run_id')
-		.eq('check_key', check_key)
-		.in_('dataset_id', sorted(newest))
-		.execute()
-		.data
-	}
-	pointed_runs = (
-		{
-			row['id']: row
-			for row in audit(client)
-			.table('runs')
-			.select('id, check_version_id')
-			.in_('id', sorted(set(pointed.values())))
-			.execute()
-			.data
-		}
-		if pointed
-		else {}
-	)
-	stale = [run for dataset, run in newest.items() if replaces(pointed_runs.get(pointed.get(dataset)), run)]
-	return sum(point(client, run) for run in stale)
-
-
-def recover(client, checks) -> int:
+def recover(client, version_ids) -> int:
 	"""Runs left running by a worker that stopped: back to the queue, or failed after the last attempt.
 
-	There is one worker; at its start nothing of these checks can still be running. A handler
-	writes crops and images idempotently, and a repeated model answer only adds a newer row.
+	There is one worker; at its start nothing of these versions can still be running. A run
+	stores nothing before audit.finish_run, so a retry starts clean.
 	"""
 	stranded = (
-		audit(client).table('runs').select('*').eq('status', 'running').in_('check_key', list(checks)).execute().data
+		audit(client)
+		.table('runs')
+		.select('*')
+		.eq('status', 'running')
+		.in_('version_id', list(version_ids))
+		.execute()
+		.data
 	)
 	for run in stranded:
 		retry_or_fail(client, run, 'interrupted: the worker stopped during this run')
@@ -243,40 +130,37 @@ def recover(client, checks) -> int:
 def enqueue(
 	client, version_row: dict, dataset_ids, queue: str, inputs: dict | None = None, force: bool = False
 ) -> list[int]:
-	"""Queued runs of this version for datasets without one on the same evidence.
+	"""Queued runs of this version for datasets whose latest run of it judged other inputs, or
+	that have none.
 
-	Evidence is the run's inputs (ortho sha256, prediction label ids): a dataset whose
-	predictions were rerun gets a new run of the same version. Benchmark runs are scheduled
-	on their own and never stop a production run, nor the other way round. force queues
+	Inputs are what a run judges (ortho sha256, AOI, prediction label ids): a dataset whose
+	ortho or predictions were redone gets a new run of the same version. force queues
 	regardless, for an explicit rerun. inputs maps a dataset id to its inputs.
 	"""
 	ids = sorted(set(dataset_ids))
 	if not ids:
 		return []
 	inputs = inputs or {}
-	have = set()
+	latest = {}
 	if not force:
 		for start in range(0, len(ids), 500):
 			rows = (
 				audit(client)
 				.table('runs')
-				.select('dataset_id, queue, inputs')
-				.eq('check_version_id', version_row['id'])
+				.select('id, dataset_id, inputs')
+				.eq('version_id', version_row['id'])
 				.in_('dataset_id', ids[start : start + 500])
+				.order('id')
 				.execute()
 				.data
 			)
-			have |= {
-				r['dataset_id']
-				for r in rows
-				if (r['queue'] == 'benchmark') == (queue == 'benchmark')
-				and (r.get('inputs') or {}) == inputs.get(r['dataset_id'], {})
-			}
-	new = [i for i in ids if i not in have]
+			for r in rows:  # ascending ids: the latest run wins
+				latest[r['dataset_id']] = r.get('inputs') or {}
+	new = [i for i in ids if i not in latest or latest[i] != inputs.get(i, {})]
 	rows = [
 		{
 			'check_key': version_row['check_key'],
-			'check_version_id': version_row['id'],
+			'version_id': version_row['id'],
 			'dataset_id': i,
 			'queue': queue,
 			'inputs': inputs.get(i, {}),

@@ -1,11 +1,14 @@
 import type { ComponentProps } from "react";
 import { Radio, Tag } from "antd";
-import type { AuditVerdict } from "../../../types/auditChecks";
-import { LAYER_MODES, MODE_LABELS, type ICropFinding, type PredictionLayer } from "../../../utils/cropCalls";
+import type { AuditVerdict, PredictionLayer } from "../../../types/auditChecks";
+import { VERDICT_WORD, type CropImageKind } from "../../../utils/auditChecks";
+import { LAYER_MODES, MODE_LABELS, type ICropFinding } from "../../../utils/tileFindings";
 import type { ILayerDraft, ProblemAnswer } from "../../../utils/cropAnswers";
 import BenchmarkPanel from "../benchmark/BenchmarkPanel";
 
 export const PREDICTION_LABELS: Record<PredictionLayer, string> = { deadwood: "Deadwood prediction", forest_cover: "Tree cover prediction" };
+/** The stored image of a tile with the layer's prediction over it. */
+export const OVERLAY: Record<PredictionLayer, CropImageKind> = { deadwood: "deadwood_overlay", forest_cover: "forest_cover_overlay" };
 
 const VERDICTS: { value: AuditVerdict; label: string }[] = [
 	{ value: "ok", label: "1 OK" },
@@ -20,8 +23,7 @@ const ANSWERS: { value: ProblemAnswer; label: string }[] = [
 	{ value: "unsure", label: "?" },
 ];
 
-const VERDICT_COLOR: Record<AuditVerdict, string> = { ok: "green", minor: "gold", major: "red", unsure: "default", ambiguous: "default" };
-export const VERDICT_WORD: Record<AuditVerdict, string> = { ok: "OK", minor: "Minor", major: "Major", unsure: "Unsure", ambiguous: "Ambiguous" };
+const VERDICT_COLOR: Record<AuditVerdict, string> = { ok: "green", minor: "gold", major: "red", ambiguous: "default", not_assessable: "default" };
 
 interface CropAnswerPanelProps {
 	layer: PredictionLayer;
@@ -127,16 +129,10 @@ function Findings({ findings }: { findings: ICropFinding[] }) {
 						{f.model}
 						{f.decides ? " (decides)" : ""}:
 					</span>{" "}
-					{f.verdict && (
-						<Tag className="m-0 text-[11px]" color={VERDICT_COLOR[f.verdict]}>
-							{VERDICT_WORD[f.verdict]}
-						</Tag>
-					)}
-					{f.errors.map((e, n) => (
-						<div key={n} className="mt-0.5 text-[11px] text-gray-600">
-							“{e}”
-						</div>
-					))}
+					<Tag className="m-0 text-[11px]" color={VERDICT_COLOR[f.verdict]}>
+						{VERDICT_WORD[f.verdict]}
+					</Tag>
+					{f.summary && <div className="mt-0.5 text-[11px] text-gray-600">“{f.summary}”</div>}
 				</div>
 			))}
 		</div>

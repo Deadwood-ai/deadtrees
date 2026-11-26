@@ -1,45 +1,44 @@
 import { useState } from "react";
 import { message } from "antd";
 import { useCanOperate } from "../../../hooks/useUserPrivileges";
-import { useAddBenchmarkTarget, useBenchmarkMembership, useRemoveBenchmarkTarget } from "../../../hooks/useAuditBenchmarks";
-import type { BenchmarkRef } from "../../../types/auditChecks";
-import { sameBenchmark } from "../../../utils/benchmarkLabels";
+import { useBenchmarkMembership, useRemoveBenchmarkTargets } from "../../../hooks/useAuditBenchmarks";
+import { BENCHMARKS, type BenchmarkKey } from "../../../utils/benchmarkLabels";
 
 export interface IBenchmarkToggle {
-	/** the target is in the benchmark's open version, as the server said after the last call */
-	isMember: (cropId: number | null) => boolean;
-	/** adds the target, or takes it out again */
-	toggle: (cropId: number | null) => Promise<void>;
+	/** the target (a tile, or the dataset: null) is in the benchmark, as the server said after the last call */
+	isMember: (tileId: number | null) => boolean;
+	/** takes the target out, or puts it in by storing its label ticked in_benchmark (`addLabel`
+	 * resolves false when nothing was stored) */
+	toggle: (tileId: number | null, addLabel: () => Promise<boolean>) => Promise<void>;
 	/** a call runs, or the membership is being read again: the toggle waits */
 	pending: boolean;
 }
 
-/** Membership of a dataset (cropId null) or one of its crops in the open version of a benchmark
- * (a check, and for prediction quality a layer), for operators: add with audit.add_benchmark_target, remove with
- * audit.remove_benchmark_target. The membership is read again after every call, and the toggle
- * is off while a call runs. Undefined for everyone else, so callers show nothing. */
-export function useBenchmarkToggle(benchmark: BenchmarkRef, datasetId: number): IBenchmarkToggle | undefined {
+/** Membership of a dataset or one of its tiles in a benchmark, for operators: a review of it ticked
+ * in_benchmark. Adding stores the label with the tick; removing is audit.remove_benchmark_target.
+ * The membership is read again after every call, and the toggle is off while a call runs.
+ * Undefined for everyone else, so callers show nothing. */
+export function useBenchmarkToggle(key: BenchmarkKey, datasetId: number): IBenchmarkToggle | undefined {
 	const { canOperate } = useCanOperate();
 	const membership = useBenchmarkMembership(canOperate ? datasetId : undefined);
-	const add = useAddBenchmarkTarget();
-	const remove = useRemoveBenchmarkTarget(undefined);
+	const remove = useRemoveBenchmarkTargets(key);
 	const [running, setRunning] = useState(false);
 	if (!canOperate) return undefined;
-
-	const isMember = (cropId: number | null) =>
-		!!membership.data?.some((m) => sameBenchmark(m.benchmark, benchmark) && m.crop_id === cropId);
+	const layer = BENCHMARKS.find((b) => b.key === key)!.layer;
+	const isMember = (tileId: number | null) =>
+		tileId === null ? !!membership.data?.dataset : !!membership.data?.tiles.some((t) => t.tile_id === tileId && t.layer === layer);
 	const pending = running || membership.isFetching || membership.isLoading;
-	const toggle = async (cropId: number | null) => {
+	const toggle = async (tileId: number | null, addLabel: () => Promise<boolean>) => {
 		if (pending) return;
-		const leaving = isMember(cropId);
-		const what = cropId === null ? "dataset" : "crop";
+		const leaving = isMember(tileId);
+		const what = tileId === null ? "dataset" : "crop";
 		setRunning(true);
 		try {
-			if (leaving) await remove.mutateAsync({ benchmark, datasetId, cropId });
-			else await add.mutateAsync({ benchmark, datasetId, cropId });
+			if (leaving) await remove.mutateAsync([{ dataset_id: datasetId, tile_id: tileId }]);
+			else if (!(await addLabel())) return;
 			message.success(leaving ? `The ${what} left the benchmark` : `The ${what} is in the benchmark`);
 		} catch (error) {
-			message.error(`${leaving ? "Not removed from" : "Not added to"} the benchmark: ${(error as { message?: string }).message ?? "please try again"}`);
+			message.error(`Not removed from the benchmark: ${(error as { message?: string }).message ?? "please try again"}`);
 			// whatever happened, show what the server holds now
 			await membership.refetch();
 		} finally {

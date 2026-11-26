@@ -12,7 +12,7 @@ interface OwnerReview {
 }
 
 const DECISION_TEXT: Record<OwnerReview["audit_decision"], string> = {
-  ok: "Ready to use.",
+  keep: "Ready to use.",
   exclude: "Excluded from the public maps and downloads.",
 };
 

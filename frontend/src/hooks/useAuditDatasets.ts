@@ -24,7 +24,7 @@ export type AuditDataset = Pick<IDataset, (typeof AUDIT_DATASET_FIELDS)[number]>
 
 /**
  * Lightweight dataset rows for the Audit Review list: where and when, the rest comes from
- * audit.dataset_results.
+ * audit.dataset_outcomes.
  *
  * Keep this projection explicit: v2_full_dataset_view contains derived columns
  * that can be expensive or large, and the list loads every auditor-visible row.

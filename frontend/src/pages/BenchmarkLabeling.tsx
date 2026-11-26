@@ -3,19 +3,19 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Segmented, Spin, message } from "antd";
 import { useAuth } from "../hooks/useAuthProvider";
 import { useCanAudit, useCanOperate } from "../hooks/useUserPrivileges";
-import { BENCHMARKS, useBenchmark, useBenchmarkCandidate, useOpenBenchmarks, useSaveBenchmarkLabel } from "../hooks/useAuditBenchmarks";
-import type { IAuditAnswerInput, IBenchmarkTarget } from "../types/auditChecks";
+import { useBenchmark, useBenchmarkCandidate, useSaveBenchmarkLabel } from "../hooks/useAuditBenchmarks";
+import type { DatasetReviewInput, TileReviewInput } from "../types/auditChecks";
 import { stepCrop } from "../utils/auditChecks";
-import { isLabeled, latestLabelRow, nextOpen, sameBenchmark, targetKey, targetNoun, type BenchmarkMode } from "../utils/benchmarkLabels";
+import { BENCHMARKS, nextOpen, targetKey, targetNoun, type BenchmarkMode, type IBenchmarkTarget, type ITileTarget } from "../utils/benchmarkLabels";
 import StatusPage from "../components/StatusPage";
 import { useAuditShortcuts } from "../components/DatasetAudit/checks/useAuditShortcuts";
 import BenchmarkCropReview from "../components/DatasetAudit/benchmark/BenchmarkCropReview";
 import EvaluationReviewer from "../components/DatasetAudit/benchmark/EvaluationReviewer";
 import RemoveFromBenchmark from "../components/DatasetAudit/benchmark/RemoveFromBenchmark";
 
-/** Full-screen labeling of one open benchmark, across datasets (Benchmark tab of the audit):
- * label new random targets one after the other (operators; each joins the benchmark with its
- * label, then the next one is drawn), or review the existing labels. */
+/** Full-screen labeling of one benchmark, across datasets (Benchmark tab of the audit): label new
+ * random targets one after the other (operators; each joins the benchmark with its label, then
+ * the next one is drawn), or review the existing labels. */
 export default function BenchmarkLabeling() {
 	const { benchmark: key } = useParams();
 	const { user, status } = useAuth();
@@ -30,20 +30,17 @@ export default function BenchmarkLabeling() {
 }
 
 function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
-	const { title } = definition;
+	const { key, layer, title } = definition;
 	const [params, setParams] = useSearchParams();
 	const { canOperate } = useCanOperate();
-	const { data: open, isLoading: openLoading } = useOpenBenchmarks();
-	const benchmark = open?.find((b) => sameBenchmark(b, definition));
 	const mode: BenchmarkMode = params.get("mode") === "review" ? "review" : "new";
-	const { data, isLoading, isError } = useBenchmark(benchmark);
-	const candidate = useBenchmarkCandidate(benchmark, mode === "new" && canOperate);
-	const { save, isPending } = useSaveBenchmarkLabel(benchmark);
-	const labeled = useMemo(() => (data?.targets ?? []).filter(isLabeled), [data]);
+	const { data: labeled = [], isLoading, isError } = useBenchmark(key);
+	const candidate = useBenchmarkCandidate(key, mode === "new" && canOperate);
+	const { save, isPending } = useSaveBenchmarkLabel(key);
 	const targets = useMemo(() => (mode === "new" ? (candidate.data ? [candidate.data] : []) : labeled), [mode, candidate.data, labeled]);
 	const requested = params.get("target");
 	const current = targets.find((t) => targetKey(t) === requested) ?? targets[0] ?? null;
-	const noun = benchmark ? targetNoun(benchmark) : "targets";
+	const noun = targetNoun(!!layer);
 
 	const go = (target: IBenchmarkTarget | null, nextMode: BenchmarkMode = mode) => {
 		const next = new URLSearchParams(params);
@@ -60,11 +57,12 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 		const next = nextOpen(targets, current?.id ?? null);
 		if (next) go(next);
 	};
-	/** Stores a label. A new target then joins the benchmark and the next random one is drawn; in
-	 * review the crop review moves on by itself, a dataset moves on here. */
-	const onSave = async (target: IBenchmarkTarget, rows: IAuditAnswerInput[], advance = false) => {
+
+	/** Stores a label, which puts the target into the benchmark. A new target is followed by the
+	 * next random one; in review the crop review moves on by itself, a dataset moves on here. */
+	const onSave = async (target: IBenchmarkTarget, review: DatasetReviewInput | TileReviewInput, advance = false) => {
 		try {
-			if (!(await save(target, rows))) message.error(`Your label was saved, but the ${targetNoun(definition, 1)} did not join the benchmark.`);
+			await save(target, review);
 		} catch {
 			message.error("Your label was not saved. Please try again.");
 			return false;
@@ -82,26 +80,23 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 	useAuditShortcuts({ k: skip }, mode === "new" && !!current && !candidate.isFetching);
 
 	/** After a removal: on to the next labeled target. */
-	const onRemoved = (removed: { dataset_id: number; crop_id: number | null }[]) => {
-		const gone = (t: IBenchmarkTarget) => removed.some((r) => r.dataset_id === t.dataset_id && r.crop_id === t.crop_id);
+	const onRemoved = (removed: IBenchmarkTarget[]) => {
+		const gone = (t: IBenchmarkTarget) => removed.some((r) => r.dataset_id === t.dataset_id && r.tile_id === t.tile_id);
 		const at = current ? targets.indexOf(current) : -1;
 		go(targets.slice(at + 1).find((t) => !gone(t)) ?? [...targets].reverse().find((t) => !gone(t)) ?? null);
 	};
 
-	if (openLoading || isLoading) return <Spin className="m-12" />;
-	if (!benchmark) return <StatusPage kind="not-found" title={`No open ${title.toLowerCase()} benchmark`} description="An operator opens a new version when the current one is frozen." />;
-	if (isError || !data) return <StatusPage kind="offline" title="The benchmark couldn’t load" description="Try again in a moment." />;
-	const index = current ? targets.indexOf(current) : -1;
+	if (isLoading) return <Spin className="m-12" />;
+	if (isError) return <StatusPage kind="offline" title="The benchmark couldn’t load" description="Try again in a moment." />;
 
+	const index = current ? targets.indexOf(current) : -1;
 	return (
 		<div className="flex h-screen flex-col gap-3 overflow-hidden bg-white px-4 pb-4 pt-24 md:pt-28" data-testid="benchmark-labeling">
 			<header className="flex flex-wrap items-center gap-3">
 				<Link to="/dataset-audit?tab=benchmark" className="text-sm">
 					← Benchmarks
 				</Link>
-				<div className="font-semibold">
-					{title} · {benchmark.name} {benchmark.version}
-				</div>
+				<div className="font-semibold">{title} benchmark</div>
 				<Segmented
 					size="small"
 					value={mode}
@@ -124,9 +119,9 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 				{/* mounted without a target too, so Undo survives a removal of the last label */}
 				{mode === "review" && (
 					<RemoveFromBenchmark
-						benchmark={benchmark}
+						benchmark={key}
 						target={current}
-						datasetTargets={current ? targets.filter((t) => t.dataset_id === current.dataset_id).length : 0}
+						datasetTargets={current ? targets.filter((t) => t.dataset_id === current.dataset_id) : []}
 						onRemoved={onRemoved}
 						active
 					/>
@@ -141,34 +136,35 @@ function Labeler({ definition }: { definition: (typeof BENCHMARKS)[number] }) {
 				<Spin className="m-12" />
 			) : !current ? (
 				<div className="p-8 text-sm text-gray-600">{mode === "new" ? `No ${noun} left that are not in the benchmark yet.` : `The benchmark has no labeled ${noun} yet.`}</div>
-			) : benchmark.layer ? (
+			) : layer ? (
 				// the crop review fits the screen: the images shrink, the answer panel scrolls
 				<div className="min-h-0 flex-1">
 					<BenchmarkCropReview
-							layer={benchmark.layer}
-							targets={targets}
-							current={current}
-							onSelect={(t) => go(t)}
-							onSave={onSave}
-							onSkip={mode === "new" ? skip : undefined}
-						/>
-				</div>
-			) : (
-				<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-					<EvaluationReviewer
-						key={targetKey(current)}
-						datasetId={current.dataset_id}
-						runId={current.run_id}
-						images={current.images}
-						label={latestLabelRow(current)}
-						models={current.models}
-						blind
-						onSave={(row) => onSave(current, [row], true)}
-						saving={isPending}
+						layer={layer}
+						targets={targets as ITileTarget[]}
+						current={current as ITileTarget}
+						onSelect={(t) => go(t)}
+						onSave={onSave}
 						onSkip={mode === "new" ? skip : undefined}
-						keys={{ ArrowRight: () => step(1), ArrowLeft: () => step(-1), Tab: toNextOpen }}
 					/>
 				</div>
+			) : (
+				current.tile_id === null && (
+					<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+						<EvaluationReviewer
+							key={targetKey(current)}
+							datasetId={current.dataset_id}
+							images={current.images}
+							label={current.label}
+							models={current.models}
+							blind
+							onSave={(review) => onSave(current, review, true)}
+							saving={isPending}
+							onSkip={mode === "new" ? skip : undefined}
+							keys={{ ArrowRight: () => step(1), ArrowLeft: () => step(-1), Tab: toNextOpen }}
+						/>
+					</div>
+				)
 			)}
 		</div>
 	);

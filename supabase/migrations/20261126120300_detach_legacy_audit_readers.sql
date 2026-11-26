@@ -1,14 +1,16 @@
--- Audit Review: the saved legacy audits are detached from every workflow (1 of 2, readers).
+-- Audit Review: the saved legacy audits are detached from every workflow (1 of 2, readers;
+-- DT-1606).
 --
 -- dataset_audit_legacy (view dataset_audit) stays as read-only history, read only by the
--- legacy list page's RPCs (get_dataset_audits_with_emails, get_dataset_audit_with_emails).
--- Its readers move to the audit schema:
+-- legacy list page's RPCs (get_dataset_audits_with_emails, get_dataset_audit_with_emails);
+-- its keep or exclude lives on in audit.legacy_decisions. Its readers move to the audit
+-- schema:
 -- - The public surface hides a dataset only when its evaluation decision is exclude
 --   (audit.is_dataset_excluded, audit.excluded_dataset_ids). Search, the archive, PRIWA
 --   flights, labels, AOIs and the correction RPCs follow through the helpers they call.
 -- - Predictions are never hidden because of the audit: the dataset views lose
 --   show_deadwood_predictions, show_forest_cover_predictions and the legacy fields and
---   expose audit_decision (ok, exclude) to audit readers and the dataset's owner.
+--   expose audit_decision (keep, exclude) to audit readers and the dataset's owner.
 -- - The processing overview's is_audited is the decision.
 -- The next migration moves the export view and the factory, and stops the writes.
 set local lock_timeout = '5s';
@@ -23,11 +25,11 @@ create function internal.audit_decisions()
 returns table (dataset_id bigint, decision text)
 language sql stable security definer set search_path = ''
 as $$
-	select e.dataset_id, e.decision
+	select e.dataset_id, e.decision::text
 	from audit.evaluation_decisions e
 	where e.decision is not null and (select internal.can_read_audit_checks())
 	union all
-	select own.id, e.decision
+	select own.id, e.decision::text
 	from public.v2_datasets own
 	cross join lateral (select d.decision from audit.evaluation_decisions d where d.dataset_id = own.id) e
 	where own.user_id = (select auth.uid()) and e.decision is not null

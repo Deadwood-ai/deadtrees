@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { IAcquisitionDateDecision, IAcquisitionDateEstimate } from "../types/acquisitionDate";
+import type { IAcquisitionDateDecision } from "../types/acquisitionDate";
 import {
   binToDate,
   dateToYearFraction,
-  datasetDateSuggestion,
-  isEstimateCurrent,
   joinYearWrap,
   activeDecision,
   evidenceText,
@@ -13,48 +11,7 @@ import {
   decisionDistribution,
 } from "./acquisitionDate";
 
-const estimate = (over: Partial<IAcquisitionDateEstimate> = {}): IAcquisitionDateEstimate => ({
-  dataset_id: 1,
-  model_version: "doy_estimation_v1",
-  model_type: "s2",
-  probabilities: new Array(365).fill(1 / 365),
-  flight_year: 2022,
-  recorded_year: 2022,
-  recorded_month: 3,
-  recorded_day: 24,
-  recorded_precision: "day",
-  predicted_date: "2022-07-10",
-  mode_date: "2022-07-09",
-  hdi: { "80": [["2022-06-20", "2022-08-01"]] },
-  hdi80_days: 42,
-  n_modes: 1,
-  recorded_surprise: 0.999,
-  recorded_offset_days: 108,
-  is_mismatch: true,
-  suggested_date: "2022-07-10",
-  suggestion_reason: "mismatch",
-  recommend_accept: true,
-  metadata: {},
-  updated_at: "2026-09-30T00:00:00Z",
-  ...over,
-});
-
 describe("acquisition date estimate helpers", () => {
-  it("shows the suggestion only while the dataset keeps the assessed date", () => {
-    const ds = { aquisition_year: 2022, aquisition_month: 3, aquisition_day: 24 };
-    expect(datasetDateSuggestion(estimate(), ds)).toEqual({ date: "2022-07-10", reason: "mismatch" });
-    // after an accepted suggestion the dataset carries the new date
-    expect(datasetDateSuggestion(estimate(), { aquisition_year: 2022, aquisition_month: 7, aquisition_day: 10 })).toBeNull();
-    expect(datasetDateSuggestion(estimate({ suggested_date: null, suggestion_reason: null }), ds)).toBeNull();
-    expect(datasetDateSuggestion(null, ds)).toBeNull();
-  });
-
-  it("compares string and missing date parts like the database", () => {
-    const e = estimate({ recorded_month: null, recorded_day: null });
-    expect(isEstimateCurrent(e, { aquisition_year: "2022", aquisition_month: null, aquisition_day: undefined })).toBe(true);
-    expect(isEstimateCurrent(e, { aquisition_year: 2022, aquisition_month: 5 })).toBe(false);
-  });
-
   it("joins a season that runs over New Year", () => {
     expect(
       joinYearWrap([
