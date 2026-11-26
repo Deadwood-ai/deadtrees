@@ -34,7 +34,8 @@ what is right, a tile answer only) and `not_assessable` (a model could not asses
 person cannot tell what the tile shows). A new answer is a new row; the newest counts.
 
 `dataset_human_reviews.evidence_key` is set on insert, never by the client: the ortho's
-sha256 for the dataset evaluation and georeferencing, the date estimate's advice
+sha256 for the dataset evaluation, the constant `dataset` for the georeferencing (a geotiff
+rerun keeps where the dataset lies, so the answer stays), the date estimate's advice
 (`replace` or `keep`) for the acquisition date (`internal.audit_evidence_key`). A review
 whose key differs from the dataset's current one is stale and no longer counts. A tile
 review counts while the run judged the same prediction label.
