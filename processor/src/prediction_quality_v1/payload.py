@@ -17,7 +17,7 @@ from .render import CROP_PX, judge_images
 CHECK_KEY = 'prediction_quality'
 LAYER_NAMES = {'deadwood': 'deadwood', 'forest': 'forest_cover'}
 IMAGE_KINDS = (('raw', None), ('deadwood_overlay', 'deadwood'), ('forest_cover_overlay', 'forest'))
-PICKER = 'pq-picker-v1'
+PICKER = 'windowed-v1'  # the sets are picked from tiles.CANDIDATES tiles the database draws
 
 
 def evidence(result: CheckResult) -> dict:
@@ -31,6 +31,7 @@ def evidence(result: CheckResult) -> dict:
 		'coverage': {
 			'mode': 'sampled',
 			'tiles_total': result.tiles_total,
+			'candidates': result.candidates,
 			'tiles': len(result.tiles),
 			'exclude_set': sum('exclude' in r.tile.sets for r in result.tiles),
 			'training_set': sum('training' in r.tile.sets for r in result.tiles),

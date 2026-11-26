@@ -18,12 +18,23 @@ than a tile is judged on the tiles it touches, and a dataset without an AOI on a
 tiles. The predictions are the dataset's active labels of the preferred model
 (`v2_model_preferences`), the newest per layer.
 
-Two tile sets, picked from the predicted cover of every tile:
+Two tile sets, picked from the predicted cover of candidate tiles:
 
 | Set | Tiles | Purpose |
 |---|---|---|
-| `exclude` | the 10 tiles with the most predicted deadwood and forest | where a bad prediction shows first |
+| `exclude` | the 10 candidates with the most predicted deadwood and forest | where a bad prediction shows first |
 | `training` | 1 per 2 ha, 10 to 40, stratified by predicted cover with area weights | an unbiased estimate of the share of bad tiles |
+
+The candidates keep the work to the tiles judged, however large the dataset (DT-1619: the
+check once read all 138,019 tiles and about 835k polygons of dataset 669 and hung).
+`audit.prediction_quality_candidates` draws up to 2000 (`tiles.CANDIDATES`) of the dataset's
+tiles inside the AOI in a fixed order (a hash of the dataset and the pixel window, so a rerun
+on the same data draws the same tiles) and works out each one's predicted deadwood, forest
+and AOI share in the database; it also counts the tiles inside the AOI (`tiles_total`). The
+two sets are picked from the candidates, the area from the AOI or the tiles inside it. Only
+then does `audit.prediction_quality_polygons` read the predictions, cut to the picked tiles,
+for the overlays. Both are for the audit worker (and analyst logins) only; picker
+`windowed-v1`.
 
 A tile in both sets is rendered and judged once. Per tile the judges see three images:
 `raw`, `deadwood_overlay` and `forest_cover_overlay` (blue and gold fill with outline;
@@ -50,13 +61,11 @@ outlines each layer along the tile border too, draws the forest with a stronger 
 
 ## What a run stores
 
-`handle(ctx)` reads the tiles, the AOI and every polygon of the two predictions (large
-predictions hold a few hundred thousand polygons; `shared.pagination.iter_pages_by_creation`
-reads them through the label's index), asks each judge per tile with four calls in
-parallel, renews the login, uploads the images to the storage server under
-`audit/prediction_quality/<dataset>/run-<run>/tile-<x0>-<y0>/`, and returns the run to the
-worker, which stores it with one call, `audit.finish_run`: all or nothing, and the run is
-done.
+`handle(ctx)` reads the AOI, the candidates and the polygons of the picked tiles, asks each
+judge per tile with four calls in parallel, renews the login, uploads the images to the
+storage server under `audit/prediction_quality/<dataset>/run-<run>/tile-<x0>-<y0>/`, and
+returns the run to the worker, which stores it with one call, `audit.finish_run`: all or
+nothing, and the run is done.
 
 - `audit.tiles`: one row per pixel window and dataset, shared by every run and check that
   judged the window, so a person's tile review carries over to a rerun.
@@ -67,8 +76,8 @@ done.
   (the errors it listed and its own verdict).
 - The run: `inputs` are the ortho sha256, the AOI key and the two label ids, read at run
   time. `evidence` holds each tile's sets, weight and predicted cover by pixel window,
-  coverage (tiles, tiles per set), cost (seconds and calls per model), versions and failed
-  calls.
+  coverage (`tiles_total` inside the AOI, `candidates`, tiles, tiles per set), cost
+  (seconds and calls per model), versions and failed calls.
 
 A judge that fails on one tile is counted in `evidence.failed_calls` and the other judge's
 answer stands; a judge that answers no tile at all fails the run, which is retried. Login

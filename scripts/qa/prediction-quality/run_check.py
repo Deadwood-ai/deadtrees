@@ -1,9 +1,9 @@
 """Run prediction_quality_v1 on given datasets, read-only, and keep every result locally.
 
 The benchmark's way to run the check without the audit worker and without writing anything:
-inputs from production through the analyst role (read-only transaction), the COG streamed over
-HTTPS, judges Luna (OpenAI Responses API key) and Haiku (the worker's Claude Code backend). Writes
-<out>/<dataset>/result.json and the tile images the judges saw. Production runs go through
+inputs from production through the analyst role (read-only transactions, the worker's
+audit.prediction_quality_* reads), the COG streamed over HTTPS, judges Luna (OpenAI Responses
+API key) and Haiku (the worker's Claude Code backend). Writes <out>/<dataset>/result.json and the tile images the judges saw. Production runs go through
 the audit worker (processor/src/prediction_quality_v1/handler.py).
 Run under a memory cap on the processing server (production ODM shares it):
 
@@ -26,14 +26,14 @@ from urllib.request import Request, urlopen
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from shapely.geometry import shape
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from processor.src.audit_worker.models import judges  # noqa: E402
 from processor.src.prediction_quality_v1.check import VERSIONS, run_prediction_quality  # noqa: E402
-from processor.src.prediction_quality_v1.handler import CONFIG  # noqa: E402
+from processor.src.prediction_quality_v1.handler import CONFIG, polygons_near, read_candidates  # noqa: E402
 from processor.src.prediction_quality_v1.render import judge_images  # noqa: E402
-from processor.src.prediction_quality_v1.tiles import Tile  # noqa: E402
 from processor.src.utils.stored_inputs import select_aoi  # noqa: E402
 
 COG_ROOT = 'https://data2.deadtrees.earth/cogs/v1/'
@@ -66,35 +66,15 @@ def inputs(db, dataset_id):
 			(dataset_id,),
 		).fetchall()
 	)
-	tiles = [
-		Tile(
-			tile_id=r['id'],
-			pixel_window=(r['pixel_x0'], r['pixel_y0'], r['pixel_x1'], r['pixel_y1']),
-			bbox_4326=(r['x0'], r['y0'], r['x1'], r['y1']),
-		)
-		for r in db.execute(
-			'SELECT id, pixel_x0, pixel_y0, pixel_x1, pixel_y1, ST_XMin(geometry) x0, ST_YMin(geometry) y0, '
-			'ST_XMax(geometry) x1, ST_YMax(geometry) y1 FROM v2_tile_embeddings WHERE dataset_id = %s',
-			(dataset_id,),
-		).fetchall()
-	]
-	geoms = {}
-	for layer, table, key in (
-		('deadwood', 'v2_deadwood_geometries', 'deadwood_label_id'),
-		('forest', 'v2_forest_cover_geometries', 'forest_label_id'),
-	):
-		geoms[layer] = (
-			[
-				shape(r['g'])
-				for r in db.execute(
-					f'SELECT ST_AsGeoJSON(geometry)::jsonb AS g FROM {table} WHERE label_id = %s AND NOT is_deleted',
-					(row[key],),
-				).fetchall()
-			]
-			if row[key]
-			else []
-		)
-	return row, tiles, geoms, aoi
+	return row, aoi
+
+
+def analyst_rpc(function, params):
+	"""The worker's audit.* reads (handler.audit_rpc), each in its own read-only transaction."""
+	args = ', '.join(f'{name} => %({name})s' for name in params)
+	values = {name: Jsonb(v) if isinstance(v, (dict, list)) else v for name, v in params.items()}
+	with analyst() as db:
+		return db.execute(f'SELECT audit.{function}({args})', values).fetchone()[0]
 
 
 def jpeg_bytes(image, quality=90):
@@ -192,6 +172,7 @@ def save(out, result, label_ids):
 				'versions': VERSIONS,
 				'label_ids': label_ids,
 				'tiles_total': result.tiles_total,
+				'candidates': result.candidates,
 				'seconds': result.seconds,
 				'tiles': judged,
 			},
@@ -220,20 +201,27 @@ if __name__ == '__main__':
 		if (out / 'result.json').exists():
 			continue
 		with analyst() as db:
-			row, tiles, geoms, aoi = inputs(db, dataset_id)
-		if not row or not tiles:
-			print({'dataset': dataset_id, 'skipped': 'no COG or CLIP tiles'}, flush=True)
+			row, aoi = inputs(db, dataset_id)
+		if not row:
+			print({'dataset': dataset_id, 'skipped': 'no COG'}, flush=True)
+			continue
+		label_ids = {'deadwood': row['deadwood_label_id'], 'forest': row['forest_label_id']}
+		try:
+			candidates, tiles_total, _ = read_candidates(analyst_rpc, dataset_id, aoi, label_ids)
+		except ValueError:
+			print({'dataset': dataset_id, 'skipped': 'no CLIP tiles'}, flush=True)
 			continue
 		result = run_prediction_quality(
 			dataset_id,
 			COG_ROOT + quote(row['cog_path'], safe='/'),
-			tiles,
+			candidates,
+			tiles_total,
 			shape(aoi) if aoi else None,
-			geoms,
+			polygons_near(analyst_rpc, label_ids),
 			backends,
 			workers=a.workers,
 		)
-		save(out, result, {'deadwood': row['deadwood_label_id'], 'forest': row['forest_label_id']})
+		save(out, result, label_ids)
 		print(
 			{
 				'dataset': dataset_id,

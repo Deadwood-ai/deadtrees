@@ -29,6 +29,7 @@ def _result(dataset_id: int, sets: list[str]) -> CheckResult:
 		epsg=EPSG,
 		tiles=[TileResult(tile=tile, crop=crop, answers=answers)],
 		tiles_total=1,
+		candidates=1,
 		seconds=1,
 	)
 
@@ -104,10 +105,13 @@ def test_finish_run_takes_a_run_and_a_second_run_shares_its_tile(
 		assert audit.table('dataset_vlm_judgements').select('id').eq('dataset_id', dataset_id).execute().data == []
 
 
-def test_large_predictions_are_read_page_by_page(test_dataset_for_processing, auth_token, test_processor_user):
-	count = 2500  # more than two pages
-	from processor.src.prediction_quality_v1.handler import prediction_polygons
+def test_the_polygons_of_a_box_come_whole_through_postgrest(
+	test_dataset_for_processing, auth_token, test_processor_user
+):
+	"""More polygons than PostgREST's max_rows (1000) in one box: the read returns one value, not rows."""
+	from processor.src.prediction_quality_v1.handler import audit_rpc, polygons_near
 
+	count = 1500
 	with use_client(auth_token) as client:
 		label = {
 			'dataset_id': test_dataset_for_processing,
@@ -120,26 +124,26 @@ def test_large_predictions_are_read_page_by_page(test_dataset_for_processing, au
 		label_id = client.table('v2_labels').insert(label).execute().data[0]['id']
 		polygon = mapping(box(7.80, 48.00, 7.8001, 48.0001))
 		rows = [{'label_id': label_id, 'geometry': polygon} for _ in range(count)]
-		# chunks that end inside a page: rows of one insert share their creation time
 		for start in range(0, count, 700):
 			client.table('v2_deadwood_geometries').insert(rows[start : start + 700]).execute()
-		found = prediction_polygons(client, 'v2_deadwood_geometries', label_id)
-	assert len(found) == count and found[0].geom_type == 'Polygon'
+		near, far = polygons_near(audit_rpc(client), {'deadwood': label_id})(
+			'deadwood', [(7.7999, 47.9999, 7.8002, 48.0002), (7.9, 48.1, 7.91, 48.11)]
+		)
+	assert len(near) == count and near[0].geom_type == 'Polygon' and far == []
 
 
 def test_the_handler_runs_on_stored_inputs(
 	test_dataset_for_processing, auth_token, test_processor_user, tmp_path, monkeypatch
 ):
 	"""The whole run on real tables and the storage server. Faked: the judges. The tiles are
-	read with the service key, because only the embedding stage's own completion call (bound
-	to a queue claim) makes a dataset's tiles readable. The model preferences are the
+	written and marked done with the service key, because only the embedding stage's own
+	completion call (bound to a queue claim) may do that. The model preferences are the
 	defaults, because the isolated local stack lacks the table grant on v2_model_preferences
 	that production and the CI database give signed-in users (DT-1497)."""
 	from types import SimpleNamespace
 
 	from processor.src.prediction_quality_v1 import handler
 	from processor.src.utils.ssh import push_file_to_storage_server
-	from processor.src.utils.stored_inputs import tile_rows
 	from processor.tests.test_prediction_quality import _squares, _to_wgs
 	from shared.db import use_service_client
 	from shared.models import DEFAULT_MODEL_PREFERENCES, LabelDataEnum
@@ -168,8 +172,7 @@ def test_the_handler_runs_on_stored_inputs(
 				for n, square in enumerate(squares)
 			]
 		).execute()
-		stored_tiles = tile_rows(service, dataset_id)
-	monkeypatch.setattr(handler, 'tile_rows', lambda client, dataset_id: stored_tiles)
+		service.table('v2_statuses').update({'is_embeddings_done': True}).eq('dataset_id', dataset_id).execute()
 	monkeypatch.setattr(handler, 'read_model_preferences', lambda client: DEFAULT_MODEL_PREFERENCES)
 	with use_client(auth_token) as client:
 		client.table('v2_orthos').update({'sha256': SHA}).eq('dataset_id', dataset_id).execute()
@@ -210,7 +213,7 @@ def test_the_handler_runs_on_stored_inputs(
 		)
 		out = handler.handle(ctx)
 		assert out['inputs']['label_ids'] == labels and out['inputs']['ortho_sha256'] == SHA
-		assert out['evidence']['coverage']['tiles'] == 4
+		assert out['evidence']['coverage']['tiles'] == 4 and out['evidence']['coverage']['candidates'] == 4
 		runs.finish(client, run, out)
 		stored = client.schema('audit').table('tiles').select('*').eq('dataset_id', dataset_id).execute().data
 		assert len(stored) == 4
