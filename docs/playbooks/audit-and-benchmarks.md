@@ -76,7 +76,7 @@ Each dataset has 7 steps: dataset evaluation, area of interest, georeferencing,
 acquisition date, phenology, tree cover prediction, deadwood prediction. Save stores one
 review per step you answered or changed. A tile answer in steps 6 and 7 is stored at once,
 on the prediction the tile shows. A review counts while the evidence it was given on is
-the same: a new ortho asks again, a new prediction makes the tile answers stop counting.
+the same: a new ortho asks the dataset evaluation again (a georeferencing answer stays), a new prediction makes the tile answers stop counting.
 
 Keys: Enter next step (in the tile view: save and go on), Shift+Enter back, Ctrl+S save.
 In the tile view: ← → tiles, Tab next tile without an answer, ↑ ↓ problem, Y N U yes,

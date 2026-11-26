@@ -253,18 +253,18 @@ def test_an_unsure_check_needs_a_review_until_one_counts(db):
 # ---------------------------------------------------------------------------
 
 
-def test_a_georef_review_settles_needs_review_while_the_ortho_is_the_same(db):
+def test_a_georef_review_settles_needs_review_and_survives_a_rewritten_ortho(db):
 	auditor, dataset = create_user(db, can_audit=True), create_dataset(db, create_user(db))
 	add_ortho(db, dataset)
 	write_check(db, dataset, 'uncertain', 'conflict')
 	assert outcome(db, dataset, 'georef_status', 'georef_source', 'review_required') == ('needs_review', 'check', ['georef'])
 	review(db, auditor, dataset, 'georef', georef_status='passed')
 	assert outcome(db, dataset, 'georef_status', 'georef_source', 'review_required') == ('passed', 'reviewer', [])
-	# a georeferencing rerun keeps the review (same ortho); a new ortho does not
+	# a georeferencing rerun keeps the review, and so does a geotiff rerun that rewrites the ortho
 	write_check(db, dataset, 'uncertain', 'insufficient')
 	assert outcome(db, dataset, 'georef_status', 'review_required') == ('passed', [])
 	add_ortho(db, dataset, 'd' * 64)
-	assert outcome(db, dataset, 'georef_status', 'georef_source', 'review_required') == ('needs_review', 'check', ['georef'])
+	assert outcome(db, dataset, 'georef_status', 'georef_source', 'review_required') == ('passed', 'reviewer', [])
 
 
 def test_a_date_review_holds_while_the_advice_is_the_same_and_reopens_when_it_flips(db):
