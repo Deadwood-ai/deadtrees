@@ -103,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
 	if limit is None or limit > worker.MEMORY_LIMIT:
 		print(
 			'Start the worker under a memory cap of at most 10 GB, e.g.\n'
-			'  systemd-run --user --scope -p MemoryMax=10G -- python -m processor.src.audit_worker run',
+			'  scripts/audit_worker/start.sh (the service has MemoryMax=10G)',
 			file=sys.stderr,
 		)
 		return 2
@@ -111,7 +111,9 @@ def main(argv: list[str] | None = None) -> int:
 	token_box = {'token': token}
 
 	def fresh():
-		client, token_box['token'] = connect()
+		# one client for the worker's life, its login renewed in place: a new client per tick
+		# left its connections open (CLOSE-WAIT) until the process ran out of them
+		token_box['token'] = sign_in_again(client)
 		return client, token_box['token']
 
 	status = worker.run_forever(
