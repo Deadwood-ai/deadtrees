@@ -6,9 +6,9 @@ import type { DatasetAcquisitionDate } from "./AcquisitionDateRows";
 import { InfoRow } from "./InfoRow";
 
 /** The season the image was taken in: the phenology curve of the site with the acquisition
- * date on it, and the probability that it falls in the maximum greenness period. */
+ * date on it (the audit's new date where it replaces the reported one), and the probability that it falls in the maximum greenness period. */
 export default function PhenologyRow({ dataset }: { dataset: DatasetAcquisitionDate & { phenology_probability?: number | null } }) {
-  const { phenology, isLoading, probability } = useDatasetPhenology(dataset);
+  const { phenology, isLoading, probability, date } = useDatasetPhenology(dataset);
   return (
     <InfoRow
       label="Phenology"
@@ -17,14 +17,14 @@ export default function PhenologyRow({ dataset }: { dataset: DatasetAcquisitionD
       <div className="flex w-[210px] items-center gap-2">
         {isLoading ? (
           <InlineSkeleton label="Loading phenology" className="h-4 w-full" />
-        ) : phenology && dataset.aquisition_year ? (
+        ) : phenology && date.aquisition_year ? (
           <>
             <PhenologyBar
               className="min-w-0 flex-1"
               phenologyData={phenology}
-              acquisitionYear={dataset.aquisition_year}
-              acquisitionMonth={dataset.aquisition_month ?? undefined}
-              acquisitionDay={dataset.aquisition_day ?? undefined}
+              acquisitionYear={date.aquisition_year}
+              acquisitionMonth={date.aquisition_month ?? undefined}
+              acquisitionDay={date.aquisition_day ?? undefined}
               showTooltips={true}
               monthsOnHover
             />

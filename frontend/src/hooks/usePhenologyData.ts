@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { PhenologyMetadata } from "../types/phenology";
-import { phenologyProbabilityAt } from "../utils/phenologyUtils";
+import { type AcquisitionDateParts, phenologyDate, phenologyProbabilityAt } from "../utils/phenologyUtils";
+import { useDatasetAuditSummary } from "./useDatasetAuditSummary";
 
 export function usePhenologyData(datasetId: number | undefined) {
   return useQuery({
@@ -34,21 +35,21 @@ export function usePhenologyData(datasetId: number | undefined) {
   });
 }
 
-type DatasetPhenologyDate = {
+type DatasetPhenologyDate = AcquisitionDateParts & {
   id: number;
-  aquisition_year?: number | string | null;
-  aquisition_month?: number | string | null;
-  aquisition_day?: number | string | null;
-  /** computed server-side in the dataset views (phenology_probability_at) */
+  /** computed server-side in the dataset views (phenology_probability_at), at the reported date */
   phenology_probability?: number | null;
 };
 
-/** A dataset's phenology curve and the probability that it was taken in the maximum greenness
- * period: the views' value, else worked out from the curve and the acquisition date. */
+/** A dataset's phenology curve, the date it is read at and the probability that the image was
+ * taken in the maximum greenness period. Where the audit replaces the reported date, both follow
+ * the new date; else the views' value, or the curve at the reported date. */
 export function useDatasetPhenology(dataset: DatasetPhenologyDate) {
   const { data: phenology, isLoading } = usePhenologyData(dataset.id);
+  const { data: audit } = useDatasetAuditSummary(dataset.id);
+  const date = phenologyDate(dataset, audit?.date_new);
   const probability =
-    dataset.phenology_probability ??
-    phenologyProbabilityAt(phenology?.phenology_curve, dataset.aquisition_year, dataset.aquisition_month, dataset.aquisition_day);
-  return { phenology, isLoading, probability };
+    (audit?.date_new ? null : dataset.phenology_probability) ??
+    phenologyProbabilityAt(phenology?.phenology_curve, date.aquisition_year, date.aquisition_month, date.aquisition_day);
+  return { phenology, isLoading, probability, date };
 }
