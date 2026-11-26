@@ -291,6 +291,37 @@ def test_dataset_update_additional_information(auth_token, test_user, test_datas
 		assert history_entry['new_value'] == new_info
 
 
+def test_dataset_archive_and_restore_logged(auth_token, test_user, test_dataset_for_editing):
+	"""Test that archiving a dataset and restoring it are both logged"""
+	with use_client(auth_token) as client:
+		# Archive the way the dataset table's archive button does, then restore
+		for archived in (True, False):
+			response = (
+				client.table(settings.datasets_table)
+				.update({'archived': archived})
+				.eq('id', test_dataset_for_editing)
+				.execute()
+			)
+			assert response.data is not None
+			assert response.data[0]['archived'] is archived
+
+		# Verify edit history
+		history_response = (
+			client.table('v2_dataset_edit_history')
+			.select('*')
+			.eq('dataset_id', test_dataset_for_editing)
+			.eq('field_name', 'archived')
+			.order('id')
+			.execute()
+		)
+		assert history_response.data is not None
+		assert [(entry['old_value'], entry['new_value']) for entry in history_response.data] == [
+			(False, True),
+			(True, False),
+		]
+		assert all(entry['user_id'] == test_user for entry in history_response.data)
+
+
 def test_dataset_update_multiple_fields(auth_token, test_user, test_dataset_for_editing):
 	"""Test updating multiple fields at once and verify all changes are logged"""
 	with use_client(auth_token) as client:
