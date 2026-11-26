@@ -14,6 +14,8 @@
 -- tiles use it) finds the few polygons there, and the label is filtered on those. On a
 -- synthetic dataset (30k tiles, 900k deadwood polygons of six labels, a forest polygon of
 -- 511k vertices and 22k holes) 2000 candidates took 2.5 s and the polygons of 50 tiles 0.5 s.
+-- Each call must end within the statement timeout of the worker's login (8 s for
+-- authenticated in production); a function's own statement_timeout setting changes nothing.
 
 -- The audit worker reads for its runs; an analyst login (not a superuser, who is a member of
 -- every role) for the check's benchmark runs (scripts/qa/prediction-quality/run_check.py),
@@ -116,7 +118,7 @@ create function audit.prediction_quality_candidates(
 	p_inside double precision
 )
 returns jsonb
-language plpgsql stable security definer set search_path = '' set statement_timeout = '90s'
+language plpgsql stable security definer set search_path = ''
 as $$
 declare
 	v_aoi public.geometry;
@@ -202,7 +204,7 @@ grant execute on function audit.prediction_quality_candidates(bigint, bigint, bi
 -- tiles it picked, to draw the overlays.
 create function audit.prediction_quality_polygons(p_label_id bigint, p_boxes jsonb)
 returns jsonb
-language plpgsql stable security definer set search_path = '' set statement_timeout = '90s'
+language plpgsql stable security definer set search_path = ''
 as $$
 declare
 	v_result jsonb;
