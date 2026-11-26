@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { IGeorefCheck, IGeorefReferenceEvidence } from "../types/georefCheck";
-import { PROVIDER_NAMES, describeReference, fillTileTemplate, offsetColor, orderedReferences, summarizeGeorefCheck } from "./georefCheck";
+import { PROVIDER_NAMES, describeReference, fillTileTemplate, offsetColor, orderedReferences } from "./georefCheck";
 
 const ref = (provider: string, decides: boolean, inliers: number): IGeorefReferenceEvidence => ({
   provider,
@@ -42,24 +42,10 @@ const check = (overrides: Partial<IGeorefCheck>): IGeorefCheck => ({
 });
 
 describe("georeferencing check display", () => {
-  it("summarizes a decided check with the measured offset and evidence strength", () => {
-    expect(summarizeGeorefCheck(check({}))).toEqual({
-      tone: "success",
-      verdict: "Good, 2.7 m off",
-      detail: "Strong evidence: 2.7 m off on 90% of the area (Esri World Imagery (current) and google).",
-    });
-    expect(summarizeGeorefCheck(check({ decision: "poor", evidence_level: "qualified", p90_m: 22.6 })).tone).toBe("error");
-  });
-
-  it("asks for a look by eye when the check is uncertain, naming why", () => {
-    const summary = summarizeGeorefCheck(check({ decision: "uncertain", evidence_level: "insufficient", reason: "no_qualified_reference", p90_m: null }));
-    expect(summary.tone).toBe("warning");
-    expect(summary.verdict).toBe("Uncertain");
-    expect(summary.detail).toContain("No reference image matched reliably");
-  });
-
-  it("lists deciding references first, then by matches", () => {
+  it("lists the references that measured an offset first, then by matches", () => {
     expect(orderedReferences(check({})).map((r) => r.provider)).toEqual(["esri", "google", "maptiler"]);
+    const unmeasured = { ...ref("esri", true, 2400), p90_m: null };
+    expect(orderedReferences(check({ reference_evidence: [unmeasured, ref("google", true, 900)] })).map((r) => r.provider)).toEqual(["google", "esri"]);
   });
 
   it("names Wayback references by their capture date", () => {

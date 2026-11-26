@@ -12,7 +12,7 @@ import VectorSource from "ol/source/Vector";
 import { getDistance } from "ol/sphere";
 import { Circle, Fill, Stroke, Style } from "ol/style";
 
-import { describeGeorefReason, describeReference, fillTileTemplate, offsetColor, orderedReferences } from "../../../utils/georefCheck";
+import { describeReference, fillTileTemplate, offsetColor, orderedReferences } from "../../../utils/georefCheck";
 import type { IGeorefCheck, IGeorefReferenceEvidence, IGeorefReferenceViewer } from "../../../types/georefCheck";
 
 /** The tile source of a keyless reference (WMS as 256 px tiles). */
@@ -56,16 +56,15 @@ export interface IGeorefReferenceOption {
 	hasImagery: boolean;
 }
 
-/** Every reference with imagery to show or matches to draw, deciding ones first. */
+/** Every reference with imagery to show or matches to draw, the ones that measured an offset first. */
 export function georefReferenceOptions(check: IGeorefCheck): IGeorefReferenceOption[] {
 	return orderedReferences(check)
 		.filter((r) => check.metadata.references?.[r.provider]?.viewer || r.sample_pairs.length > 0)
 		.map((r) => {
-			const call = r.decides && r.vote && r.vote !== "unstable" ? `decided ${r.vote}` : describeGeorefReason(r.reason);
 			const offset = r.p90_m === null ? "" : ` · ${r.p90_m.toFixed(1)} m`;
 			return {
 				value: r.provider,
-				label: `${describeReference(check, r.provider)} · ${call}${offset}`,
+				label: `${describeReference(check, r.provider)} · ${r.inliers} matches${offset}`,
 				hasImagery: !!check.metadata.references?.[r.provider]?.viewer,
 			};
 		});

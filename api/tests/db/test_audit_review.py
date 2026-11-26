@@ -260,11 +260,15 @@ def test_a_georef_review_settles_needs_review_and_survives_a_rewritten_ortho(db)
 	assert outcome(db, dataset, 'georef_status', 'georef_source', 'review_required') == ('needs_review', 'check', ['georef'])
 	review(db, auditor, dataset, 'georef', georef_status='passed')
 	assert outcome(db, dataset, 'georef_status', 'georef_source', 'review_required') == ('passed', 'reviewer', [])
-	# a georeferencing rerun keeps the review, and so does a geotiff rerun that rewrites the ortho
-	write_check(db, dataset, 'uncertain', 'insufficient')
+	# a georeferencing rerun keeps the review, also when it now finds no reference imagery,
+	# and so does a geotiff rerun that rewrites the ortho
+	write_check(db, dataset, 'uncertain', 'insufficient', refs=[], reason='no_qualified_reference')
 	assert outcome(db, dataset, 'georef_status', 'review_required') == ('passed', [])
 	add_ortho(db, dataset, 'd' * 64)
 	assert outcome(db, dataset, 'georef_status', 'georef_source', 'review_required') == ('passed', 'reviewer', [])
+	# a person can also answer that there is no reference imagery to compare with
+	review(db, auditor, dataset, 'georef', georef_status='no_reference')
+	assert outcome(db, dataset, 'georef_status', 'georef_source') == ('no_reference', 'reviewer')
 
 
 def test_a_date_review_holds_while_the_advice_is_the_same_and_reopens_when_it_flips(db):
@@ -407,13 +411,14 @@ def test_the_dataset_page_summary_shows_the_outcome_and_the_deciding_models_reas
 		],
 	)
 	tile_review(db, auditor, dataset, tile_ids(db, run)[2], labels['deadwood'], 'ok')
+	write_check(db, dataset, 'uncertain', 'insufficient', refs=[], reason='no_qualified_reference')
 	act_as_anon(db)
 	summary = db.execute('SELECT public.get_dataset_audit_summary(%s)', (dataset,)).fetchone()[0]
 	assert summary == {
 		'review_required': [],
 		'evaluation_decision': 'keep',
 		'evaluation_reason': None,
-		'georef_status': None,
+		'georef_status': 'no_reference',
 		'georef_offset_m': None,
 		'date_replace': True,
 		'date_new': '2022-07-19',

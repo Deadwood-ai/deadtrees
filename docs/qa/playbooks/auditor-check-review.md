@@ -33,8 +33,9 @@ check's map mode, answers stored as reviews in `audit.dataset_human_reviews` and
 1. Open `/dataset-audit?tab=pending`; the seeded dataset is listed with "Review required"
    for the dataset evaluation and georeferencing (not for the prediction layers).
 2. Open `/dataset-audit/91090?section=georef`. The map shows the reference under the
-   drone image with match lines; the panel switches reference and opacity. Answer
-   Passed or Not passed.
+   drone image with match lines; the panel switches reference and opacity. The step says
+   the references do not support a reliable offset estimate. Answer Passed, Not passed or
+   No reference imagery.
 3. Open `1. Dataset evaluation`: the COG and thumbnail facts with the COG issue flagged,
    "The evaluation could not decide", and the decision OK or Exclude (no Fix).
 4. Open `5. Phenology`: the probability and, where the site has a curve, the phenology

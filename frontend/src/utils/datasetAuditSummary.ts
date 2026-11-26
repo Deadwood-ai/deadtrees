@@ -10,8 +10,9 @@ const metres = (m: number) => `${m < 10 ? m.toFixed(1) : Math.round(m)} m`;
  * evaluation review does not hide the georeferencing. */
 export const reviewOpen = (summary: IDatasetAuditSummary, item: ReviewItem) => summary.review_required.includes(item);
 
-/** The georeferencing in words; null while there is none to show (not run, or waiting for a
- * person), which the page shows as pending. */
+/** The georeferencing in words: the check's estimated offset, or a person's answer (passed, not
+ * passed) or either's "no reference imagery"; null while there is none to show (not run, or
+ * waiting for a person), which the page shows as pending. */
 export function georefFinding(summary: IDatasetAuditSummary | null | undefined): string | null {
   if (!summary || reviewOpen(summary, "georef")) return null;
   const offset = summary.georef_offset_m;

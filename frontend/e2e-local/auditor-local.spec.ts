@@ -133,12 +133,12 @@ const datasetResult = (dataset_id: number, over: Record<string, unknown> = {}) =
   ...over,
 });
 
-// The dataset to review: the evaluation could not decide, there is no AOI, and no reference
-// decides the georeferencing.
+// The dataset to review: the evaluation could not decide, there is no AOI, and the references
+// do not support a reliable georeferencing offset.
 const datasetResults = [
   datasetResult(completeDataset.id, {
     georef_status: "needs_review",
-    georef_offset_m: 22.6,
+    georef_offset_m: null,
     georef_source: "check",
     deadwood_total: 20,
     deadwood_major: 4,
@@ -211,22 +211,23 @@ const flags = [
   },
 ];
 
-// The georeferencing check measured a 22.6 m offset on two independent references.
+// The georeferencing check: Esri has plenty of matches but bunched in three grid cells, the DOP's
+// are inconsistent, so no reference supports an offset estimate.
 const georefCheck = {
   dataset_id: completeDataset.id,
   model_version: "romav2.0.1",
   rules_version: "georef-rules-v1",
-  decision: "poor",
-  evidence_level: "strong",
-  reason: "references_agree",
-  p90_m: 22.6,
-  evidence_groups: 2,
-  support: 0.97,
-  edge_support: 0.9,
+  decision: "uncertain",
+  evidence_level: "insufficient",
+  reason: "no_qualified_reference",
+  p90_m: null,
+  evidence_groups: 0,
+  support: 0,
+  edge_support: 0,
   used_aoi: true,
   reference_evidence: [
-    { provider: "esri", group: "esri", matches: 2400, inliers: 2300, inlier_fraction: 0.95, cells: 16, support: 0.97, edge_support: 0.9, p50_m: 21.9, p90_m: 22.7, holdout_p90_m: [22.1, 23.0], vote: "poor", qualified: true, decides: true, reason: null, sample_pairs: [[8.0, 48.0, 8.0003, 48.0], [8.001, 48.001, 8.0013, 48.001]] },
-    { provider: "de-bw-dop20", group: "de-bw-dop20", matches: 1800, inliers: 1600, inlier_fraction: 0.9, cells: 15, support: 0.95, edge_support: 0.88, p50_m: 21.5, p90_m: 22.4, holdout_p90_m: [22.0, 22.9], vote: "poor", qualified: true, decides: true, reason: null, sample_pairs: [] },
+    { provider: "esri", group: "esri", matches: 2400, inliers: 2300, inlier_fraction: 0.95, cells: 3, support: 0, edge_support: 0, p50_m: null, p90_m: null, holdout_p90_m: [], vote: null, qualified: false, decides: false, reason: "clustered_matches", sample_pairs: [[8.0, 48.0, 8.0003, 48.0], [8.001, 48.001, 8.0013, 48.001]] },
+    { provider: "de-bw-dop20", group: "de-bw-dop20", matches: 1800, inliers: 800, inlier_fraction: 0.44, cells: 15, support: 0, edge_support: 0, p50_m: null, p90_m: null, holdout_p90_m: [], vote: null, qualified: false, decides: false, reason: "inconsistent_matches", sample_pairs: [] },
     { provider: "wayback-12457", group: "esri", matches: 4, inliers: 0, inlier_fraction: 0, cells: 0, support: 0, edge_support: 0, p50_m: null, p90_m: null, holdout_p90_m: [], vote: null, qualified: false, decides: false, reason: "no_fit", sample_pairs: [] },
   ],
   reference_errors: { maptiler: "blank imagery" },
@@ -623,7 +624,7 @@ test.describe("auditor local e2e", () => {
     // a subset tab: n of N, with its chip fixed
     await expect(count.locator(".ant-tag")).toHaveText("Review required");
     await expect(count).toContainText("1 of 3 datasets");
-    await expect(table.getByText("Needs review (best reference 23 m)")).toBeVisible();
+    await expect(table.getByText("Needs review", { exact: true })).toBeVisible();
     await expect(table.locator(".ant-tag").filter({ hasText: "Georeferencing" })).toBeVisible();
 
     await page.getByText("All audits").click();
@@ -800,18 +801,19 @@ test.describe("auditor local e2e", () => {
     await dismissCookieBanner(page);
 
     const georef = await section(page, "Georeferencing");
-    await expect(georef.getByText("Strong evidence: 22.6 m off on 90% of the area (Esri World Imagery (current) and DOP Baden-Württemberg (DE)).")).toBeVisible({ timeout: 20_000 });
-    await expect(georef.getByText("Passed (≤ 15 m)")).toBeVisible();
+    await expect(georef.getByText("The references do not support a reliable offset estimate: their matches are inconsistent or bunched in part of the image. Compare the drone image with them on the map.")).toBeVisible({ timeout: 20_000 });
+    await expect(georef.getByText("3 of 16 cells")).toBeVisible();
+    await expect(georef.getByText("800 of 1800 (44%)")).toBeVisible();
+    for (const answer of ["Passed (≤ 15 m)", "Not passed (> 15 m)", "No reference imagery"]) await expect(georef.getByText(answer)).toBeVisible();
 
     // opening the section puts the map into georeferencing mode: reference picker, match lines, opacity
     const panel = page.getByText("Map mode: Georeferencing").locator("..");
     await expect(panel).toBeVisible();
-    await expect(panel.getByText(/Esri World Imagery \(current\).*22\.7 m/)).toBeVisible();
+    await expect(panel.getByText("Esri World Imagery (current) · 2300 matches")).toBeVisible();
     await expect(panel.getByText("Unavailable: maptiler (blank imagery)")).toBeVisible();
     await expect(panel.getByRole("slider")).toBeVisible();
     await panel.locator(".ant-select").click();
-    await expect(page.getByText(/Esri Wayback, captured 2019-06-02/).first()).toBeVisible();
-    await expect(page.getByText(/no confident matches \(uniform canopy, season or blank imagery\)/).first()).toBeVisible();
+    await expect(page.getByText(/Esri Wayback, captured 2019-06-02 · 0 matches/).first()).toBeVisible();
   });
 
   test("the review line follows the answers on the page", async ({ page }) => {

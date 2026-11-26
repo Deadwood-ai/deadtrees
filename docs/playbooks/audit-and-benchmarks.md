@@ -50,8 +50,9 @@ They run in this order; the review page shows them as steps.
 - **Dataset evaluation.** The only decision, plus COG and thumbnail issues. Judges look at
   an overview, four tiles and the thumbnail. [dataset-evaluation.md](../dataset-evaluation.md)
 - **Area of interest.** Whether an AOI exists, when, by whom and with which model.
-- **Georeferencing.** Estimated, no reference, needs review, passed or not passed, and the
-  offset in metres; passed means within 15 m. [georef-check.md](../georef-check.md)
+- **Georeferencing.** The estimated offset in metres, or no reference imagery. It asks a
+  person only when the references matched too poorly for an estimate. Passed (within 15 m)
+  and not passed come only from a reviewer. [georef-check.md](../georef-check.md)
 - **Acquisition date.** AerialStamp: keep the recorded date or replace it with the
   estimate. It never changes the dataset. [doy-estimation.md](../doy-estimation.md)
 - **Phenology.** The probability of peak greenness on the recorded date.
@@ -66,8 +67,8 @@ a time; its commands and safety rules are in [audit-checks.md](../audit-checks.m
 Open the Audit Review. **All audits** lists every dataset, **Pending audit reviews** the
 ones a check asks about, **Benchmark** the three benchmarks. A check asks for a person
 when the dataset evaluation is unsure, the AOI step ran or failed without an AOI, the
-georeferencing needs review, or the date estimate's advice flipped after a reviewer's
-answer. The prediction layers never ask, and an excluded dataset asks nothing more; you
+references match too poorly for a georeferencing offset, or the date estimate's advice
+flipped after a reviewer's answer. The prediction layers never ask, and an excluded dataset asks nothing more; you
 can still answer them. The filters narrow either tab, e.g. to one review reason or to the
 excluded datasets, and Save & Next goes on to the next row of the table as you filtered
 it, ending back at the list after the last one.

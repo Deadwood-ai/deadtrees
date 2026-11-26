@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuditCheckKey, IAuditDatasetResult, ITileCall } from "../types/auditChecks";
 import {
 	evaluationReview,
+	georefCheckSentence,
 	georefText,
 	initialDraft,
 	layerProgress,
@@ -63,7 +64,7 @@ describe("what still needs a person", () => {
 	});
 
 	it("marks an open step and otherwise shows the check's output", () => {
-		const r = result({ review_required: ["georef"], georef_status: "needs_review", georef_offset_m: 22 });
+		const r = result({ review_required: ["georef"], georef_status: "needs_review", georef_offset_m: null });
 		expect(sectionStatus("georef", r, ["georef"], RAN).label).toBe("Review required");
 		expect(sectionStatus("georef", r, [], RAN).label).toBe("Needs review");
 		expect(sectionStatus("evaluation", r, [], RAN)).toEqual({ label: "OK", tone: "ok" });
@@ -80,9 +81,20 @@ describe("what still needs a person", () => {
 describe("output words", () => {
 	it("describes the georeferencing output", () => {
 		expect(georefText(result())).toBe("4.2 m offset");
-		expect(georefText(result({ georef_status: "needs_review", georef_offset_m: 22.4 }))).toBe("Needs review (best reference 22 m)");
-		expect(georefText(result({ georef_status: "no_reference", georef_offset_m: null }))).toBe("No reference");
+		expect(georefText(result({ georef_status: "needs_review", georef_offset_m: null }))).toBe("Needs review");
+		expect(georefText(result({ georef_status: "no_reference", georef_offset_m: null }))).toBe("No reference imagery");
+		expect(georefText(result({ georef_status: "not_passed", georef_source: "reviewer" }))).toBe("Not passed (> 15 m)");
 		expect(georefText(null)).toBe("Not run yet");
+	});
+
+	it("says what the check found, and nothing once a person answered", () => {
+		expect(georefCheckSentence(result())).toBe("Estimated offset: 4.2 m, the references' median on 90% of the matched area.");
+		expect(georefCheckSentence(result({ georef_status: "needs_review", georef_offset_m: null }))).toBe(
+			"The references do not support a reliable offset estimate: their matches are inconsistent or bunched in part of the image. Compare the drone image with them on the map.",
+		);
+		expect(georefCheckSentence(result({ georef_status: "no_reference", georef_offset_m: null }))).toBe("No reference imagery matched this dataset.");
+		expect(georefCheckSentence(result({ georef_status: "passed", georef_source: "reviewer" }))).toBeNull();
+		expect(georefCheckSentence(null)).toBeNull();
 	});
 
 	it("reads the larger major crop share", () => {
@@ -148,6 +160,13 @@ describe("Save: the dataset reviews", () => {
 		const { reviews, answered } = save({ ...initialDraft(result(open)), georefStatus: "passed" }, open);
 		expect(answered).toEqual(["georef"]);
 		expect(reviews).toEqual([{ dataset_id: 7, check_key: "georef", georef_status: "passed", note: null }]);
+	});
+
+	it("starts from a reviewer's no reference imagery answer", () => {
+		const answeredBefore = { georef_status: "no_reference" as const, georef_source: "reviewer" as const };
+		expect(initialDraft(result(answeredBefore)).georefStatus).toBe("no_reference");
+		// the check's own no reference is not an answer
+		expect(initialDraft(result({ georef_status: "no_reference", georef_source: "check" })).georefStatus).toBeNull();
 	});
 
 	it("keeps an earlier reviewer's georeferencing answer unless it changes or the step is open again", () => {

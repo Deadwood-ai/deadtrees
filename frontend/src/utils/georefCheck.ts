@@ -1,21 +1,5 @@
 import type { IGeorefCheck, IGeorefReferenceEvidence } from "../types/georefCheck";
 
-const REASONS: Record<string, string> = {
-  no_fit: "no confident matches (uniform canopy, season or blank imagery)",
-  few_inliers: "too few consistent matches",
-  inconsistent_matches: "matches disagree with each other",
-  clustered_matches: "matches cover only part of the image",
-  no_support: "matches do not cover the area of interest",
-  too_few_holdouts: "too few matches to cross-check",
-  low_support: "matches cover less than 30% of the area of interest",
-  unstable_near_threshold: "offset close to 15 m; the call flips under cross-checks",
-  references_disagree: "references disagree about the 15 m line",
-  no_qualified_reference: "no reference image matched reliably",
-  on_null_line: "nothing matches and the image sits on the equator or prime meridian (lost coordinates)",
-};
-
-export const describeGeorefReason = (reason: string | null | undefined) => (reason ? (REASONS[reason] ?? reason.replace(/_/g, " ")) : "");
-
 // Readable names for the registry (processor/src/georef_check_v1/providers.json);
 // georefCheck.test.ts checks that every registry entry has one.
 export const PROVIDER_NAMES: Record<string, string> = {
@@ -104,38 +88,6 @@ export function describeReference(check: IGeorefCheck, provider: string): string
   return PROVIDER_NAMES[provider] ?? provider;
 }
 
-export interface GeorefSummary {
-  tone: "success" | "error" | "warning";
-  /** the call, e.g. "Poor, 19.8 m off" */
-  verdict: string;
-  /** what it rests on, or why it is uncertain */
-  detail: string;
-}
-
-/** The check's call and what it rests on, for the audit card. */
-export function summarizeGeorefCheck(check: IGeorefCheck): GeorefSummary {
-  if (check.decision === "uncertain") {
-    return { tone: "warning", verdict: "Uncertain", detail: `${capitalize(describeGeorefReason(check.reason))}. Please check by eye.` };
-  }
-  if (check.evidence_level === "gross") {
-    return { tone: "error", verdict: "Poor", detail: `${capitalize(describeGeorefReason(check.reason))}.` };
-  }
-  const deciding = orderedReferences(check).filter((r) => r.decides);
-  const names = deciding.slice(0, 2).map((r) => describeReference(check, r.provider));
-  const on =
-    deciding.length === 1
-      ? `${names[0]} only`
-      : deciding.length === 2
-        ? names.join(" and ")
-        : `${names.join(", ")} and ${deciding.length - 2} more`;
-  const strength = check.evidence_level === "strong" ? "Strong" : "Moderate";
-  return {
-    tone: check.decision === "good" ? "success" : "error",
-    verdict: `${check.decision === "good" ? "Good" : "Poor"}${check.p90_m === null ? "" : `, ${check.p90_m.toFixed(1)} m off`}`,
-    detail: `${strength} evidence: ${check.p90_m === null ? "" : `${check.p90_m.toFixed(1)} m off on 90% of the area `}(${on}).`,
-  };
-}
-
 /** Tile URL of a viewer template for one XYZ tile: {z}/{x}/{y}, {-y} (TMS row
  * order), {zz} (two-digit zoom) and {q} (Bing quadkey). */
 export function fillTileTemplate(template: string, z: number, x: number, y: number): string {
@@ -150,11 +102,9 @@ export function fillTileTemplate(template: string, z: number, x: number, y: numb
     .replace("{y}", String(y));
 }
 
-const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-
-/** References worth showing first: deciding ones, then by inliers. */
+/** References worth showing first: the ones that measured an offset, then by inliers. */
 export function orderedReferences(check: IGeorefCheck): IGeorefReferenceEvidence[] {
-  return [...check.reference_evidence].sort((a, b) => Number(b.decides) - Number(a.decides) || b.inliers - a.inliers);
+  return [...check.reference_evidence].sort((a, b) => Number(b.p90_m !== null) - Number(a.p90_m !== null) || b.inliers - a.inliers);
 }
 
 /** Colour of a match by its offset: green well under 15 m, red over. */
