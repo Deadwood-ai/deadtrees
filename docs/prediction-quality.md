@@ -27,14 +27,20 @@ Two tile sets, picked from the predicted cover of candidate tiles:
 
 The candidates keep the work to the tiles judged, however large the dataset (DT-1619: the
 check once read all 138,019 tiles and about 835k polygons of dataset 669 and hung).
-`audit.prediction_quality_candidates` draws up to 2000 (`tiles.CANDIDATES`) of the dataset's
+`audit.prediction_quality_candidates` draws up to 500 (`tiles.CANDIDATES`) of the dataset's
 tiles inside the AOI in a fixed order (a hash of the dataset and the pixel window, so a rerun
-on the same data draws the same tiles) and works out each one's predicted deadwood, forest
-and AOI share in the database; it also counts the tiles inside the AOI (`tiles_total`). The
-two sets are picked from the candidates, the area from the AOI or the tiles inside it. Only
-then does `audit.prediction_quality_polygons` read the predictions, cut to the picked tiles,
-for the overlays. Both are for the audit worker (and analyst logins) only; picker
-`windowed-v1`.
+on the same data draws the same tiles), with each one's AOI share, and counts the tiles inside
+the AOI (`tiles_total`). `audit.prediction_quality_cover` then gives each candidate's share of
+predicted deadwood and forest, per layer. The two sets are picked from the candidates, the
+area from the AOI or the tiles inside it. Only then does `audit.prediction_quality_polygons`
+read the predictions, cut to the picked tiles, for the overlays. All three are for the audit
+worker (and analyst logins) only; picker `windowed-v1`.
+
+Every call must end within the worker login's statement timeout (8 s in production), and one
+box of a large forest prediction can take a few tenths of a second. So the cover and polygon
+reads go in batches of boxes (`handler.read_boxes`): 50 boxes per call to start with; a call
+that times out is made again with half the boxes, and the later calls keep that size. A
+single box that still times out fails the run.
 
 A tile in both sets is rendered and judged once. Per tile the judges see three images:
 `raw`, `deadwood_overlay` and `forest_cover_overlay` (blue and gold fill with outline;

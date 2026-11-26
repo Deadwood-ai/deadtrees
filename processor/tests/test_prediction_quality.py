@@ -266,25 +266,30 @@ def _fake_candidates(db, p):
 
 	rows = [r for r in db.get('v2_tile_embeddings', []) if r['dataset_id'] == p['p_dataset_id']]
 	aoi = shape(p['p_aoi']) if p['p_aoi'] else None
-
-	def cover(footprint, polygons):
-		return sum(g.intersection(footprint).area for g in polygons) / footprint.area
-
-	share = {r['id']: 1.0 if aoi is None else cover(shape(r['geometry']), [aoi]) for r in rows}
+	share = {r['id']: 1.0 if aoi is None else _cover(shape(r['geometry']), [aoi]) for r in rows}
 	inside = [r for r in rows if share[r['id']] >= p['p_inside']] or [r for r in rows if share[r['id']] > 0]
-	deadwood, forest = (_label_polygons(db, p[key]) for key in ('p_deadwood_label_id', 'p_forest_label_id'))
 	candidates = [
 		{
 			'id': r['id'],
 			'pixel_window': [r['pixel_x0'], r['pixel_y0'], r['pixel_x1'], r['pixel_y1']],
 			'geometry': r['geometry'],
-			'deadwood': cover(shape(r['geometry']), deadwood),
-			'forest': cover(shape(r['geometry']), forest),
 			'aoi': share[r['id']],
 		}
 		for r in inside[: p['p_limit']]
 	]
 	return {'tiles': len(rows), 'tiles_inside': len(inside), 'candidates': candidates}
+
+
+def _cover(footprint, polygons):
+	return sum(g.intersection(footprint).area for g in polygons) / footprint.area
+
+
+def _fake_cover(db, p):
+	"""audit.prediction_quality_cover on the fake tables."""
+	from shapely.geometry import box
+
+	polygons = _label_polygons(db, p['p_label_id'])
+	return [_cover(box(*b), polygons) for b in p['p_boxes']]
 
 
 def _fake_polygons(db, p):
@@ -295,10 +300,18 @@ def _fake_polygons(db, p):
 	return [[mapping(g.intersection(box(*b))) for g in polygons if g.intersects(box(*b))] for b in p['p_boxes']]
 
 
+def _timeout():
+	from postgrest.exceptions import APIError
+
+	return APIError({'code': '57014', 'message': 'canceling statement due to statement timeout'})
+
+
 class _FakeClient:
-	def __init__(self, db=None):
-		self.db = db or {}
-		self.calls = []  # (audit function, params)
+	"""max_boxes: a box read of more boxes times out, as a large prediction does in production."""
+
+	def __init__(self, db=None, max_boxes=None):
+		self.db, self.max_boxes = db or {}, max_boxes
+		self.calls = []  # (audit function, params) of the calls that answered
 
 	def table(self, name):
 		return _FakeTable(self.db, name)
@@ -310,8 +323,14 @@ class _FakeClient:
 	def rpc(self, function, params):
 		from types import SimpleNamespace
 
+		fake = {
+			'prediction_quality_candidates': _fake_candidates,
+			'prediction_quality_cover': _fake_cover,
+			'prediction_quality_polygons': _fake_polygons,
+		}[function]
+		if self.max_boxes is not None and len(params.get('p_boxes', ())) > self.max_boxes:
+			raise _timeout()
 		self.calls.append((function, params))
-		fake = {'prediction_quality_candidates': _fake_candidates, 'prediction_quality_polygons': _fake_polygons}[function]
 		data = fake(self.db, json.loads(json.dumps(params)))  # as PostgREST would receive them
 		return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
 
@@ -476,7 +495,7 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 	from processor.src.prediction_quality_v1 import handler
 
 	monkeypatch.setattr(handler, 'readable_cog', lambda *args: nullcontext(str(ortho_file)))
-	client, stored, refreshed = _FakeClient(_dataset()), {}, []
+	client, stored, refreshed = _FakeClient(_dataset(), max_boxes=3), {}, []
 	judges = {
 		'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major'),
 		'haiku-5.5': lambda prompt, images: _answer(dw_major=70, verdict='major'),
@@ -513,26 +532,59 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 	covered = {t['pixel_window'][0]: t['predicted']['deadwood'] for t in out['evidence']['tiles']}
 	assert covered[0] == pytest.approx(1, abs=0.05) and covered[512] == covered[1024] == 0
 	assert out['tiles'][0]['geometry']['type'] == 'Polygon'
-	# the sample with its cover first, then the polygons of the picked tiles, once per layer
+	# the sample, its cover per layer, then the polygons of the picked tiles per layer; a call
+	# of more than three boxes timed out, so each read halved its calls from 50 down to 3
 	(first, sample), *reads = client.calls
 	assert first == 'prediction_quality_candidates'
-	assert sample == {
-		'p_dataset_id': 42,
-		'p_deadwood_label_id': 11,
-		'p_forest_label_id': 12,
-		'p_aoi': None,
-		'p_limit': 2000,
-		'p_inside': 0.9,
-	}
-	assert [(f, p['p_label_id'], len(p['p_boxes'])) for f, p in reads] == [
-		('prediction_quality_polygons', 11, 4),
-		('prediction_quality_polygons', 12, 4),
+	assert sample == {'p_dataset_id': 42, 'p_aoi': None, 'p_limit': 500, 'p_inside': 0.9}
+	assert [(f.removeprefix('prediction_quality_'), p['p_label_id'], len(p['p_boxes'])) for f, p in reads] == [
+		('cover', 11, 3),
+		('cover', 11, 1),
+		('cover', 12, 3),
+		('cover', 12, 1),
+		('polygons', 11, 3),
+		('polygons', 11, 1),
+		('polygons', 12, 3),
+		('polygons', 12, 1),
 	]
-	assert handler.CONFIG['tiles']['picker'] == 'windowed-v1' and handler.CONFIG['tiles']['candidates'] == 2000
+	assert handler.CONFIG['tiles']['picker'] == 'windowed-v1' and handler.CONFIG['tiles']['candidates'] == 500
 	assert worker.HANDLERS['prediction_quality'] == handler.__name__
 	assert handler.CONFIG['models'].keys() == judges.keys()
 	assert (handler.RULES, handler.RULES_CONFIG) == ('rules-v1', {'decider': 'haiku'})
 	assert not {'rule', 'rule_config'} & set(handler.CONFIG)
+
+
+def test_box_reads_halve_their_calls_until_each_fits_the_statement_timeout():
+	from processor.src.prediction_quality_v1.handler import read_boxes
+
+	sizes = []
+
+	def rpc(function, params):
+		sizes.append(len(params['p_boxes']))
+		if len(params['p_boxes']) > 3:
+			raise _timeout()
+		return [b[0] for b in params['p_boxes']]
+
+	boxes = [(n, 0, n + 1, 1) for n in range(10)]
+	assert read_boxes(rpc, 'prediction_quality_cover', 11, boxes, size=8) == list(range(10))
+	# 8 and 4 time out; the rest goes in calls of two
+	assert sizes == [8, 4, 2, 2, 2, 2, 2]
+	# a box that times out on its own fails the run with a clear error
+	def slow(function, params):
+		raise _timeout()
+
+	with pytest.raises(RuntimeError, match='cover of label 11 exceeds the statement timeout on a single box'):
+		read_boxes(slow, 'prediction_quality_cover', 11, boxes)
+	# other errors are not retried
+	calls = []
+
+	def broken(function, params):
+		calls.append(params)
+		raise RuntimeError('permission denied')
+
+	with pytest.raises(RuntimeError, match='permission denied'):
+		read_boxes(broken, 'prediction_quality_polygons', 11, boxes)
+	assert len(calls) == 1 and read_boxes(broken, 'prediction_quality_polygons', 11, []) == []
 
 
 def test_a_run_needs_the_preferred_predictions_and_a_new_aoi_is_other_inputs():

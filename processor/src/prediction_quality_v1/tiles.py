@@ -18,7 +18,7 @@ from pyproj import Transformer
 import shapely
 
 TILE_M = 51.2  # 512 px at 10 cm, as in embedding_search.patch_embedding
-CANDIDATES = 2000  # tiles drawn from the dataset to pick the sets from
+CANDIDATES = 500  # tiles drawn from the dataset to pick the sets from
 INSIDE_AOI = 0.9  # share of a tile that lies in the AOI for the tile to be judged
 DEADWOOD_BINS = (0.0, 0.05, 0.20)  # predicted deadwood: none, under 5%, 5-20%, over 20%
 FOREST_CLOSED = 0.6  # predicted forest: none, partial, closed (60% or more)
