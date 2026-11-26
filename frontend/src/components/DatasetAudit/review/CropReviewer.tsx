@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Segmented, Slider, Tag } from "antd";
 import { CheckOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { AuditVerdict, IAuditImage, ITileJudgement, ITileReview, PredictionLayer, TileReviewInput } from "../../../types/auditChecks";
@@ -354,8 +354,13 @@ function CropStrip({
 	answered: (id: number) => boolean;
 	onSelect: (id: number) => void;
 }) {
+	// one row that scrolls, however many tiles: the current one stays in view
+	const strip = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		strip.current?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: "nearest", inline: "center" });
+	}, [cropId]);
 	return (
-		<div className="flex flex-wrap gap-1" data-testid="crop-strip">
+		<div ref={strip} className="flex gap-1 overflow-x-auto px-1 py-1.5" data-testid="crop-strip">
 			{crops.map((c, i) => {
 				const background = color(c.id);
 				const mine = answered(c.id);
@@ -363,7 +368,7 @@ function CropStrip({
 					<button
 						key={c.id}
 						type="button"
-						className={`h-6 min-w-[2.25rem] rounded border-0 px-1.5 text-xs font-medium ${background === NO_CALL ? "text-gray-700" : "text-white"} ${
+						className={`h-6 min-w-[2.25rem] shrink-0 rounded border-0 px-1.5 text-xs font-medium ${background === NO_CALL ? "text-gray-700" : "text-white"} ${
 							c.id === cropId ? "ring-2 ring-gray-900 ring-offset-1" : ""
 						}`}
 						style={{ background }}

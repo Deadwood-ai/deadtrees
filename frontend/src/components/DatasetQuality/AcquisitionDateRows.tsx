@@ -7,6 +7,7 @@ import { decisionDistribution, describeModelType, formatDateParts, formatIsoDate
 import { formatAcquisitionDate } from "../DatasetAudit/auditConstants";
 import AcquisitionDateEvidence from "../AcquisitionDate/AcquisitionDateEvidence";
 import { InfoRow } from "./InfoRow";
+import { AERIALSTAMP_CITATION } from "../../data/citations";
 
 export interface DatasetAcquisitionDate {
   id: number;
@@ -84,13 +85,18 @@ export default function AcquisitionDateRows({ dataset }: { dataset: DatasetAcqui
             trigger="click"
             title="Suggestion of the date model"
             content={
-              <AcquisitionDateEvidence
-                distribution={estimate}
-                reportedLabel={formatAcquisitionDate(dataset)}
-                reportedIso={reportedIso}
-                reason={estimate}
-                modelLabel={`${estimate.model_version}, ${describeModelType(estimate)}`}
-              />
+              <div className="flex flex-col gap-1.5">
+                <AcquisitionDateEvidence
+                  distribution={estimate}
+                  reportedLabel={formatAcquisitionDate(dataset)}
+                  reportedIso={reportedIso}
+                  reason={estimate}
+                  modelLabel={`${estimate.model_version}, ${describeModelType(estimate)}`}
+                />
+                <a href={AERIALSTAMP_CITATION.url} target="_blank" rel="noopener noreferrer" className="text-xs" data-testid="aerialstamp-citation">
+                  Mosig et al., 2026, AerialStamp (preprint)
+                </a>
+              </div>
             }
           >
             <Typography.Text className="cursor-pointer">
