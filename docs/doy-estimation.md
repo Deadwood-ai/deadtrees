@@ -87,7 +87,7 @@ v1). Built from the AerialStamp weights by
 processor asset preflight.
 
 The archive `doy_estimation_v2.tar.gz` is a public asset (`ASSETS_BASE_URL`,
-`/data/assets/v1/models/` on the storage server), fetched by
+`/data/assets/models/` on the storage server), fetched by
 `make download-processor-assets` or `make download-doy-model`. The weights
 hold no imagery: date heads on DINOv2 embeddings of 16 patches per
 orthophoto. Stage the model on every processor host before a release that
