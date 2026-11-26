@@ -150,6 +150,35 @@ or decisions. The earlier `acquisition_date_decisions` stay as read-only history
 dataset whose date was replaced by an accepted suggestion keeps
 `aquisition_date_source = 'model_suggestion'` until its date is edited by hand.
 
+## Existing datasets: out-of-fold estimates
+
+`doy_estimation_v2` learned from the recorded dates of 8,825 datasets of the
+2026-10-08 snapshot. Its estimate for one of them is in-sample: pulled toward
+the recorded date, with too narrow a set, so it hides exactly the wrong dates
+the audit should see (of 107 recorded dates the fold models find implausible,
+the deployed model flags 35). The datasets that existed at the switch to v2
+were therefore run once, outside the queue: every dataset of the snapshot with
+the cross-validation fold model that held it out, everything else with the
+deployed model. Same code, inputs, model version (`doy_estimation_v2`) and
+calibration as the stage; the fold is recorded in `metadata.oof`
+(`{"fold": k, "package": ..., "snapshot": "2026-10-08"}`, `fold: null` for the
+deployed model). The fold models were used for this run only; new datasets and
+every later rerun use the deployed model.
+
+`scripts/import_doy_estimates.py <bundle>` writes such a run the way the stage
+writes its own rows (estimate upsert, status flag, clears), only for rows that
+still describe their dataset (not archived, same recorded date, no newer
+estimate of the same model version). The default is a dry run with the analyst login that reports the
+counts and the date reviews whose advice would flip (stale, as after a rerun);
+`--rehearse` writes and rolls back, `--execute` commits in batches. It
+is a production write: run it only with approval, as
+[approved-production-writes.md](playbooks/approved-production-writes.md)
+describes.
+
+A plain `requeue_doy_estimation.py` leaves these rows alone (current model
+version). `--all`, or a changed recorded date, replaces them with an in-sample
+estimate of the deployed model.
+
 ## Rerun for all datasets
 
 ```bash
