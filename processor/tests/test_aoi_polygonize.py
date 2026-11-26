@@ -1,10 +1,12 @@
 import numpy as np
 import pytest
 import rasterio
+from rasterio.enums import ColorInterp
 from rasterio.transform import from_origin
 from shapely.ops import unary_union
 
 from processor.src.aoi_segmentation_v1.inference import aoi_inference
+from processor.src.utils.segmentation import reproject_polygons
 
 
 def _write_mask(path, mask, cell_m=0.1):
@@ -47,3 +49,36 @@ def test_empty_mask_has_no_aoi_polygons(tmp_path, monkeypatch):
 	monkeypatch.setattr(aoi_inference, 'MAX_POLYGONIZE_PIXELS', 10_000)
 
 	assert aoi_inference.polygonize_inside_aoi(str(path), lambda message, **extra: None) == []
+
+
+@pytest.mark.unit
+def test_ortho_smaller_than_one_tile_gets_its_valid_data_footprint_without_the_model(tmp_path):
+	# 30 m x 20 m plot at 2 cm, an alpha band marking a 10 m x 20 m nodata strip
+	height, width = 1000, 1500
+	alpha = np.full((height, width), 255, dtype=np.uint8)
+	alpha[:, 1000:] = 0
+	path = tmp_path / 'small_ortho.tif'
+	with rasterio.open(
+		path,
+		'w',
+		driver='GTiff',
+		height=height,
+		width=width,
+		count=4,
+		dtype=np.uint8,
+		crs='EPSG:32632',
+		transform=from_origin(400000, 5300000, 0.02, 0.02),
+	) as dst:
+		dst.write(np.full((3, height, width), 120, dtype=np.uint8), [1, 2, 3])
+		dst.write(alpha, 4)
+		dst.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha]
+	logged = []
+
+	# No model: the small-ortho path must not run inference.
+	model = object.__new__(aoi_inference.AOIInference)
+	polygons = model.inference(str(path), log=lambda message, **extra: logged.append(message))
+
+	assert len(polygons) == 1
+	(footprint,) = reproject_polygons(polygons, 'EPSG:4326', 'EPSG:32632')
+	assert footprint.area == pytest.approx(20 * 20, rel=0.05)
+	assert any('footprint' in message for message in logged)
