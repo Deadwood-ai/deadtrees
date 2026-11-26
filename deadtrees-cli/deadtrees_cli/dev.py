@@ -372,6 +372,7 @@ class DevCommands:
 			TaskTypeEnum.aoi_v1,
 			TaskTypeEnum.embeddings_v1,
 			TaskTypeEnum.doy_estimation_v1,
+			TaskTypeEnum.georef_check_v1,
 		]
 		ordered = [task for task in order if task in unique]
 		return ordered

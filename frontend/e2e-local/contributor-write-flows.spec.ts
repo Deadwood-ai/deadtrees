@@ -477,6 +477,7 @@ async function expectDatasetSideEffects(datasetId: number) {
         "deadwood_treecover_combined_v2",
         "embeddings_v1",
         "doy_estimation_v1",
+        "georef_check_v1",
       ],
       priority: 4,
       is_processing: false,
