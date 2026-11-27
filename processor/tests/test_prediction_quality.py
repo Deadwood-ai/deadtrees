@@ -496,10 +496,7 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 
 	monkeypatch.setattr(handler, 'readable_cog', lambda *args: nullcontext(str(ortho_file)))
 	client, stored, refreshed = _FakeClient(_dataset(), max_boxes=3), {}, []
-	judges = {
-		'luna-medium': lambda prompt, images: _answer(dw_major=80, verdict='major'),
-		'haiku-5.5': lambda prompt, images: _answer(dw_major=70, verdict='major'),
-	}
+	judges = {'haiku-5.5': lambda prompt, images: _answer(dw_major=70, verdict='major')}
 	ctx = SimpleNamespace(
 		run={'id': 5, 'dataset_id': 42},
 		refresh=lambda: refreshed.append(len(stored)),
@@ -519,13 +516,13 @@ def test_the_handler_judges_the_preferred_predictions_and_returns_the_run(ortho_
 		'exclude_set': 4,
 		'training_set': 4,
 	}
-	assert out['evidence']['cost']['luna-medium']['calls'] == 4
+	assert out['evidence']['cost']['haiku-5.5']['calls'] == 4
 	assert len(out['tiles']) == 4 and len(stored) == 12 and len(out['images']) == 12
 	assert set(stored) == {i['storage_path'] for i in out['images']}
 	assert all(dataset_id == 42 for dataset_id, _ in stored.values())
 	rows = out['tile_judgements']
 	# tile answers only (deadwood and forest per tile and judge): no dataset verdict
-	assert len(rows) == 4 * 2 * 2 and out['dataset_judgements'] == []
+	assert len(rows) == 4 * 2 and out['dataset_judgements'] == []
 	assert {i['prediction_label_id'] for i in out['images'] if i['kind'] == 'forest_cover_overlay'} == {12}
 	assert refreshed == [0], 'the login is renewed before the uploads'
 	# only the newest preferred prediction is drawn, without its deleted polygons
@@ -627,6 +624,6 @@ def test_a_run_queued_for_the_older_version_fails_instead_of_being_judged_with_t
 
 	from processor.src.prediction_quality_v1 import handler
 
-	ctx = SimpleNamespace(run={'id': 5, 'dataset_id': 42}, version={'version': 'v1', 'config': {}})
-	with pytest.raises(ValueError, match='the run is of version v1; this code judges v2'):
+	ctx = SimpleNamespace(run={'id': 5, 'dataset_id': 42}, version={'version': 'v2', 'config': {}})
+	with pytest.raises(ValueError, match='the run is of version v2; this code judges v3'):
 		handler.handle(ctx)

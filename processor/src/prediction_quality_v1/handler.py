@@ -27,10 +27,11 @@ from .judge import PROMPT_VERSION
 from .render import CROP_PX, RENDER_VERSION
 from .tiles import CANDIDATES, EXCLUDE_SET_SIZE, INSIDE_AOI, TILE_M, Tile
 
-VERSION = 'v2'
+VERSION = 'v3'
 CONFIG = {
+	# Haiku alone (DT-1634): it decides every call, and Luna on the Codex login answers one
+	# tile at a time (DT-1536), which held a dataset for minutes per run
 	'models': {
-		'luna-medium': {'transport': 'codex', 'model': 'gpt-6-luna', 'effort': 'medium'},
 		'haiku-5.5': {'transport': 'claude', 'model': 'claude-haiku-5-5'},
 	},
 	'prompt_version': PROMPT_VERSION,
