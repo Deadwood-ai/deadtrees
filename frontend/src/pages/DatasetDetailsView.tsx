@@ -219,6 +219,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
       label?.label_source === ILabelSource.VISUAL_INTERPRETATION,
   );
   const hasAOI = !!aoiData?.geometry;
+  const aoiEmpty = !!aoiData?.noUsableArea;
   // Without a viewable image there is no map, so basemap/layer controls and the
   // in-image search would be dead weight next to the empty state.
   const showMapImage = hasMapImage(dataset);
@@ -383,6 +384,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
               hasDeadwood={hasDeadwood}
               deadwoodWarning={deadwoodWarning}
               hasAOI={hasAOI}
+              aoiEmpty={aoiEmpty}
               canAudit={canAudit}
               deadwoodVariants={deadwoodVariants ?? []}
               forestVariants={forestVariants ?? []}
@@ -518,6 +520,7 @@ export default function DatasetDetailsView({ dataset }: DatasetDetailsViewProps)
             hasDeadwood={hasDeadwood}
             deadwoodWarning={deadwoodWarning}
             hasAOI={hasAOI}
+            aoiEmpty={aoiEmpty}
             canAudit={canAudit}
             deadwoodVariants={deadwoodVariants ?? []}
             forestVariants={forestVariants ?? []}

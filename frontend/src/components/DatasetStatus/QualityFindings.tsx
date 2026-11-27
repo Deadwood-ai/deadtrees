@@ -4,7 +4,7 @@ import { reasonWord } from "../../utils/auditChecks";
 import { InfoRow, Pending } from "../DatasetQuality/InfoRow";
 import AcquisitionDateRows from "../DatasetQuality/AcquisitionDateRows";
 import PhenologyRow from "../DatasetQuality/PhenologyRow";
-import { AoiRow, GeorefRow, PredictionQuality } from "../DatasetQuality/AuditFindings";
+import { GeorefRow, PredictionQuality } from "../DatasetQuality/AuditFindings";
 import { imageCheck, type ContributorDataset, type ImageCheck } from "./status";
 
 const IMAGE_WORDS: Record<ImageCheck["kind"], string | null> = {
@@ -41,7 +41,6 @@ export default function QualityFindings({ dataset }: { dataset: ContributorDatas
         <p className="mb-2 text-xs text-slate-500">Results of the automatic checks on your upload.</p>
         <ImageQualityRow dataset={dataset} />
         <GeorefRow datasetId={dataset.id} />
-        <AoiRow datasetId={dataset.id} />
         <AcquisitionDateRows dataset={dataset} />
         <PhenologyRow dataset={dataset} />
       </section>

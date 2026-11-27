@@ -29,6 +29,8 @@ interface DatasetLayerControlPanelProps {
   hasForestCover: boolean;
   hasDeadwood: boolean;
   hasAOI?: boolean;
+  /** the AOI model found no usable area: the AOI item stays, unchecked and marked, with nothing to show */
+  aoiEmpty?: boolean;
   /** a red mark on the deadwood layer with this warning on hover, e.g. outside the greenness period */
   deadwoodWarning?: string | null;
   // Model variant selection (auditors only)
@@ -84,6 +86,7 @@ const DatasetLayerControlPanel = ({
   hasForestCover,
   hasDeadwood,
   hasAOI,
+  aoiEmpty = false,
   deadwoodWarning,
   canAudit = false,
   deadwoodVariants,
@@ -201,24 +204,32 @@ const DatasetLayerControlPanel = ({
             <span className="text-xs text-gray-600">Drone Imagery</span>
           </span>
         </Checkbox>
-        {hasAOI && setShowAOI && (
-          <Checkbox
-            checked={showAOI}
-            onChange={(e) => setShowAOI(e.target.checked)}
-          >
-            <span className="flex items-center gap-2">
-              <span
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: 2,
-                  border: `2px solid ${mapColors.aoi.stroke}`,
-                  display: "inline-block",
-                }}
-              />
-              <span className="text-xs text-gray-600">Area of Interest</span>
-            </span>
-          </Checkbox>
+        {(hasAOI || aoiEmpty) && setShowAOI && (
+          <div className="flex items-center justify-between">
+            <Checkbox
+              checked={showAOI && !aoiEmpty}
+              disabled={aoiEmpty}
+              onChange={(e) => setShowAOI(e.target.checked)}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: 2,
+                    border: `2px solid ${mapColors.aoi.stroke}`,
+                    display: "inline-block",
+                  }}
+                />
+                <span className="text-xs text-gray-600">Area of Interest</span>
+              </span>
+            </Checkbox>
+            {aoiEmpty && (
+              <Tooltip title={<div className="max-w-xs text-xs leading-relaxed">Empty: the model found no usable area in this image.</div>} placement="left">
+                <WarningOutlined className="cursor-help text-xs text-amber-500" data-testid="aoi-layer-empty" />
+              </Tooltip>
+            )}
+          </div>
         )}
       </div>
 
