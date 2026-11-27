@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 from shared.db import use_client
 from shared.settings import settings
@@ -10,7 +10,7 @@ from shared.models import TaskTypeEnum, QueueTask, AOI, aoi_insert_payload
 
 from processor.src.process_aoi_segmentation import process_aoi_segmentation
 from processor.src.aoi_segmentation_v1.predict_aoi import AOI_MODEL_VERSION, AUTO_AOI_NOTES, predicted_aoi_row
-from processor.src.aoi_segmentation_v1.inference.aoi_inference import cleanup_aoi_polygon
+from processor.src.aoi_segmentation_v1.inference.aoi_inference import _smooth_geometry, cleanup_aoi_polygon
 
 MODEL_PATH = str(Path(__file__).parent.parent.parent / 'assets' / 'models' / 'b1_50epoch_best_macro_f1.safetensors')
 
@@ -132,6 +132,20 @@ def test_cleanup_aoi_polygon_returns_single_solid_polygon():
 @pytest.mark.unit
 def test_cleanup_aoi_polygon_empty():
 	assert cleanup_aoi_polygon([]) == []
+
+
+@pytest.mark.unit
+def test_smoothing_a_multi_part_aoi_whose_part_splits():
+	"""Smoothing makes this part self-intersect and its repair splits it in two; a multi-part
+	AOI with such a part failed with 'Sequences of multi-polygons are not valid arguments'
+	(dataset 12447)."""
+	splits = Polygon([(2, 0), (0, 5), (1, 5), (2, 2), (4, 3), (5, 3), (0, 6), (6, 3)])
+	other = Polygon([(20, 0), (30, 0), (30, 10), (20, 10)])
+
+	smoothed = _smooth_geometry(MultiPolygon([splits, other]), simplify_tolerance=0, chaikin_iterations=1)
+
+	assert smoothed.is_valid
+	assert isinstance(smoothed, MultiPolygon) and len(smoothed.geoms) == 3
 
 
 @pytest.mark.comprehensive
