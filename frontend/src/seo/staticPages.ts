@@ -2,6 +2,7 @@ import {
   DEFAULT_SOCIAL_IMAGE,
   getPageMeta,
   getSitemapPaths,
+  getStaticPagePaths,
   normalizePath,
   SITE_NAME,
   SITE_ORIGIN,
@@ -52,10 +53,16 @@ const renderHead = (meta: PageMeta, canonicalUrl: string | null) => {
   return tags.join("\n    ");
 };
 
+/** A page's own name, for link text; data packages have none at build time. */
+const linkText = (path: string) =>
+  getStaticPagePaths().includes(path)
+    ? getPageMeta(path).title.split(" | ")[0]
+    : path;
+
 const renderBody = (path: string, meta: PageMeta) => {
   const links = getSitemapPaths()
     .filter((link) => link !== path)
-    .map((link) => `<li><a href="${link}">${link}</a></li>`)
+    .map((link) => `<li><a href="${link}">${escapeHtml(linkText(link))}</a></li>`)
     .join("");
   const heading = escapeHtml(meta.title.split(" | ")[0]);
   return `<!-- seo-body --><noscript><h1>${heading}</h1><p>${escapeHtml(meta.description)}</p><ul>${links}</ul></noscript><!-- /seo-body -->`;
@@ -89,4 +96,37 @@ export const renderSitemap = (): string => {
     .map((path) => `  <url><loc>${SITE_ORIGIN}${normalizePath(path)}</loc></url>`)
     .join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+};
+
+const LEGAL_PATHS = ["/impressum", "/datenschutzerklaerung", "/terms-of-service"];
+
+/**
+ * /llms.txt: a plain-text map of the public pages for AI agents and answer
+ * engines, which often read text files and skip JavaScript.
+ */
+export const renderLlmsTxt = (): string => {
+  const entry = (path: string) => {
+    const { title, description } = getPageMeta(path);
+    return `- [${title.split(" | ")[0]}](${SITE_ORIGIN}${normalizePath(path)}): ${description}`;
+  };
+  const pages = getStaticPagePaths().filter(
+    (path) => path !== "/" && !LEGAL_PATHS.includes(path),
+  );
+  return [
+    `# ${SITE_NAME}`,
+    "",
+    `> ${getPageMeta("/").description}`,
+    "",
+    `Each public dataset has its own page at ${SITE_ORIGIN}/dataset/{id}; the archive at ${SITE_ORIGIN}/dataset lists and filters them. Those pages load their details with JavaScript.`,
+    "",
+    "## Pages",
+    "",
+    ...pages.map(entry),
+    `- [Sitemap](${SITE_ORIGIN}/sitemap.xml): every public page we want crawled.`,
+    "",
+    "## Legal",
+    "",
+    ...LEGAL_PATHS.map(entry),
+    "",
+  ].join("\n");
 };
