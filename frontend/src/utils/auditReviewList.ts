@@ -104,12 +104,12 @@ export interface IAuditListFilters {
 	stage: string | null;
 	decision: EvaluationDecision | "none" | null;
 	georef: GeorefStatus | "none" | null;
-	dateReplaced: "yes" | "no" | null;
+	dateReplaced: YesNo | null;
 	/** the least share of major crops (0 to 100) on either prediction layer */
 	majorShare: number | null;
 	/** a review is required: for any reason, or for this one */
 	review: ReviewItem | "any" | null;
-	inBenchmark: boolean;
+	inBenchmark: YesNo | null;
 	/** a reviewer's user id */
 	reviewedBy: string | null;
 }
@@ -123,7 +123,7 @@ export const NO_FILTERS: IAuditListFilters = {
 	dateReplaced: null,
 	majorShare: null,
 	review: null,
-	inBenchmark: false,
+	inBenchmark: null,
 	reviewedBy: null,
 };
 
@@ -141,6 +141,10 @@ const PARAMS: Record<keyof IAuditListFilters, string> = {
 	reviewedBy: "reviewer",
 };
 
+type YesNo = "yes" | "no";
+
+const yesNo = (value: string | null): YesNo | null => (value === "yes" || value === "no" ? value : null);
+
 export function filtersFromParams(params: URLSearchParams): IAuditListFilters {
 	const get = (key: keyof IAuditListFilters) => params.get(PARAMS[key]);
 	const major = Number(get("majorShare"));
@@ -151,10 +155,10 @@ export function filtersFromParams(params: URLSearchParams): IAuditListFilters {
 		stage: get("stage"),
 		decision: get("decision") as IAuditListFilters["decision"],
 		georef: get("georef") as IAuditListFilters["georef"],
-		dateReplaced: get("dateReplaced") === "yes" || get("dateReplaced") === "no" ? (get("dateReplaced") as "yes" | "no") : null,
+		dateReplaced: yesNo(get("dateReplaced")),
 		majorShare: get("majorShare") !== null && Number.isFinite(major) ? major : null,
 		review: review === "any" || REVIEW_ITEMS.includes(review as ReviewItem) ? (review as IAuditListFilters["review"]) : null,
-		inBenchmark: get("inBenchmark") === "1",
+		inBenchmark: yesNo(get("inBenchmark")),
 		reviewedBy: get("reviewedBy"),
 	};
 }
@@ -163,8 +167,8 @@ export function filtersFromParams(params: URLSearchParams): IAuditListFilters {
 export function listParams(tab: AuditListTab, filters: IAuditListFilters): URLSearchParams {
 	const params = new URLSearchParams({ tab });
 	for (const [key, value] of Object.entries(filters) as [keyof IAuditListFilters, IAuditListFilters[keyof IAuditListFilters]][]) {
-		if (value === null || value === "" || value === false) continue;
-		params.set(PARAMS[key], value === true ? "1" : String(value));
+		if (value === null || value === "") continue;
+		params.set(PARAMS[key], String(value));
 	}
 	return params;
 }
@@ -206,7 +210,8 @@ export function listConditions(tab: AuditListTab, f: IAuditListFilters): ListCon
 		!!f.dateReplaced && ["date_replace", "is", f.dateReplaced === "yes" ? "true" : "false"],
 		f.majorShare !== null && ["major_share", "gte", String(f.majorShare)],
 		f.review === "any" ? ["review_required", "neq", "{}"] : !!f.review && ["review_required", "cs", `{${f.review}}`],
-		f.inBenchmark && ["in_benchmark", "is", "true"],
+		// not in the benchmark includes a dataset without an outcome yet (null)
+		!!f.inBenchmark && ["in_benchmark", f.inBenchmark === "yes" ? "is" : "not.is", "true"],
 		!!f.reviewedBy && ["reviewers", "cs", `{${f.reviewedBy}}`],
 	];
 	return conditions.filter((c): c is ListCondition => !!c);

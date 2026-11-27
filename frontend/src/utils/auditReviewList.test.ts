@@ -54,7 +54,9 @@ describe("filters", () => {
 	it("filter by the review, the dataset and its processing", () => {
 		expect(only({ review: "any" })).toEqual([["review_required", "neq", "{}"]]);
 		expect(only({ review: "georef" })).toEqual([["review_required", "cs", "{georef}"]]);
-		expect(only({ inBenchmark: true })).toEqual([["in_benchmark", "is", "true"]]);
+		expect(only({ inBenchmark: "yes" })).toEqual([["in_benchmark", "is", "true"]]);
+		// a dataset without an outcome (null) is not in the benchmark either
+		expect(only({ inBenchmark: "no" })).toEqual([["in_benchmark", "not.is", "true"]]);
 		expect(only({ reviewedBy: "u-1" })).toEqual([["reviewers", "cs", "{u-1}"]]);
 		expect(only({ id: " 3 " })).toEqual([["dataset_id", "eq", "3"]]);
 		// not a number: no dataset, not a failed request
@@ -76,16 +78,17 @@ describe("filters", () => {
 	});
 
 	it("round-trip through the URL and count what is set", () => {
-		const filters = { ...NO_FILTERS, decision: "exclude" as const, majorShare: 10, review: "georef" as const, reviewedBy: "u-1" };
+		const filters = { ...NO_FILTERS, decision: "exclude" as const, majorShare: 10, review: "georef" as const, inBenchmark: "no" as const, reviewedBy: "u-1" };
 		const params = listParams("pending", filters);
-		expect(params.toString()).toBe("tab=pending&decision=exclude&major=10&review=georef&reviewer=u-1");
+		expect(params.toString()).toBe("tab=pending&decision=exclude&major=10&review=georef&benchmark=no&reviewer=u-1");
 		expect(filtersFromParams(params)).toEqual(filters);
 		expect(listOfPath(`/dataset-audit?${params}`)).toEqual({ tab: "pending", filters });
 		expect(listOfPath("/dataset-audit")).toEqual({ tab: "all", filters: NO_FILTERS });
-		expect(activeFilterCount(filters)).toBe(4);
+		expect(activeFilterCount(filters)).toBe(5);
 		expect(activeFilterCount(NO_FILTERS)).toBe(0);
 		// an unknown reason in an old link is no filter, not an empty list
 		expect(filtersFromParams(new URLSearchParams("review=1")).review).toBeNull();
+		expect(filtersFromParams(new URLSearchParams("benchmark=1")).inBenchmark).toBeNull();
 	});
 });
 

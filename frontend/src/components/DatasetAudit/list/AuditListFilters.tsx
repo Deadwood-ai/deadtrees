@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Button, Checkbox, Input, Select } from "antd";
+import { Button, Input, Select } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { NO_FILTERS, type IAuditListFilters } from "../../../utils/auditReviewList";
 import { DECISION_LABELS, GEOREF_LABELS, REVIEW_ITEMS, REVIEW_ITEM_LABELS } from "../../../utils/auditReview";
@@ -85,11 +85,11 @@ export default function AuditListFilters({ filters, onChange, countries, stages,
 					{select("review", 170, [{ label: "For any reason", value: "any" }, ...REVIEW_ITEMS.map((i) => ({ label: REVIEW_ITEM_LABELS[i], value: i }))], "Either")}
 				</Field>
 				<Field label="Reviewed by">{select("reviewedBy", 180, reviewers.map((r) => ({ label: r.email ?? r.id, value: r.id })), "Anyone")}</Field>
+				<Field label="Benchmark">
+					{select("inBenchmark", 150, [{ label: "In benchmark", value: "yes" }, { label: "Not in benchmark", value: "no" }], "Either")}
+				</Field>
 			</div>
 			<div className="flex flex-wrap items-center gap-4">
-				<Checkbox checked={filters.inBenchmark} onChange={(e) => onChange({ inBenchmark: e.target.checked })}>
-					In benchmark
-				</Checkbox>
 				<Button size="small" onClick={() => onChange(NO_FILTERS)}>
 					Clear filters
 				</Button>
