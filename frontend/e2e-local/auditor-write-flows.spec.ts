@@ -500,6 +500,50 @@ test.describe("auditor local write flows", () => {
     expect(cleanupError).toBeNull();
   });
 
+  test("the editor loads every polygon of a layer, also past the API's 1,000-row limit", async ({ page }) => {
+    await seedDeadwoodPrediction();
+    const { data: label, error: labelError } = await adminClient
+      .from("v2_labels")
+      .select("id")
+      .eq("dataset_id", datasetId)
+      .eq("label_data", "deadwood")
+      .single();
+    expect(labelError).toBeNull();
+    const polygonCount = 1005;
+    const rows = Array.from({ length: polygonCount }, (_, i) => {
+      const x = 8 + (i % 40) * 0.0001;
+      const y = 48 + Math.floor(i / 40) * 0.0001;
+      const d = 0.00005;
+      return {
+        label_id: label!.id,
+        geometry: `SRID=4326;POLYGON((${x} ${y},${x + d} ${y},${x + d} ${y + d},${x} ${y + d},${x} ${y}))`,
+      };
+    });
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error } = await adminClient.from("v2_deadwood_geometries").insert(rows.slice(i, i + 500));
+      expect(error).toBeNull();
+    }
+
+    try {
+      let loaded = 0;
+      page.on("response", async (response) => {
+        const url = response.url();
+        if (!url.includes("/rest/v1/v2_deadwood_geometries") || !url.includes(`label_id=eq.${label!.id}`)) return;
+        if (response.request().method() !== "GET") return;
+        const body = await response.json().catch(() => null);
+        if (Array.isArray(body)) loaded += body.length;
+      });
+      await installAuditorSession(page);
+      await openPredictionEditor(page);
+      await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
+      await expect.poll(() => loaded, { timeout: 20_000 }).toBe(polygonCount);
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      const { error } = await adminClient.from("v2_deadwood_geometries").delete().eq("label_id", label!.id);
+      expect(error).toBeNull();
+    }
+  });
+
   test("a freehand stroke keeps the polygon open unless it ends on the first vertex", async ({ page }) => {
     await installAuditorSession(page);
     await openPredictionEditor(page);
