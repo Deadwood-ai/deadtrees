@@ -514,6 +514,34 @@ def test_operators_queue_runs_of_the_active_version_by_hand(db):
 	raises(db, psycopg.errors.ObjectNotInPrerequisiteState, "SELECT audit.queue_runs('dataset_evaluation', ARRAY[1]::bigint[])")
 
 
+def test_a_benchmark_tick_queues_a_dataset_evaluation_run(db):
+	"""A dataset ticked into the benchmark gets its images (DT-1624): a run of the active version,
+	unless one is open or done. Without an active version the label is stored all the same."""
+	operator = create_operator(db)
+	never, judged, unticked = (create_dataset(db, create_user(db)) for _ in range(3))
+	review = (
+		'INSERT INTO audit.dataset_human_reviews(dataset_id,check_key,decision,reviewed_by,in_benchmark) '
+		"VALUES (%s,'dataset_evaluation','keep',%s,%s)"
+	)
+
+	def runs():
+		as_admin(db)
+		return db.execute(
+			"SELECT dataset_id, queue, status FROM audit.runs WHERE check_key='dataset_evaluation' ORDER BY dataset_id"
+		).fetchall()
+
+	act_as(db, operator)
+	db.execute(review, (never, operator, True))
+	assert runs() == []
+	version_id = register_version(db, check='dataset_evaluation')
+	create_run(db, judged, version_id, check='dataset_evaluation')
+	db.execute("UPDATE audit.runs SET status='done', finished_at=now() WHERE dataset_id=%s", (judged,))
+	act_as(db, operator)
+	for dataset, ticked in ((never, True), (never, True), (judged, True), (unticked, False)):
+		db.execute(review, (dataset, operator, ticked))
+	assert runs() == [(never, 'manual', 'queued'), (judged, 'upload', 'done')]
+
+
 def test_read_policies_evaluate_access_once_per_statement(db):
 	"""A bare function call in USING runs per row; over large tables that hit the statement timeout (DT-1532)."""
 	policies = db.execute(
