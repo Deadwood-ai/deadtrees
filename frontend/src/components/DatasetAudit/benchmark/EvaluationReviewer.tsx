@@ -3,19 +3,17 @@ import { Button, Checkbox, Input, Tag } from "antd";
 import { useAuditImageAccess } from "../../../hooks/useAuditChecks";
 import { auditImageUrl } from "../../../api/auditImages";
 import type { DatasetReviewInput, IAuditImage, IDatasetJudgement, IDatasetReview, EvaluationDecision } from "../../../types/auditChecks";
-import { EVALUATION_FLAGS, EXCLUDE_REASONS, judgeName, judgementText, type EvaluationFlag } from "../../../utils/auditChecks";
+import { DECISION_KEYS, EVALUATION_FLAGS, EXCLUDE_REASONS, REASON_KEYS, judgeName, judgementText, type EvaluationFlag } from "../../../utils/auditChecks";
 import { evaluationReview, type IEvaluationAnswer } from "../../../utils/auditReview";
 import { useAuditShortcuts, type AuditKeyMap } from "../checks/useAuditShortcuts";
 import LabeledBy from "./LabeledBy";
 
 const REASONS = EXCLUDE_REASONS;
-// q w e r t i o: the old labeler's row, without Y and U (yes and unsure elsewhere in the audit)
-const REASON_KEYS = ["q", "w", "e", "r", "t", "i", "o"];
 const FLAG_KEYS: Record<EvaluationFlag, string> = { cog_issue: "a", thumbnail_issue: "s" };
 const FLAG_FIELD: Record<EvaluationFlag, "cogIssue" | "thumbnailIssue"> = { cog_issue: "cogIssue", thumbnail_issue: "thumbnailIssue" };
 const CALLS: { decision: EvaluationDecision; label: string; key: string }[] = [
-	{ decision: "keep", label: "OK", key: "1" },
-	{ decision: "exclude", label: "Exclude", key: "2" },
+	{ decision: "keep", label: "OK", key: DECISION_KEYS.keep },
+	{ decision: "exclude", label: "Exclude", key: DECISION_KEYS.exclude },
 ];
 
 type Draft = IEvaluationAnswer & { note: string };

@@ -79,7 +79,9 @@ review per step you answered or changed. A tile answer in steps 6 and 7 is store
 on the prediction the tile shows. A review counts while the evidence it was given on is
 the same: a new ortho asks the dataset evaluation again (a georeferencing answer stays), a new prediction makes the tile answers stop counting.
 
-Keys: Enter next step (in the tile view: save and go on), Shift+Enter back, Ctrl+S save.
+Keys: Enter next step (in the tile view: save and go on), Shift+Enter back, Ctrl+S save,
+Ctrl+Enter save and next (the next dataset opens on the same step). In step 1: 1 OK, 2
+Exclude, Q W E R T I O an exclude reason, B benchmark (operators).
 In the tile view: ← → tiles, Tab next tile without an answer, ↑ ↓ problem, Y N U yes,
 no or unsure, 1 2 3 4 OK, minor, major, ambiguous (and save), T raw or prediction, V side by
 side, - + prediction opacity, M map, B benchmark (operators).

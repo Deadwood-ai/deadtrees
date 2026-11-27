@@ -2,7 +2,7 @@
  * the dataset evaluation's answers in words. What a check reports on a dataset and what still
  * needs a person come from audit.dataset_outcomes (utils/auditReview.ts). */
 
-import type { AuditCheckKey, AuditImageKind, AuditVerdict, IDatasetJudgement, IDatasetReview, PredictionLayer, ReviewItem } from "../types/auditChecks";
+import type { AuditCheckKey, AuditImageKind, AuditVerdict, EvaluationDecision, IDatasetJudgement, IDatasetReview, PredictionLayer, ReviewItem } from "../types/auditChecks";
 
 export type AuditSectionId = "evaluation" | "aoi" | "georef" | "date" | "phenology" | "forest" | "deadwood";
 export type CropImageKind = Extract<AuditImageKind, "raw" | "deadwood_overlay" | "forest_cover_overlay">;
@@ -58,6 +58,12 @@ export const EXCLUDE_REASONS: (IAuditReason & { inText: string })[] = [
   { code: "too_dark", label: "Too dark", inText: "too dark" },
   { code: "other", label: "Other", inText: "other reason" },
 ];
+
+/** The dataset evaluation's keys, the same in the Audit Review and on the benchmark labeling page:
+ * 1 OK, 2 Exclude, and Q W E R T I O for the exclude reasons in order (the old labeler's row,
+ * without Y and U: yes and unsure elsewhere in the audit). */
+export const DECISION_KEYS: Record<EvaluationDecision, string> = { keep: "1", exclude: "2" };
+export const REASON_KEYS = ["q", "w", "e", "r", "t", "i", "o"];
 
 export const AUDIT_SECTIONS: IAuditSectionDef[] = [
   {
