@@ -6,10 +6,19 @@ from shared.models import StatusEnum, Ortho, QueueTask
 from shared.logger import logger
 from shared.status import update_status
 from shared.logging import LogContext, LogCategory
+from shared.retry import retry_on_transient_error
 
 from .utils.local_ortho import ensure_local_ortho
 from .aoi_segmentation_v1.predict_aoi import predict_aoi
 from .exceptions import AuthenticationError, DatasetError, ProcessingError
+
+
+@retry_on_transient_error
+def _fetch_ortho(dataset_id: int, token: str) -> Ortho:
+	"""Read the dataset's ortho row; a read, so a brief network or DNS failure is retried."""
+	with use_client(token) as client:
+		response = client.table(settings.orthos_table).select('*').eq('dataset_id', dataset_id).execute()
+	return Ortho(**response.data[0])
 
 
 def process_aoi_segmentation(task: QueueTask, token: str, temp_dir: Path):
@@ -30,9 +39,7 @@ def process_aoi_segmentation(task: QueueTask, token: str, temp_dir: Path):
 		raise AuthenticationError('Invalid token')
 
 	try:
-		with use_client(token) as client:
-			response = client.table(settings.orthos_table).select('*').eq('dataset_id', task.dataset_id).execute()
-			ortho = Ortho(**response.data[0])
+		ortho = _fetch_ortho(task.dataset_id, token)
 	except Exception as e:
 		logger.error(
 			'Failed to fetch ortho data',

@@ -199,3 +199,122 @@ def test_process_aoi_skips_when_human_aoi_exists(aoi_task, auth_token, test_proc
 	# Auditor AOI preserved and no auto AOI was created.
 	assert any(aoi['notes'] == 'auditor drawn' for aoi in aoi_response.data)
 	assert not any(aoi['notes'] == AUTO_AOI_NOTES for aoi in aoi_response.data)
+
+
+class _FlakyAoiTable:
+	"""Fake v2_aois table: each execute() raises the next queued error, then answers."""
+
+	def __init__(self, store, errors):
+		self.store, self.errors, self.op, self.filters, self.payload = store, errors, None, {}, None
+
+	def select(self, _columns):
+		self.op = 'select'
+		return self
+
+	def delete(self):
+		self.op = 'delete'
+		return self
+
+	def insert(self, row):
+		self.op, self.payload = 'insert', row
+		return self
+
+	def eq(self, column, value):
+		self.filters[column] = value
+		return self
+
+	def execute(self):
+		class _Response:
+			def __init__(self, data):
+				self.data = data
+
+		if self.errors:
+			raise self.errors.pop(0)
+		matches = [r for r in self.store if all(r.get(k) == v for k, v in self.filters.items())]
+		if self.op == 'select':
+			return _Response(matches)
+		if self.op == 'delete':
+			self.store[:] = [r for r in self.store if r not in matches]
+			return _Response(matches)
+		row = {**self.payload, 'id': len(self.store) + 100}
+		self.store.append(row)
+		return _Response([row])
+
+
+@pytest.fixture
+def flaky_aois(monkeypatch):
+	"""v2_aois with a queue of errors; no sleeps between retries."""
+	from contextlib import contextmanager
+	from processor.src.aoi_segmentation_v1 import predict_aoi as module
+
+	state = {'rows': [], 'errors': [], 'delays': []}
+
+	@contextmanager
+	def fake_client(_token):
+		class _Client:
+			def table(self, _name):
+				return _FlakyAoiTable(state['rows'], state['errors'])
+
+		yield _Client()
+
+	monkeypatch.setattr(module, 'use_client', fake_client)
+	monkeypatch.setattr('shared.retry.time.sleep', state['delays'].append)
+	return state
+
+
+def _dns_error():
+	import httpx
+
+	return httpx.ConnectError('[Errno -3] Temporary failure in name resolution')
+
+
+@pytest.mark.unit
+def test_human_aoi_check_retries_a_dns_failure(flaky_aois):
+	# 10450 and 13776 (DT-1632): the check after inference failed on a brief DNS outage.
+	from processor.src.aoi_segmentation_v1.predict_aoi import _existing_human_aoi
+
+	flaky_aois['rows'].append({'id': 1, 'dataset_id': 7, 'notes': 'drawn by an auditor'})
+	flaky_aois['errors'].append(_dns_error())
+
+	assert _existing_human_aoi(7, 'token') is True
+	assert flaky_aois['delays'] == [1.0]
+
+
+@pytest.mark.unit
+def test_auto_aoi_write_retried_after_a_lost_response_leaves_one_auto_aoi(flaky_aois):
+	from processor.src.aoi_segmentation_v1.predict_aoi import _replace_auto_aoi
+
+	human = {'id': 1, 'dataset_id': 7, 'notes': 'drawn by an auditor'}
+	flaky_aois['rows'] += [human, {'id': 2, 'dataset_id': 7, 'notes': AUTO_AOI_NOTES}]
+	row = {'dataset_id': 7, 'notes': AUTO_AOI_NOTES}
+
+	# First attempt: the insert commits, then its response is lost.
+	original_execute = _FlakyAoiTable.execute
+
+	def lose_first_insert_response(self):
+		result = original_execute(self)
+		if self.op == 'insert' and not flaky_aois.get('lost'):
+			flaky_aois['lost'] = True
+			raise _dns_error()
+		return result
+
+	import unittest.mock
+
+	with unittest.mock.patch.object(_FlakyAoiTable, 'execute', lose_first_insert_response):
+		aoi_id = _replace_auto_aoi(7, row, 'token')
+
+	autos = [r for r in flaky_aois['rows'] if r['notes'] == AUTO_AOI_NOTES]
+	assert [r['id'] for r in autos] == [aoi_id]
+	assert human in flaky_aois['rows']
+	assert flaky_aois['delays'] == [1.0]
+
+
+@pytest.mark.unit
+def test_auto_aoi_write_does_not_retry_a_rejected_write(flaky_aois):
+	from processor.src.aoi_segmentation_v1.predict_aoi import _replace_auto_aoi
+
+	flaky_aois['errors'].append(Exception('permission denied for table v2_aois'))
+
+	with pytest.raises(Exception, match='permission denied'):
+		_replace_auto_aoi(7, {'dataset_id': 7, 'notes': AUTO_AOI_NOTES}, 'token')
+	assert flaky_aois['delays'] == []
