@@ -86,15 +86,11 @@ def predict_aoi(dataset_id: int, file_path: Path, user_id: str, token: str):
 def _save_aoi(polygons, dataset_id, user_id, token):
 	log_ctx = LogContext(category=LogCategory.AOI, dataset_id=dataset_id, user_id=user_id, token=token)
 
-	if polygons is None or len(polygons) == 0:
-		logger.warning('No AOI polygon detected; skipping AOI write', log_ctx)
-		return
-
-	# Polygons are already in EPSG:4326 from inference; validate/repair geometry.
+	# Polygons are already in EPSG:4326 from inference; validate/repair geometry. No polygon
+	# is a result too: the model found no usable area, which is stored as an empty AOI.
 	polygons, _ = validate_and_fix_polygons(polygons, min_area=0.0, dataset_id=dataset_id, label_type='aoi')
-	if len(polygons) == 0:
-		logger.warning('No valid AOI polygon after geometry validation; skipping AOI write', log_ctx)
-		return
+	if not polygons:
+		logger.info('The model found no usable area; storing an empty AOI', log_ctx)
 
 	# Re-check after the long-running inference: never write on top of a human
 	# AOI that may have appeared in the meantime.

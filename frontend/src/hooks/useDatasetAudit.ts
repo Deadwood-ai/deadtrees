@@ -9,6 +9,7 @@ import {
   resolveAOIRevisionMetadata,
   resolveAOISaveTarget,
 } from "./aoiSaveProvenance";
+import { withoutEmptyGeometry } from "../utils/aoiGeometry";
 
 export interface AOIData {
   id?: number;
@@ -116,7 +117,7 @@ export function useDatasetAOI(datasetId: number | undefined) {
       if (error) throw error;
 
       // Return the first item if it exists, otherwise null
-      return data && data.length > 0 ? data[0] : null;
+      return data && data.length > 0 ? withoutEmptyGeometry(data[0]) : null;
     },
     enabled: !!datasetId,
   });

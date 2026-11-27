@@ -147,13 +147,12 @@ def test_process_aoi_segmentation_success(aoi_task, auth_token):
 
 	assert status_response.data[0]['is_aoi_done'] is True
 
-	# The model may legitimately predict no AOI; only assert on the row when present.
-	auto_aois = [aoi for aoi in aoi_response.data if aoi['notes'] == AUTO_AOI_NOTES]
-	for aoi in auto_aois:
-		assert aoi['is_whole_image'] is False
-		assert aoi['source'] == 'ml_prediction'
-		assert aoi['model_version'] == AOI_MODEL_VERSION
-		assert aoi['geometry']['type'] == 'MultiPolygon'
+	# Every run stores its result; no usable area is an empty MultiPolygon.
+	(aoi,) = [aoi for aoi in aoi_response.data if aoi['notes'] == AUTO_AOI_NOTES]
+	assert aoi['is_whole_image'] is False
+	assert aoi['source'] == 'ml_prediction'
+	assert aoi['model_version'] == AOI_MODEL_VERSION
+	assert aoi['geometry']['type'] == 'MultiPolygon'
 
 
 @pytest.mark.comprehensive

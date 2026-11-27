@@ -32,7 +32,6 @@ from shapely.ops import unary_union
 from transformers import SegformerConfig, SegformerForSemanticSegmentation
 
 from processor.src.utils.inference_dataset import MASK_TIFF_LAYOUT, InferenceDataset, normalize_imagenet, predict_tiles
-from processor.src.utils.nodata import read_nodata_mask
 from processor.src.utils.segmentation import (
 	filter_polygons_by_area,
 	image_reprojector,
@@ -75,11 +74,6 @@ PROGRESS_LOG_FRACTION = 0.1
 # the shape within 20 cm while cutting the vertex count by ~1-2 orders of
 # magnitude (lighter storage and map rendering).
 FINAL_SIMPLIFY_TOLERANCE_M = 0.20
-# The model was trained on whole flights and finds no usable AOI on an ortho that
-# fits inside one tile's prediction window (51.2 m at 10 cm): in production 62 of
-# 69 such orthos got no AOI and the other 7 a sliver of 2-12 % of the image. These
-# are tightly cropped plots, so their valid-data footprint is the AOI.
-SMALL_ORTHO_MAX_PX = TILE_SIZE - 2 * PADDING
 
 
 def _build_model_config() -> SegformerConfig:
@@ -238,16 +232,6 @@ def cleanup_aoi_polygon(polygons: list[Polygon]) -> list[Polygon]:
 	return [geometry]
 
 
-def valid_data_footprint(src) -> list[Polygon]:
-	"""The valid-data outline of an image_reprojector VRT as one hole-free polygon."""
-	valid = ~read_nodata_mask(src)
-	parts = [shape(geom) for geom, _ in shapes(valid.astype(np.uint8), mask=valid, transform=src.transform)]
-	footprint = _remove_polygon_holes(_keep_largest_polygon(unary_union(parts)))
-	if footprint.is_empty:
-		return []
-	return [footprint.simplify(FINAL_SIMPLIFY_TOLERANCE_M, preserve_topology=True)]
-
-
 def polygonize_inside_aoi(mask_path: str, log: Callable[..., None]) -> list[Polygon]:
 	"""Return inside-AOI polygons, from an averaged mask when it exceeds MAX_POLYGONIZE_PIXELS."""
 	with rasterio.open(mask_path) as ds:
@@ -323,11 +307,6 @@ class AOIInference:
 			padding=PADDING,
 		)
 		vrt_src = dataset.image_src
-		if max(dataset.width, dataset.height) <= SMALL_ORTHO_MAX_PX:
-			log('Ortho fits in one model tile; using its valid-data footprint', width=dataset.width, height=dataset.height)
-			footprint = valid_data_footprint(vrt_src)
-			vrt_src.close()
-			return reproject_polygons(footprint, vrt_src.crs, 'EPSG:4326') if footprint else []
 
 		tmp_mask_path = None
 		try:

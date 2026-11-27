@@ -107,7 +107,7 @@ def test_candidate_blocks_follow_the_sentinel_grid():
 
 
 @pytest.mark.unit
-def test_select_aoi_prefers_auditor_aoi_and_ignores_whole_image():
+def test_select_aoi_prefers_auditor_aoi_and_ignores_whole_image_and_empty():
 	geom = {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 0]]]}
 	manual = {**geom, 'coordinates': [[[0, 0], [2, 0], [2, 2], [0, 0]]]}
 	aois = [
@@ -116,6 +116,9 @@ def test_select_aoi_prefers_auditor_aoi_and_ignores_whole_image():
 	]
 	assert select_aoi(aois) == manual
 	assert select_aoi([{'geometry': geom, 'source': 'manual', 'is_whole_image': True}]) is None
+	# The model found no usable area: the stages read the whole ortho.
+	empty = {'type': 'MultiPolygon', 'coordinates': []}
+	assert select_aoi([{'geometry': empty, 'source': 'ml_prediction', 'is_whole_image': False}]) is None
 	assert select_aoi([]) is None
 
 

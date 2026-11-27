@@ -28,8 +28,9 @@ NO_ORTHO_HASH = 'dataset has no ortho with a sha256; run the ortho stage first'
 
 def select_aoi(aois: list[dict]) -> dict | None:
 	"""The AOI to work in: an auditor's AOI before the predicted one, newest
-	first; whole-image AOIs mean "no AOI"."""
-	usable = [a for a in aois if a.get('geometry') and not a.get('is_whole_image')]
+	first; whole-image AOIs and empty ones (the model found no usable area) mean
+	"no AOI", so the stages read the whole ortho."""
+	usable = [a for a in aois if (a.get('geometry') or {}).get('coordinates') and not a.get('is_whole_image')]
 	if not usable:
 		return None
 	usable.sort(key=lambda a: a.get('created_at') or '', reverse=True)
