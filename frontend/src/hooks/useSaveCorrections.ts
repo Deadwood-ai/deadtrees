@@ -3,7 +3,7 @@ import { clearLocalSupabaseSession, supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { isInvalidSessionError } from "../utils/authSession";
 import { isTokenExpiringSoon } from "../utils/isTokenExpiringSoon";
-import { fetchAllPages } from "../utils/fetchAllPages";
+import { allRows } from "../utils/allRows";
 import type Feature from "ol/Feature";
 import type { Geometry } from "ol/geom";
 import MultiPolygon from "ol/geom/MultiPolygon";
@@ -76,9 +76,6 @@ export function usePredictionLabel(datasetId: number | undefined, layerType: Lay
  * Hook to load geometries for editing
  * Returns features with geometry_id, updated_at metadata attached
  */
-/** Rows per request when loading a layer for editing; matches the API's row limit. */
-const EDIT_PAGE_SIZE = 1000;
-
 export function useLoadGeometriesForEditing(labelId: number | undefined, layerType: LayerType | null) {
   const geoJson = new GeoJSON();
 
@@ -92,20 +89,18 @@ export function useLoadGeometriesForEditing(labelId: number | undefined, layerTy
 
       // Note: correction_status is computed via RPC functions (JOINs with corrections table)
       // It's not a column on the geometry tables, so we don't query for it here
-      // The API returns at most EDIT_PAGE_SIZE rows per request, so a dataset with thousands of
-      // polygons is read in pages; otherwise the editor would silently miss everything after
-      // the first page (and a saved polygon past it would seem lost).
-      const data = await fetchAllPages<GeometryRow>(async (from, to) => {
-        const { data: page, error } = await supabase
+      // The API returns at most 1,000 rows per request, so a layer is read in pages; otherwise the
+      // editor would silently miss every polygon after the first page.
+      const data = await allRows<GeometryRow>((from, to) =>
+        supabase
           .from(tableName)
           .select("id, geometry, updated_at, is_deleted")
           .eq("label_id", labelId)
           .eq("is_deleted", false)
           .order("id")
-          .range(from, to);
-        if (error) throw error;
-        return page as GeometryRow[] | null;
-      }, EDIT_PAGE_SIZE);
+          .range(from, to)
+          .overrideTypes<GeometryRow[], { merge: false }>(),
+      );
 
       // Dynamically import OpenLayers Feature to avoid SSR issues
       const { default: Feature } = await import("ol/Feature");
