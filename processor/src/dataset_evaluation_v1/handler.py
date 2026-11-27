@@ -25,9 +25,10 @@ from ..utils.stored_inputs import (
 from .check import CONFIG, evaluate, image_path, payload
 from .inputs import Tile, read_inputs
 
-# v3: the prompt and images of v2, which judged the orthophoto alone; v1 judged inside the
-# AOI, which is a check of its own (DT-1538).
-VERSION = 'v3'
+# v4: imagery without trees is usable, not a reason to exclude (DT-1625); v3 had the prompt
+# and images of v2, which judged the orthophoto alone; v1 judged inside the AOI, which is a
+# check of its own (DT-1538).
+VERSION = 'v4'
 # audit.check_rules of the version: the deciding model's verdict (by name prefix) keeps or
 # excludes, a band check at band_major_at or more excludes as not RGB, an empty COG as a
 # broken ortho; the other models are stored and shown, not counted
