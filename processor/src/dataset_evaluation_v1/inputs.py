@@ -199,9 +199,15 @@ def native_crops(src, valid: np.ndarray, scale: float, native_mpp: float, crop_p
 	eligible = inside(valid, half)
 	ys, xs = np.nonzero(eligible if eligible.any() else valid)
 	crops = []
+	windows = []
 	for x, y in spread_points(np.column_stack((xs, ys)).astype(float), count, seed):
 		col = int(np.clip((x + 0.5) * scale - cw / 2, 0, src.width - cw))
 		row = int(np.clip((y + 0.5) * scale - ch / 2, 0, src.height - ch))
+		# an ortho about one crop across clamps several points to one window: show it once
+		# (audit.finish_run keeps a tile and its image once)
+		if (col, row) in windows:
+			continue
+		windows.append((col, row))
 		window = Window(col, row, cw, ch)
 		crops.append(
 			Crop(
