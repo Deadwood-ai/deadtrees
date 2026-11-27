@@ -18,8 +18,9 @@ interface AoiStepProps {
 /** Step 2: the area of interest as stored (exists, created, source, model version), and its
  * editing on the map. A dataset whose processing finished without an AOI needs one drawn. */
 export default function AoiStep({ result, editor }: AoiStepProps) {
+	const exists = !result?.aoi_exists ? "No" : result.aoi_empty ? "Empty: the model found no usable area" : "Yes";
 	const rows: [string, string][] = [
-		["Exists", result?.aoi_exists ? "Yes" : "No"],
+		["Exists", exists],
 		["Created", day(result?.aoi_created_at)],
 		["Source", result?.aoi_source ? (SOURCES[result.aoi_source] ?? result.aoi_source) : "–"],
 		["Model version", result?.aoi_model_version ?? "–"],

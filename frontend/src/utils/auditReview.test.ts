@@ -26,6 +26,7 @@ const result = (over: Partial<IAuditDatasetResult> = {}): IAuditDatasetResult =>
 	aoi_created_at: "2026-11-01T10:00:00Z",
 	aoi_source: "ml_prediction",
 	aoi_model_version: "aoi_segmentation_v1",
+	aoi_empty: false,
 	georef_status: "estimated",
 	georef_offset_m: 4.2,
 	georef_source: "check",
@@ -72,6 +73,8 @@ describe("what still needs a person", () => {
 		expect(sectionStatus("date", result({ date_replace: true }), [], RAN).label).toBe("Replace");
 		expect(sectionStatus("phenology", result({ phenology_probability: 0.31 }), [], RAN)).toEqual({ label: "31%", tone: "warn" });
 		expect(sectionStatus("aoi", undefined, [], RAN).label).toBe("Not run yet");
+		expect(sectionStatus("aoi", result({ aoi_empty: true }), [], RAN)).toEqual({ label: "Empty", tone: "warn" });
+		expect(sectionStatus("aoi", result({ aoi_exists: false }), [], RAN).label).toBe("Missing");
 		expect(sectionStatus("georef", r, [], RAN).tone).toBe("warn");
 		expect(sectionStatus("evaluation", result({ evaluation_decision: null }), [], RAN).label).toBe("Undecided");
 		expect(sectionStatus("evaluation", result({ evaluation_decision: null }), [], []).label).toBe("Not run yet");

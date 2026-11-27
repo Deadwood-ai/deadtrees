@@ -133,7 +133,8 @@ export function sectionStatus(id: AuditSectionId, result: IAuditDatasetResult | 
       if (result.evaluation_decision) return { label: DECISION_LABELS[result.evaluation_decision], tone: DECISION_TONE[result.evaluation_decision] };
       return checksRun.includes("dataset_evaluation") ? { label: "Undecided", tone: "warn" } : NOT_RUN;
     case "aoi":
-      return result.aoi_exists ? { label: "Set", tone: "ok" } : { label: "Missing", tone: "todo" };
+      if (!result.aoi_exists) return { label: "Missing", tone: "todo" };
+      return result.aoi_empty ? { label: "Empty", tone: "warn" } : { label: "Set", tone: "ok" };
     case "georef": {
       const status = result.georef_status;
       if (!status) return NOT_RUN;

@@ -53,7 +53,7 @@ review counts while the run judged the same prediction label.
 | `review_list` | dataset that is not archived | the Audit Review list: `outcome` (the dataset's `dataset_outcomes` row), the columns its tabs and filters use, the processing stages (`failed_stage` named as the factory does), user reports, pending edits, the segmentation benchmark selection and the reviewers |
 
 `review_required`, in step order: `evaluation` (the check is unsure and no review
-counts), `aoi` (the AOI step ran or failed and left no AOI; not while it has not run), `georef` (`needs_review`: the references matched too poorly for an offset estimate, and no review counts),
+counts), `aoi` (the AOI step failed or left no AOI; not while it has not run. A model that finds no usable area stores an empty AOI, which is a result and needs no review), `georef` (`needs_review`: the references matched too poorly for an offset estimate, and no review counts),
 `date` (the date review is stale: the estimate's advice flipped since; a new estimate
 with the same advice keeps it). The prediction layers never need review, and an excluded
 dataset needs none at all: once the evaluation excludes it, its other checks do not matter.

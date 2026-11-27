@@ -17,6 +17,7 @@ const RESULT_COLUMNS = [
   "aoi_created_at",
   "aoi_source",
   "aoi_model_version",
+  "aoi_empty",
   "georef_status",
   "georef_offset_m",
   "georef_source",

@@ -110,6 +110,7 @@ const datasetResult = (dataset_id: number, over: Record<string, unknown> = {}) =
   aoi_created_at: null,
   aoi_source: null,
   aoi_model_version: null,
+  aoi_empty: false,
   georef_status: null,
   georef_offset_m: null,
   georef_source: null,
