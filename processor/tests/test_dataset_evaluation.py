@@ -1,10 +1,10 @@
-from contextlib import nullcontext
-
 """Dataset evaluation check: inputs from the COG, the band check, the model answer, the
 dataset rule and its rule-only recomputation, and the worker handler (external models,
 PostgREST and storage faked at their boundaries)."""
 
 import io
+from contextlib import nullcontext
+from functools import partial
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +23,9 @@ from processor.src.dataset_evaluation_v1.check import evaluate, payload as finis
 from processor.src.dataset_evaluation_v1.handler import tile_of
 from processor.src.dataset_evaluation_v1.inputs import Tile, inside, padding, read_inputs
 from processor.src.dataset_evaluation_v1.prompt import AnswerError, build_prompt, parse_answer
+from processor.src.utils import stored_inputs
 from processor.src.utils.stored_inputs import read_geometry
+from shared import pagination
 
 SHA = 'b' * 64
 # EPSG:3857 metres near Freiburg (48.0 N): 0.05 m map pixels are about 3.3 cm on the ground
@@ -104,12 +106,23 @@ def test_crops_are_the_same_on_a_rerun_and_move_with_the_seed(cog):
 
 
 @pytest.mark.unit
-def test_a_small_ortho_gives_crops_of_its_own_size(tmp_path):
+def test_a_small_ortho_gives_one_crop_of_its_own_size(tmp_path):
 	small = write_cog(tmp_path / 'small.tif', forest(300, 400))
 	inputs = read_inputs(str(small), overview_px=2048, crop_px=1024)
 
 	assert inputs.overview.shape == (300, 400, 3)
-	assert all(c.image.shape == (300, 400, 3) for c in inputs.crops)
+	# four points, one window: the same tile twice would break audit.finish_run's image key
+	assert [c.image.shape for c in inputs.crops] == [(300, 400, 3)]
+
+
+@pytest.mark.unit
+def test_an_ortho_about_one_crop_across_never_repeats_a_crop_window(tmp_path):
+	narrow = write_cog(tmp_path / 'narrow.tif', forest(1037, 589))
+	inputs = read_inputs(str(narrow), overview_px=2048, crop_px=1024)
+
+	windows = [c.cog_window for c in inputs.crops]
+	assert windows and len(set(windows)) == len(windows)
+	assert all(c.image.shape == (1024, 589, 3) for c in inputs.crops)
 
 
 @pytest.mark.unit
@@ -181,7 +194,6 @@ def clip_tiles(cog_path):
 
 @pytest.mark.unit
 def test_crops_are_spread_clip_tiles_rendered_at_5_cm(tmp_path):
-
 	big = tmp_path / 'big.tif'
 	rgb = forest(4500, 6000)
 	with rasterio.open(
@@ -330,7 +342,14 @@ def test_a_reply_becomes_a_dataset_judgement_in_the_audit_vocabulary():
 	assert j.exclude_reason == 'blurry' and j.summary == 'Closed conifer forest, sharp.'
 	assert j.raw['flags']['blurry'] == 90.0 and j.raw['scene'] == 'forest_interior'
 	assert set(j.row()) == {
-		'judge', 'verdict', 'likelihood', 'cog_issue', 'thumbnail_issue', 'exclude_reason', 'summary', 'raw'
+		'judge',
+		'verdict',
+		'likelihood',
+		'cog_issue',
+		'thumbnail_issue',
+		'exclude_reason',
+		'summary',
+		'raw',
 	}, 'only columns audit.dataset_vlm_judgements has'
 
 
@@ -473,10 +492,10 @@ def test_the_prompt_lists_only_the_reasons_the_models_decide():
 
 
 class Rows:
-	"""Enough of a PostgREST table: select / eq / is_ / order / range / execute, and insert."""
+	"""Enough of a PostgREST table: select / eq / is_ / gt / order / range / limit / execute, and insert."""
 
 	def __init__(self, rows):
-		self.rows, self.filters, self.span = rows, [], None
+		self.rows, self.filters, self.span, self.after = rows, [], None, None
 
 	def select(self, *_):
 		return Rows(self.rows)
@@ -496,12 +515,22 @@ class Rows:
 	def order(self, *_):
 		return self
 
+	def gt(self, key, value):
+		assert key == 'id'
+		self.after = value
+		return self
+
 	def range(self, start, end):
 		self.span = (start, end)
 		return self
 
+	def limit(self, count):
+		return self.range(0, count - 1)
+
 	def execute(self):
 		rows = [r for r in self.rows if all(r.get(k) == v for k, v in self.filters)]
+		if self.after is not None:
+			rows = sorted((r for r in rows if r['id'] > self.after), key=lambda r: r['id'])
 		if self.span:
 			rows = rows[self.span[0] : self.span[1] + 1]
 		return SimpleNamespace(data=rows)
@@ -579,11 +608,26 @@ def test_the_handler_uploads_the_images_and_returns_the_rows_to_store(cog, tmp_p
 
 
 @pytest.mark.unit
+def test_the_tiles_are_read_a_page_at_a_time_after_the_last_id(monkeypatch):
+	monkeypatch.setattr(stored_inputs, 'iter_pages_by_id', partial(pagination.iter_pages_by_id, page_size=2))
+	square = {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
+	tiles = [
+		{'id': i, 'dataset_id': d, 'pixel_x0': 0, 'pixel_y0': 0, 'pixel_x1': 1, 'pixel_y1': 1, 'geometry': square}
+		for i, d in [(1, 42), (2, 7), (3, 42), (4, 42), (5, 42), (6, 7), (7, 42)]
+	]
+	rows = stored_inputs.tile_rows(FakeClient({'v2_tile_embeddings': tiles}), 42)
+
+	assert [r['id'] for r in rows] == [1, 3, 4, 5, 7]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize('earlier', ['v1', 'v2'])
 def test_a_run_of_an_earlier_version_is_not_judged_by_this_code(earlier):
 	"""Version 1 judged inside the AOI and version 2 had the duplicate check: their runs must not
 	get this code's answers under their name."""
-	ctx = SimpleNamespace(run={'id': 7, 'dataset_id': 42}, version={'version': earlier, 'config': {}}, client=None, token='t')
+	ctx = SimpleNamespace(
+		run={'id': 7, 'dataset_id': 42}, version={'version': earlier, 'config': {}}, client=None, token='t'
+	)
 	with pytest.raises(ValueError, match=f'the run is of version {earlier}; this code judges v3'):
 		handler.handle(ctx)
 
