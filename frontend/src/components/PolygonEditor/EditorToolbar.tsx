@@ -63,11 +63,17 @@ export default function EditorToolbar({
   const displayTitle = title || `Editing ${type === "deadwood" ? "deadwood cover" : "tree cover"}`;
 
   return (
-    <div className={`absolute ${position === "top-right" ? "right-4" : "left-4"} ${className || "top-32"} z-20`}>
+    // The toolbar never grows past the map's bottom edge; its body scrolls instead, so Save and
+    // Cancel stay reachable on short screens.
+    <div
+      className={`absolute ${position === "top-right" ? "right-4" : "left-4"} ${className || "top-32"} z-20 flex`}
+      style={{ maxHeight: "calc(100% - 9rem)" }}
+    >
       <Card
         title={displayTitle}
-        className="shadow-lg"
+        className="flex max-h-full flex-col shadow-lg"
         style={{ width: areaTools ? 200 : 180 }}
+        styles={{ body: { overflowY: "auto", minHeight: 0 } }}
         size="small"
       >
         <Space direction="vertical" size="small" className="w-full">

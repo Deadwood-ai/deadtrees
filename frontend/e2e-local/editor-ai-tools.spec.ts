@@ -180,6 +180,23 @@ test.describe("label editor AI and area tools", () => {
     await expect.poll(() => editor.countCorrections("add")).toBeGreaterThanOrEqual(addsBefore + 2);
   });
 
+  test("on a short laptop screen the toolbar stays inside the map and Save stays reachable", async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await editor.openDeadwoodEditor(page);
+
+    const map = (await page.getByTestId("dataset-audit-map").boundingBox())!;
+    const toolbar = page.locator(".ant-card").filter({ hasText: "Editing deadwood cover" });
+    const box = (await toolbar.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(map.y + map.height + 1);
+
+    // The toolbar's body scrolls, so both buttons can be brought into view.
+    for (const button of [page.getByRole("button", { name: /Save \(⌘S\)/ }), page.getByRole("button", { name: "Cancel", exact: true })]) {
+      await button.scrollIntoViewIfNeeded();
+      await expect(button).toBeInViewport();
+    }
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
+
   test("a search still running when the editor is cancelled publishes nothing", async ({ page }) => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => (release = resolve));
