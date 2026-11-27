@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 
 from .vocabulary import CATEGORIES, FLAGS, MODEL_REASONS, VERDICTS
 
-PROMPT_VERSION = 'v2'
+PROMPT_VERSION = 'v3'
 # A COG or thumbnail issue the model puts at this likelihood or higher is reported.
 ISSUE_AT = 50
 
@@ -60,7 +60,6 @@ flight. {samples}
 Decide whether the imagery can be used to map dead trees and forest cover.
 - exclude: unusable as a whole. Only for these reasons:
   blurry (blurry or smeared throughout, crowns cannot be told apart at full resolution),
-  no_trees (no trees or forest at all, e.g. water, fields, built-up area, a construction site),
   artifacts (severe reconstruction errors throughout: warping, ghosting, holes, stretched or melted areas),
   not_rgb (not a true colour photo: near-infrared or false colour, thermal, grayscale, one band),
   broken_ortho (mostly empty, black, cut off or only a few scattered pieces),
@@ -73,8 +72,8 @@ Decide whether the imagery can be used to map dead trees and forest cover.
   change the light of the flight.
 - keep: usable as it is. Small problems at the edges, a few artifacts, partial cloud or shadow are fine.
 - unsure: you cannot tell from these images.
-Not a reason to exclude: the season or leafless trees, the georeferencing, or another upload of the same
-area. Other checks decide those.
+Not a reason to exclude: few or no trees (fields, water or built-up areas are usable imagery too), the
+season or leafless trees, the georeferencing, or another upload of the same area. Other checks decide those.
 
 Answer with this JSON only:
 {{"verdict": "{_choices(VERDICTS)}",

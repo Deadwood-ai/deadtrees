@@ -118,7 +118,8 @@ def evaluate(
 	thumbnail: bytes | None = None,
 ) -> Evaluation:
 	"""Ask the models and run the band check on one dataset's inputs. An empty COG is
-	judged by no one: the rules exclude it as a broken ortho."""
+	judged by no one: the rules exclude it as a broken ortho. With no judges (a prepare run)
+	only the images are made."""
 	images = model_images(inputs, thumbnail)
 	evidence = {
 		'settings': inputs.settings,
@@ -130,7 +131,7 @@ def evaluate(
 		'prompt_version': PROMPT_VERSION,
 		'empty': inputs.empty,
 	}
-	if inputs.empty:
+	if inputs.empty or not judges:
 		return Evaluation(images=images, judgements=[], evidence=evidence)
 	crop_mpp = inputs.crops[0].mpp if inputs.crops else inputs.native_mpp
 	prompt = build_prompt(inputs.overview_mpp, crop_mpp, thumbnail is not None, crop_count=len(inputs.crops))

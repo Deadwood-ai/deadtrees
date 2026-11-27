@@ -16,7 +16,7 @@ The orthophoto alone. The area of interest is a check of its own and the predict
 are judged by the prediction quality check, so neither plays a part here (version 2,
 DT-1538; version 1 judged inside the AOI and drew its edge on the overview).
 
-The code is the version (now v3): the handler refuses a run that was queued for an
+The code is the version (now v4; v4 keeps imagery without trees, DT-1625): the handler refuses a run that was queued for an
 earlier version (the run fails with that reason), so an old version's results never hold
 the new version's answers. An operator activates a version, with its rules, before the
 worker judges with it.
@@ -49,7 +49,7 @@ The handler uploads the images the models judged to the storage server under
   its exclude likelihood, `exclude_reason` its reason, `cog_issue` and
   `thumbnail_issue` set when it puts them at 50 or more, and a one-sentence `summary`.
   `raw` holds the parsed answer: every flag's 0-100 likelihood (blurry, not_rgb,
-  no_trees, broken_ortho, too_dark, artifacts, cog_issue, thumbnail_issue, reprocess),
+  broken_ortho, too_dark, artifacts, cog_issue, thumbnail_issue, reprocess),
   sharpness, lighting, leaf state (a hint only), image type, scene and land cover from
   the fixed lists in `vocabulary.py`, seconds and attempt.
 - The run: `inputs` is the ortho sha256, read again at run time. `evidence` holds the
