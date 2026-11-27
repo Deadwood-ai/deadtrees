@@ -492,13 +492,14 @@ def test_the_prompt_lists_only_the_reasons_the_models_decide():
 
 
 class Rows:
-	"""Enough of a PostgREST table: select / eq / is_ / gt / order / range / limit / execute, and insert."""
+	"""Enough of a PostgREST table: select / eq / is_ / gt / gte / lte / order / range / limit /
+	execute, and insert."""
 
-	def __init__(self, rows):
-		self.rows, self.filters, self.span, self.after = rows, [], None, None
+	def __init__(self, rows, columns=None):
+		self.rows, self.columns, self.filters, self.bounds, self.span = rows, columns, [], [], None
 
-	def select(self, *_):
-		return Rows(self.rows)
+	def select(self, columns='*'):
+		return Rows(self.rows, None if columns == '*' else columns.split(','))
 
 	def eq(self, key, value):
 		self.filters.append((key, value))
@@ -516,8 +517,15 @@ class Rows:
 		return self
 
 	def gt(self, key, value):
-		assert key == 'id'
-		self.after = value
+		self.bounds.append(lambda r: r[key] > value)
+		return self
+
+	def gte(self, key, value):
+		self.bounds.append(lambda r: r[key] >= value)
+		return self
+
+	def lte(self, key, value):
+		self.bounds.append(lambda r: r[key] <= value)
 		return self
 
 	def range(self, start, end):
@@ -528,11 +536,13 @@ class Rows:
 		return self.range(0, count - 1)
 
 	def execute(self):
-		rows = [r for r in self.rows if all(r.get(k) == v for k, v in self.filters)]
-		if self.after is not None:
-			rows = sorted((r for r in rows if r['id'] > self.after), key=lambda r: r['id'])
+		rows = [r for r in self.rows if all(r.get(k) == v for k, v in self.filters) and all(b(r) for b in self.bounds)]
+		if self.bounds:
+			rows.sort(key=lambda r: r['id'])
 		if self.span:
 			rows = rows[self.span[0] : self.span[1] + 1]
+		if self.columns:
+			rows = [{k: r[k] for k in self.columns} for r in rows]
 		return SimpleNamespace(data=rows)
 
 
@@ -610,6 +620,7 @@ def test_the_handler_uploads_the_images_and_returns_the_rows_to_store(cog, tmp_p
 @pytest.mark.unit
 def test_the_tiles_are_read_a_page_at_a_time_after_the_last_id(monkeypatch):
 	monkeypatch.setattr(stored_inputs, 'iter_pages_by_id', partial(pagination.iter_pages_by_id, page_size=2))
+	# ids of another dataset lie between this one's, inside a page's range
 	square = {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
 	tiles = [
 		{'id': i, 'dataset_id': d, 'pixel_x0': 0, 'pixel_y0': 0, 'pixel_x1': 1, 'pixel_y1': 1, 'geometry': square}

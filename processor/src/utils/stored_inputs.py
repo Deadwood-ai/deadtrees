@@ -143,14 +143,10 @@ def read_geometry(value):
 def tile_rows(client, dataset_id: int) -> list[dict]:
 	"""The dataset's CLIP tiles (none before the embedding stage has run): id, pixel window
 	and the footprint as shapely."""
-	# Page after the last id, through the (dataset_id, id) index. Ordered by id with only the
-	# dataset index, Postgres walked the primary key through other datasets' tiles, and the first
-	# page of a dataset of 53 000 tiles ran past the statement timeout.
+	# Page by id through the (dataset_id, id) index. Ordered by id with only the dataset index,
+	# Postgres walked the primary key through other datasets' tiles.
 	pages = iter_pages_by_id(
-		lambda: (
-			client.table(settings.tile_embeddings_table)
-			.select('id,pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry')
-			.eq('dataset_id', dataset_id)
-		)
+		lambda select: client.table(settings.tile_embeddings_table).select(select).eq('dataset_id', dataset_id),
+		'id,pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry',
 	)
 	return [{**row, 'geometry': read_geometry(row['geometry'])} for page in pages for row in page]
