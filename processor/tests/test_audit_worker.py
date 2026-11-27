@@ -191,16 +191,17 @@ def run_row(client, run_id):
 
 
 @pytest.mark.unit
-def test_new_uploads_go_before_manual_runs_and_the_backfill():
+def test_new_uploads_go_before_manual_runs_the_backfill_and_prepare_runs():
 	client = Client()
 	v = version(client)
+	prepare = queued(client, v, 5, 'prepare', created='2026-10-01T00:00')
 	backfill = queued(client, v, 1, 'backfill', created='2026-11-01T00:00')
 	manual = queued(client, v, 2, 'manual', created='2026-11-02T09:00')
 	upload = queued(client, v, 3, 'upload', created='2026-11-02T10:00')
 	other = version(client, check='dataset_evaluation')
 	queued(client, other, 4, 'upload', created='2026-11-01T00:00')
-	order = [runs.claim_next(client, [v['id']])['id'] for _ in range(3)]
-	assert order == [upload['id'], manual['id'], backfill['id']]
+	order = [runs.claim_next(client, [v['id']])['id'] for _ in range(4)]
+	assert order == [upload['id'], manual['id'], backfill['id'], prepare['id']]
 	assert runs.claim_next(client, [v['id']]) is None  # another check's run is not this worker's
 	assert run_row(client, upload['id'])['status'] == 'running' and run_row(client, upload['id'])['attempts'] == 1
 
@@ -218,6 +219,19 @@ def test_a_run_of_any_version_is_finished_through_finish_run():
 	assert [args['p_run_id'] for args in client.finished] == [first['id'], second['id']]
 	assert client.finished[0]['p_result'] == result
 	assert run_row(client, first['id'])['status'] == 'done' and run_row(client, second['id'])['status'] == 'done'
+
+
+@pytest.mark.unit
+def test_a_prepare_run_is_handled_without_judges(monkeypatch):
+	"""A prepare run stores the check's images and asks no model (DT-1627)."""
+	monkeypatch.setattr(models, 'judges', lambda config: {'haiku-5.5': None})
+	client = Client()
+	v = version(client)
+	full, prepare = queued(client, v, 1, 'manual'), queued(client, v, 2, 'prepare')
+	h = handler()
+	results = [worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None) for _ in range(2)]
+	assert results == ['done', 'done']
+	assert h.calls == [('handle', full['id'], ['haiku-5.5']), ('handle', prepare['id'], [])]
 
 
 @pytest.mark.unit
@@ -567,5 +581,3 @@ def test_a_run_records_the_inputs_its_handler_read_again():
 	h = handler(result={'inputs': judged, 'evidence': {}})
 	assert worker.tick(client=client, handlers={'prediction_quality': h}, put_image=None) == 'done'
 	assert run_row(client, run['id'])['inputs'] == judged
-
-

@@ -20,7 +20,7 @@ For the whole loop in plain words (review, benchmarks, how a change goes live), 
 | `checks` | check: `dataset_evaluation`, `prediction_quality`, `georef`, `acquisition_date` | migrations |
 | `check_versions` | what a check asks: models, prompt, tile picking (`config`); one active per check | worker registers (switched off); operators switch on |
 | `check_rules` | how a version's answers turn into results: the deciding judge (`decider`, a model name prefix) and thresholds; one active per version | worker registers (switched off); operators switch on |
-| `runs` | one execution of a version on a dataset: `status` (`queued`, `running`, `done`, `failed`), `queue` (`upload`, `backfill`, `manual`), `inputs` (ortho sha256, AOI, prediction label ids), `evidence` (coverage, cost, check-specific evidence) | worker |
+| `runs` | one execution of a version on a dataset: `status` (`queued`, `running`, `done`, `failed`), `queue` (`upload`, `backfill`, `manual`, `prepare`), `inputs` (ortho sha256, AOI, prediction label ids), `evidence` (coverage, cost, check-specific evidence) | worker |
 | `tiles` | square patch of the dataset's ortho on the 10 cm CLIP grid (`pixel_x0..y1`) with its footprint, or a footprint alone off the grid (the DT-1272 gold crops). Identified by window and footprint, no ortho fingerprint: a rerun on an ortho that did not move finds its tiles (and their reviews) again; a rewrite that moves the image gives new tiles | `finish_run` |
 | `images` | picture a run cut and judged (`raw`, `deadwood_overlay`, `forest_cover_overlay`, `overview`, `thumbnail`), stored on the storage server under `audit/`; `run_id` null only for the gold crops' images | `finish_run` |
 | `dataset_vlm_judgements` | a model's answer about a dataset in a run: `verdict`, `likelihood`, `cog_issue`, `thumbnail_issue`, `exclude_reason`, `summary`, `raw` | `finish_run`; never changed |
@@ -120,6 +120,10 @@ whoever gave it.
   `in_benchmark = true`. An operator's dataset label is also that dataset's review.
 - `audit.remove_benchmark_target(benchmark, dataset_id, tile_id)` (operators) clears the
   tick on the target's reviews; the reviews stay. It returns how many lost the tick.
+- A dataset ticked into the dataset evaluation benchmark gets a prepare run of the active
+  version (trigger `queue_benchmark_evaluation`) unless it has a run of that version, so
+  every benchmark dataset has its images. Benchmark tiles always come from a run that
+  stored their images.
 
 The rewrite ticked the newest review of every labeled member of the open benchmark
 versions (the DT-1272 gold labels included); members without a label, such as the 250
@@ -148,12 +152,17 @@ in the request, so a model cannot read files of the account.
   [{tile_index, layer, judge, verdict, likelihood, problems, summary, raw}]}`. Image files
   are uploaded before the call. Which run counts is `audit.current_runs`: the worker
   points nothing.
-- Queues: uploads first, then manual runs, then the backfill. The worker queues nothing
+- Queues: uploads first, then manual runs, then the backfill, then prepare runs. The worker queues nothing
   itself while the checks are tested: an operator queues datasets with
   `select audit.queue_runs('<check>', array[<dataset ids>])` (the manual queue by default).
   It queues a run of the check's active version for each dataset that has no open run of
   it, and no finished one unless `p_again => true`. Queueing spends model calls on the
   subscription logins.
+- A prepare run (`audit.queue_runs('<check>', array[...], 'prepare')`) goes through its check
+  with no models: it stores the tiles and images and no answers, spends no model calls and
+  never counts as the dataset's result (`audit.current_runs` leaves it out). Any open or
+  finished run of the version makes a prepare run needless; a prepare run does not stop a
+  full run being queued.
 - A worker that cannot reach a model (expired login, usage limit, a rate limit that
   outlasts its waits) puts the run back without spending an attempt and pauses; its status
   file (`~/.local/state/deadtrees-audit-worker/status.json`) shows it and the platform

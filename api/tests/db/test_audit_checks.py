@@ -515,8 +515,9 @@ def test_operators_queue_runs_of_the_active_version_by_hand(db):
 
 
 def test_a_benchmark_tick_queues_a_dataset_evaluation_run(db):
-	"""A dataset ticked into the benchmark gets its images (DT-1624): a run of the active version,
-	unless one is open or done. Without an active version the label is stored all the same."""
+	"""A dataset ticked into the benchmark gets its images (DT-1624): a prepare run of the active
+	version (DT-1627), unless a run is open or done. Without an active version the label is stored
+	all the same."""
 	operator = create_operator(db)
 	never, judged, unticked = (create_dataset(db, create_user(db)) for _ in range(3))
 	review = (
@@ -539,7 +540,34 @@ def test_a_benchmark_tick_queues_a_dataset_evaluation_run(db):
 	act_as(db, operator)
 	for dataset, ticked in ((never, True), (never, True), (judged, True), (unticked, False)):
 		db.execute(review, (dataset, operator, ticked))
-	assert runs() == [(never, 'manual', 'queued'), (judged, 'upload', 'done')]
+	assert runs() == [(never, 'prepare', 'queued'), (judged, 'upload', 'done')]
+
+
+def test_a_prepare_run_stores_images_and_never_counts(db):
+	"""A prepare run (DT-1627) holds a check's images and no answers: it is never the dataset's result,
+	a full run is still queued beside it, and a full run's images make it needless."""
+	operator = create_operator(db)
+	prepared, judged = create_dataset(db, create_user(db)), create_dataset(db, create_user(db))
+	register_version(db, check='dataset_evaluation')
+
+	def queue(ids, name):
+		act_as(db, operator)
+		return db.execute("SELECT audit.queue_runs('dataset_evaluation', %s, %s)", (ids, name)).fetchone()[0]
+
+	def run_of(dataset, name):
+		as_admin(db)
+		return db.execute('SELECT id FROM audit.runs WHERE dataset_id=%s AND queue=%s', (dataset, name)).fetchone()[0]
+
+	assert queue([prepared], 'prepare') == 1 and queue([prepared], 'prepare') == 0
+	finish(db, run_of(prepared, 'prepare'), images=[])
+	assert current(db, prepared, 'dataset_evaluation') is None
+	# a full run is queued beside a prepare run and counts once done
+	assert queue([prepared], 'manual') == 1
+	full = finish(db, run_of(prepared, 'manual'), dataset_judgements=[dataset_judgement('haiku-5.5', 'ok')])
+	assert current(db, prepared, 'dataset_evaluation')[0] == full
+	assert queue([judged], 'manual') == 1
+	finish(db, run_of(judged, 'manual'), dataset_judgements=[dataset_judgement('haiku-5.5', 'ok')])
+	assert queue([judged], 'prepare') == 0
 
 
 def test_read_policies_evaluate_access_once_per_statement(db):
