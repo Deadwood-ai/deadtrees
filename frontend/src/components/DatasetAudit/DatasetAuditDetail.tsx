@@ -125,7 +125,7 @@ export default function DatasetAuditDetail({ dataset }: DatasetAuditDetailProps)
 								isAOIBusy={aoi.isDirty || aoi.isSaving}
 								onCancel={state.handleCancel}
 								onSave={() => form.submit()}
-								onSaveAndNext={state.handleSaveAndNext}
+								onSaveAndNext={() => state.handleSaveAndNext(checkView.section)}
 							/>
 						)}
 					</div>

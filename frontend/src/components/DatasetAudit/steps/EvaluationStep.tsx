@@ -1,8 +1,9 @@
 import { Form, Image, Input, Radio, Tag } from "antd";
 import type { IAuditChecks, EvaluationDecision } from "../../../types/auditChecks";
-import { EXCLUDE_REASONS, judgeName, judgementText } from "../../../utils/auditChecks";
+import { DECISION_KEYS, EXCLUDE_REASONS, REASON_KEYS, judgeName, judgementText } from "../../../utils/auditChecks";
 import { evaluationReview, type IReviewDraft } from "../../../utils/auditReview";
 import BenchmarkToggle from "../benchmark/BenchmarkToggle";
+import { useAuditShortcuts } from "../checks/useAuditShortcuts";
 import ChoiceRow, { YES_NO } from "./ChoiceRow";
 import CogFacts, { type CogFactsProps } from "./CogFacts";
 
@@ -12,13 +13,13 @@ interface EvaluationStepProps {
 	checks: IAuditChecks | undefined;
 	cog: CogFactsProps;
 	thumbnailUrl: string | null;
-	/** B adds the dataset to the benchmark while the step is open */
+	/** the keys answer while the step is open: 1 2 the decision, Q W E R T I O the reason, B the benchmark */
 	active: boolean;
 }
 
 const DECISIONS: { label: string; value: EvaluationDecision }[] = [
-	{ label: "OK", value: "keep" },
-	{ label: "Exclude", value: "exclude" },
+	{ label: `OK (${DECISION_KEYS.keep})`, value: "keep" },
+	{ label: `Exclude (${DECISION_KEYS.exclude})`, value: "exclude" },
 ];
 
 /** A small heading inside a step. */
@@ -29,10 +30,20 @@ export const StepHeading = ({ children }: { children: string }) => (
 /** Step 1: the map image (COG) and the thumbnail, each with its facts and an issue (yes or no),
  * then the dataset's decision: OK or Exclude. Both issues are output values, independent of the
  * decision; the form starts with the current values and Save stores what you change. Operators add the
- * dataset to the dataset evaluation benchmark here, labeled with the decision. */
+ * dataset to the dataset evaluation benchmark here, labeled with the decision. Keys while it is
+ * open: 1 OK, 2 Exclude, Q W E R T I O an exclude reason (and Exclude), B the benchmark. */
 export default function EvaluationStep({ datasetId, checks, cog, thumbnailUrl, active }: EvaluationStepProps) {
 	const form = Form.useFormInstance<IReviewDraft>();
 	const decision = Form.useWatch("decision", form);
+	useAuditShortcuts(
+		{
+			...Object.fromEntries(DECISIONS.map((d) => [DECISION_KEYS[d.value], () => form.setFieldsValue({ decision: d.value })])),
+			...Object.fromEntries(
+				EXCLUDE_REASONS.map((r, i) => [REASON_KEYS[i], () => form.setFieldsValue({ decision: "exclude", excludeReason: r.code })]),
+			),
+		},
+		active,
+	);
 	// each model's answer and reasoning; the one the check's call rests on (audit.evaluation_calls) first
 	const deciding = checks?.evaluationJudgementId ?? null;
 	const judgements = [...(checks?.datasetJudgements ?? [])].sort((a, b) => Number(b.id === deciding) - Number(a.id === deciding));
@@ -110,9 +121,9 @@ export default function EvaluationStep({ datasetId, checks, cog, thumbnailUrl, a
 function ExcludeReasons({ value, onChange }: { value?: string | null; onChange?: (code: string) => void }) {
 	return (
 		<div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Why exclude">
-			{EXCLUDE_REASONS.map((r) => (
+			{EXCLUDE_REASONS.map((r, i) => (
 				<Tag.CheckableTag key={r.code} checked={value === r.code} onChange={() => onChange?.(r.code)}>
-					{r.label}
+					{r.label} ({REASON_KEYS[i].toUpperCase()})
 				</Tag.CheckableTag>
 			))}
 		</div>

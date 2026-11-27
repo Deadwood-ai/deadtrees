@@ -13,6 +13,7 @@ import { useAcquisitionDateEstimate, useGeorefCheck } from "../../hooks/useAcqui
 import { useAuditChecks, useAuditReviews, useSaveDatasetReviews } from "../../hooks/useAuditChecks";
 import { useAuditDatasetResult } from "../../hooks/useAuditDatasetResults";
 import { initialDraft, reviewAnswers, type IReviewDraft } from "../../utils/auditReview";
+import type { AuditSectionId } from "../../utils/auditChecks";
 import { useNextInList } from "../../hooks/useAuditReviewList";
 import { trackAppEvent } from "../../utils/analytics";
 import { useAuditAOIState } from "./useAuditAOIState";
@@ -79,6 +80,7 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const navigateToNext = useRef(false);
+	const nextSection = useRef<AuditSectionId | null>(null);
 	// what the draft started from: leaving asks only when something differs from it
 	const [startDraft, setStartDraft] = useState<IReviewDraft | null>(null);
 	const draft = Form.useWatch([], { form, preserve: true }) as IReviewDraft | undefined;
@@ -137,7 +139,9 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 	const leave = () => {
 		const next = navigateToNext.current ? nextDatasetId : null;
 		if (navigateToNext.current && !next) message.info("No other dataset needs review");
-		navigate(next ? `/dataset-audit/${next}` : listPath);
+		// the next dataset opens on the step you were on, to go through a list one step at a time
+		const step = nextSection.current ? `?section=${nextSection.current}` : "";
+		navigate(next ? `/dataset-audit/${next}${step}` : listPath);
 	};
 
 	const handleSubmit = async (values: IReviewDraft) => {
@@ -173,8 +177,9 @@ export function useAuditDetailState({ dataset }: { dataset: IDataset }) {
 		}
 	};
 
-	const handleSaveAndNext = () => {
+	const handleSaveAndNext = (section: AuditSectionId | null) => {
 		navigateToNext.current = true;
+		nextSection.current = section;
 		form.submit();
 	};
 

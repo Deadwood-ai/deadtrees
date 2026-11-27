@@ -1,5 +1,6 @@
 import { Button, Tooltip } from "antd";
 import { RightOutlined, SaveOutlined } from "@ant-design/icons";
+import { useAuditShortcuts } from "./checks/useAuditShortcuts";
 
 interface AuditFooterProps {
 	/** the next dataset that needs review; null when no other one does */
@@ -13,9 +14,11 @@ interface AuditFooterProps {
 }
 
 /** Cancel, Save (stores your answers as reviews, then back to the list) and Save & Next (on
- * to the next dataset that needs review). */
+ * to the next dataset that needs review; Ctrl+Enter or Cmd+Enter). */
 export default function AuditFooter({ nextDatasetId, isSaving, isAOIBusy, onCancel, onSave, onSaveAndNext }: AuditFooterProps) {
-	const nextTip = nextDatasetId !== null ? `Save and go to the next dataset that needs review (#${nextDatasetId})` : "No other dataset needs review";
+	const canGoNext = !isSaving && !isAOIBusy && nextDatasetId !== null;
+	useAuditShortcuts({ "mod+Enter": onSaveAndNext }, canGoNext);
+	const nextTip = nextDatasetId !== null ? `Save and go to the next dataset that needs review (#${nextDatasetId}), Ctrl+Enter` : "No other dataset needs review";
 	return (
 		<div className="flex items-center justify-end gap-2" data-testid="audit-footer">
 			<Button onClick={onCancel}>Cancel</Button>
