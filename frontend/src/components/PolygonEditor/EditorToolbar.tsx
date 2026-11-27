@@ -8,8 +8,8 @@ import {
   RobotOutlined,
   DeleteOutlined,
   UndoOutlined,
-  SearchOutlined,
 } from "@ant-design/icons";
+import AreaToolsPanel, { type AreaToolsPanelProps } from "./AreaToolsPanel";
 
 interface Props {
   type: "deadwood" | "forest_cover";
@@ -23,8 +23,8 @@ interface Props {
   onMerge: () => void;
   onClip: () => void;
   onToggleAI: () => void;
-  /** Tree cover only: outline every tree in the current view with the AI. */
-  onFindTrees?: () => void;
+  /** Layer switch, area tools and copy between layers; editors without them leave this out. */
+  areaTools?: AreaToolsPanelProps;
   onDeleteSelected: () => void;
   onUndo: () => void;
   canUndo: boolean;
@@ -49,7 +49,7 @@ export default function EditorToolbar({
   onMerge,
   onClip,
   onToggleAI,
-  onFindTrees,
+  areaTools,
   onDeleteSelected,
   onUndo,
   canUndo,
@@ -63,11 +63,17 @@ export default function EditorToolbar({
   const displayTitle = title || `Editing ${type === "deadwood" ? "deadwood cover" : "tree cover"}`;
 
   return (
-    <div className={`absolute ${position === "top-right" ? "right-4" : "left-4"} ${className || "top-32"} z-20`}>
+    // The toolbar never grows past the map's bottom edge; its body scrolls instead, so Save and
+    // Cancel stay reachable on short screens.
+    <div
+      className={`absolute ${position === "top-right" ? "right-4" : "left-4"} ${className || "top-32"} z-20 flex`}
+      style={{ maxHeight: "calc(100% - 9rem)" }}
+    >
       <Card
         title={displayTitle}
-        className="shadow-lg"
-        style={{ width: 180 }}
+        className="flex max-h-full flex-col shadow-lg"
+        style={{ width: areaTools ? 200 : 180 }}
+        styles={{ body: { overflowY: "auto", minHeight: 0 } }}
         size="small"
       >
         <Space direction="vertical" size="small" className="w-full">
@@ -137,17 +143,12 @@ export default function EditorToolbar({
             {isAIActive ? "Finish AI (S)" : "AI (S)"}
           </Button>
 
-          {type === "forest_cover" && onFindTrees && (
-            <Button
-              icon={<SearchOutlined />}
-              onClick={onFindTrees}
-              disabled={isAIActive || isAIProcessing}
-              block
-              title="Find trees - Outline every tree in the current view with AI"
-              htmlType="button"
-            >
-              Find trees
-            </Button>
+          {areaTools && (
+            <>
+              <Divider style={{ margin: "4px 0" }} />
+              <AreaToolsPanel {...areaTools} />
+              <Divider style={{ margin: "4px 0" }} />
+            </>
           )}
 
           {/* Delete */}

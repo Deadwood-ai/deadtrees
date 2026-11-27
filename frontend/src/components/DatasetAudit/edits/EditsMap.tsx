@@ -194,11 +194,25 @@ export default function EditsMap({ dataset, onEditingStateChange }: EditsMapProp
 					onMerge={editor.mergeSelected}
 					onClip={editor.clipSelected}
 					onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
-					onFindTrees={() => void ai.findConcept("tree")}
+					areaTools={{
+						layer: editing.editingLayerType ?? "deadwood",
+						onSwitchLayer: (layer) => void editing.switchLayer(layer),
+						action: editing.areaTools.action,
+						preview: editing.areaTools.preview,
+						onStart: (action) => editing.areaTools.start(action, editing.findPrompt),
+						findPrompt: editing.findPrompt,
+						onFindPromptChange: editing.setFindPrompt,
+						onAcceptPreview: editing.areaTools.acceptPreview,
+						onDiscardPreview: editing.areaTools.discardPreview,
+						canCopy: editor.selection.length > 0,
+						onCopyToOtherLayer: editing.copySelectionToOtherLayer,
+						disabled: ai.isActive || ai.isProcessing || editing.isSaving,
+					}}
 					onDeleteSelected={editor.deleteSelected}
 					onUndo={editor.undo}
 					canUndo={editor.canUndo}
 					onSave={editing.handleSaveEdits}
+					isSaving={editing.isSaving}
 					onCancel={editing.handleCancelEditing}
 					position="top-right"
 					title={`Editing ${editingLayerType === "deadwood" ? "deadwood cover" : "tree cover"}`}

@@ -13,10 +13,13 @@ export type PixelFeatureCollection = { type: "FeatureCollection"; features: Pixe
 /** The service accepts view images up to this many pixels on the longest side. */
 export const MAX_CAPTURE_SIDE = 2048;
 
-/** Factor that shrinks a map view of this size to fit the service's limit (never enlarges). */
-export function captureScale(width: number, height: number, maxSide = MAX_CAPTURE_SIDE): number {
-  const longest = Math.max(width, height);
-  return longest > maxSide ? maxSide / longest : 1;
+/**
+ * Factor that fits a capture of this size into the service's limit. Small areas may be enlarged
+ * up to `maxUpscale` so the model sees more pixels per crown; whole views are never enlarged.
+ */
+export function captureScale(width: number, height: number, maxUpscale = 1, maxSide = MAX_CAPTURE_SIDE): number {
+  const longest = Math.max(width, height, 1);
+  return Math.min(maxSide / longest, maxUpscale);
 }
 
 type PixelToCoordinate = (pixel: [number, number]) => number[] | null;
@@ -51,7 +54,11 @@ export function pixelPolygonsToFeatures(fc: PixelFeatureCollection, toCoordinate
     const rings = f.geometry.coordinates
       .map((ring) => ring.map(([x, y]) => toCoordinate([x, sign * y])).filter((c): c is number[] => !!c))
       .filter((ring) => ring.length > 2);
-    if (rings.length) created.push(new Feature(new Polygon(rings)));
+    if (!rings.length) continue;
+    const feature = new Feature(new Polygon(rings));
+    const score = f.properties?.score;
+    if (typeof score === "number") feature.set("score", score);
+    created.push(feature);
   }
   return created;
 }
