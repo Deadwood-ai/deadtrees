@@ -1,6 +1,7 @@
 """The worker's reads and writes on audit.runs (Supabase, as the processor).
 
-New uploads go first, then manual runs, then the backfill. A run is claimed by moving it from
+New uploads go first, then manual runs, then the backfill, then prepare runs (the images
+without the models, DT-1627). A run is claimed by moving it from
 queued to running, so a second worker could never take the same run. A finished run is stored
 by audit.finish_run in one transaction; which run counts for a dataset is the database's view
 audit.current_runs, so the worker points nothing.
@@ -10,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-QUEUE_ORDER = ('upload', 'manual', 'backfill')
+QUEUE_ORDER = ('upload', 'manual', 'backfill', 'prepare')
 MAX_ATTEMPTS = 3
 
 

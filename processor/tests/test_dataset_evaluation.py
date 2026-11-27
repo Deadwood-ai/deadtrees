@@ -402,6 +402,18 @@ def thumbnail_bytes():
 
 
 @pytest.mark.unit
+def test_a_prepare_run_makes_the_images_and_asks_no_one(cog):
+	"""No judges (a prepare run, DT-1627): the same images, no answers."""
+	inputs = read_inputs(str(cog), seed=3, overview_px=1024, crop_px=512)
+	evaluation = evaluate(inputs, {}, source_profile=RGB_PROFILE, thumbnail=thumbnail_bytes())
+
+	assert [i.kind for i in evaluation.images] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
+	assert evaluation.judgements == [] and evaluation.cost == {}
+	result = finish_payload(evaluation, inputs, 42, 7, {'ortho_sha256': SHA})
+	assert len(result['images']) == 6 and result['dataset_judgements'] == []
+
+
+@pytest.mark.unit
 def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	inputs = read_inputs(str(cog), seed=3, overview_px=1024, crop_px=512)
 	luna = Fake(answer('fix', 10, reprocess=55, thumbnail_issue=60))

@@ -135,7 +135,9 @@ def deadline(run: dict, client, refresh=None, seconds: float = RUN_DEADLINE_SECO
 		try:
 			if refresh:
 				refresh(client)
-			runs.fail(client, run, f'timed out: still running after {seconds / 3600:g} h; its stacks are in the worker log')
+			runs.fail(
+				client, run, f'timed out: still running after {seconds / 3600:g} h; its stacks are in the worker log'
+			)
 			write_status('stopped', reason=f'run {run["id"]} timed out', run_id=run['id'])
 		finally:
 			stop(TIMEOUT_EXIT)
@@ -161,7 +163,9 @@ def process(run: dict, *, client, handler, version_row: dict, put_image, token='
 	try:
 		with deadline(run, client, refresh):
 			try:
-				ctx.judges = models.judges(version_row['config'].get('models', {}))
+				# a prepare run asks no one: the check stores its images and no answers
+				if run['queue'] != 'prepare':
+					ctx.judges = models.judges(version_row['config'].get('models', {}))
 				result = handler.handle(ctx)
 			finally:
 				ctx.refresh()  # the run may have outlived its login; every outcome below is written with a valid one
