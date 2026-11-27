@@ -3,6 +3,7 @@ import { clearLocalSupabaseSession, supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { isInvalidSessionError } from "../utils/authSession";
 import { isTokenExpiringSoon } from "../utils/isTokenExpiringSoon";
+import { allRows } from "../utils/allRows";
 import type Feature from "ol/Feature";
 import type { Geometry } from "ol/geom";
 import MultiPolygon from "ol/geom/MultiPolygon";
@@ -88,19 +89,23 @@ export function useLoadGeometriesForEditing(labelId: number | undefined, layerTy
 
       // Note: correction_status is computed via RPC functions (JOINs with corrections table)
       // It's not a column on the geometry tables, so we don't query for it here
-      const { data, error } = await supabase
-        .from(tableName)
-        .select("id, geometry, updated_at, is_deleted")
-        .eq("label_id", labelId)
-        .eq("is_deleted", false);
-
-      if (error) throw error;
-      if (!data) return [];
+      // The API returns at most 1,000 rows per request, so a layer is read in pages; otherwise the
+      // editor would silently miss every polygon after the first page.
+      const data = await allRows<GeometryRow>((from, to) =>
+        supabase
+          .from(tableName)
+          .select("id, geometry, updated_at, is_deleted")
+          .eq("label_id", labelId)
+          .eq("is_deleted", false)
+          .order("id")
+          .range(from, to)
+          .overrideTypes<GeometryRow[], { merge: false }>(),
+      );
 
       // Dynamically import OpenLayers Feature to avoid SSR issues
       const { default: Feature } = await import("ol/Feature");
 
-      return (data as GeometryRow[]).map((row) => {
+      return data.map((row) => {
         const feature = new Feature(
           geoJson.readGeometry(row.geometry, {
             dataProjection: "EPSG:4326",

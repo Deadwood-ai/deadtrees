@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
+import { allRows, unwrap, type Rows } from "../utils/allRows";
 import {
   AUDIT_RESULTS_KEY,
   CURRENT_REVIEW_COLUMNS,
@@ -10,14 +11,11 @@ import {
   IMAGE_COLUMNS,
   TILE_JUDGEMENT_COLUMNS,
   TILE_REVIEW_COLUMNS,
-  allRows,
   audit,
   benchmarkMembershipKey,
-  unwrap,
   useSaveDatasetReviews,
   useSaveTileReview,
   withEmails,
-  type Rows,
 } from "./useAuditChecks";
 import type {
   DatasetReviewInput,
