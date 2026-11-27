@@ -23,8 +23,6 @@ import { trackAppEvent } from "../utils/analytics";
 interface UseDatasetEditingOptions {
   datasetId: number | undefined;
   user: User | null;
-  /** Set on an audit page: corrections are saved under that page's audit lease. */
-  auditLeaseId?: string | null;
 }
 
 type EditDebugEvent = {
@@ -42,7 +40,7 @@ declare global {
   }
 }
 
-export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetEditingOptions) {
+export function useDatasetEditing({ datasetId, user }: UseDatasetEditingOptions) {
   const navigate = useNavigate();
   const geoJson = useMemo(() => new GeoJSON(), []);
 
@@ -78,6 +76,9 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
   const mapRef = useRef<OLMap | null>(null);
   const orthoLayerRef = useRef<TileLayerWebGL | null>(null);
   const hasLoadedFeatures = useRef(false);
+  // A second save while one runs (double click, or Save plus Ctrl/Cmd+S) would store the
+  // same polygons twice, so it is ignored.
+  const saveInFlight = useRef(false);
 
   // Hooks for data
   const { deadwood: deadwoodLabel, forestCover: forestCoverLabel } = useDatasetLabelTypes({
@@ -168,7 +169,9 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
   // Save edits
   const handleSaveEdits = useCallback(async () => {
     if (!predictionLabel?.id || !editingLayerType || !user?.id || !datasetId) return;
+    if (saveInFlight.current) return;
 
+    saveInFlight.current = true;
     setIsSaving(true);
     try {
       const currentFeatures = editor.getOverlayLayer()?.getSource()?.getFeatures() || [];
@@ -198,7 +201,6 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         layerType: editingLayerType,
         deletions,
         additions,
-        auditLeaseId,
       });
       emitDebugEvent("save:rpc-result", {
         success: result.success,
@@ -239,9 +241,10 @@ export function useDatasetEditing({ datasetId, user, auditLeaseId }: UseDatasetE
         message.error("Failed to save corrections");
       }
     } finally {
+      saveInFlight.current = false;
       setIsSaving(false);
     }
-  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, auditLeaseId, disableAI]);
+  }, [predictionLabel?.id, editingLayerType, user?.id, datasetId, editor, initialFeatures, geoJson, saveCorrections, emitDebugEvent, disableAI]);
 
   // Load geometries into editor when editing starts
   useEffect(() => {

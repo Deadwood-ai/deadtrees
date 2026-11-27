@@ -55,6 +55,10 @@ BOARD_FILE = 'platform-board.md'
 # A relay session forwards each note here to the project coordinator and
 # deletes it; the tick writes one only when something changed or failed.
 OUTBOX = 'outbox'
+# The Messaging thread waits on this folder the same way and deletes a note
+# once it has handled its Gmail and Zulip items (DT-1586).
+MESSAGING_OUTBOX = 'messaging-outbox'
+MESSAGING_TAGS = ('- [gmail]', '- [zulip]')
 SHADOW_LOG = 'shadow.jsonl'
 DIGESTS = 'digests'
 DIGEST_RETENTION = timedelta(days=2)
@@ -715,11 +719,16 @@ def read_inbox(prompt: str, since: datetime, args: argparse.Namespace, workdir: 
 	return items, checked, inbox_ok, posthog_ok, cost
 
 
-def post_outbox(state_dir: Path, now: datetime, text: str) -> None:
+def post_outbox(state_dir: Path, now: datetime, text: str, folder: str = OUTBOX) -> None:
 	# The relay forwards and removes `*.md`; it ignores `*.tmp`.
-	outbox = state_dir / OUTBOX
+	outbox = state_dir / folder
 	outbox.mkdir(exist_ok=True)
 	write_atomic(outbox / f"{now.strftime('%Y%m%dT%H%M%SZ')}.md", text)
+
+
+def messaging_lines(items: list[str]) -> list[str]:
+	"""The inbox items the Messaging thread answers: mail and Zulip, not Linear or PostHog."""
+	return [line for line in items if line.startswith(MESSAGING_TAGS)]
 
 
 def board_update(
@@ -734,9 +743,12 @@ def board_update(
 	reasons, found, next_board = platform_board.wake(previous, rows, now)
 	markdown = platform_board.render(rows, next_board.get('changed_at'), scorecard)
 	ci_items = [item for item in new_findings if platform_board.CI_MARK in str(item.get('fingerprint'))]
-	lines = platform_board.finding_lines(found, ci_items, known)
+	causes = [item for item in new_findings if item.get('surface') == findings_module.FAILURE_SURFACE]
+	lines = platform_board.finding_lines(found, ci_items + causes, known)
 	if ci_items:
 		reasons.append('main job red')
+	if causes:
+		reasons.append('new processing failure cause')
 	section = '\n'.join([f"Board sent because: {'; '.join(reasons)}", *lines, '', markdown]) if reasons else ''
 	return markdown, section, {**next_board, 'posthog_recent': recent}
 
@@ -753,7 +765,7 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		scorecard = {}
 	last_tick = state.get('last_tick_at')
 	facts = host_facts.collect(now, datetime.fromisoformat(last_tick.replace('Z', '+00:00')) if isinstance(last_tick, str) else None)
-	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now)
+	current, gaps, unobserved = findings_module.build_findings(snapshot, facts, now, scorecard)
 	# Baseline, issue map and PostHog cursor live in one state file, written
 	# once at the end, so a tick that dies halfway leaves them consistent.
 	baseline = state.get('baseline') or {}
@@ -844,10 +856,21 @@ def tick(args: argparse.Namespace, now: datetime, workdir: Path) -> int:
 		'verdict': findings_module.verdict(current), 'checked': checked,
 		'inbox_ok': inbox_ok, 'posthog_ok': posthog_ok, 'filed': sorted(filing), 'cost_usd': round(cost, 4),
 	})
+	# The Messaging note comes before the state, unlike the board note: it
+	# changes nothing in Linear, and a failed write keeps the inbox window where
+	# it was, so the next tick reads these items again instead of losing them.
+	window_read = inbox_ok and zulip_ok
+	messaging = messaging_lines(items) if window_read else []
+	if messaging:
+		try:
+			post_outbox(args.state_dir, now, f'{header}\n\n' + redact('\n'.join(messaging)) + '\n', MESSAGING_OUTBOX)
+		except OSError as exc:
+			print(f'messaging note not written: {type(exc).__name__}', file=sys.stderr)
+			window_read = False
 	write_atomic(tick_file, json.dumps({
 		'last_tick_at': iso(now),
-		# The inbox window only moves past what every source read.
-		'inbox_since': iso(now) if inbox_ok and zulip_ok else iso(since),
+		# The inbox window only moves past what every source read and passed on.
+		'inbox_since': iso(now) if window_read else iso(since),
 		'baseline': baseline,
 		'issues': known,
 		'posthog_seen': seen_posthog,

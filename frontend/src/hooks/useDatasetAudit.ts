@@ -2,46 +2,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
-import { useMemo } from "react";
 import { withAuditLease } from "./useAuditLock";
+import { AUDIT_RESULTS_KEY } from "./useAuditChecks";
 import {
   type ExistingAOI,
   resolveAOIRevisionMetadata,
   resolveAOISaveTarget,
 } from "./aoiSaveProvenance";
-
-// Update the enum type to match your backend
-export type PredictionQuality = "great" | "sentinel_ok" | "bad";
-
-// Simplified disposition enum - 3 levels only
-export type DatasetDisposition = "no_issues" | "fixable_issues" | "exclude_completely";
-
-export interface AuditFormValues {
-  dataset_id?: number;
-  audit_date?: string;
-  is_georeferenced?: boolean;
-  has_valid_acquisition_date?: boolean;
-  acquisition_date_notes?: string;
-  // saving records a date decision (acquisition_date_decisions); true applies
-  // the model's suggested date to the dataset
-  accept_suggested_acquisition_date?: boolean | null;
-  has_valid_phenology?: boolean;
-  phenology_notes?: string;
-  deadwood_quality?: PredictionQuality;
-  deadwood_notes?: string;
-  forest_cover_quality?: PredictionQuality;
-  forest_cover_notes?: string;
-  aoi_done?: boolean;
-  has_cog_issue?: boolean;
-  cog_issue_notes?: string;
-  has_thumbnail_issue?: boolean;
-  thumbnail_issue_notes?: string;
-  audited_by?: string;
-  audited_by_email?: string;
-  notes?: string;
-  // Replace has_major_issue with simplified final assessment
-  final_assessment?: DatasetDisposition;
-}
+import { withoutEmptyGeometry } from "../utils/aoiGeometry";
 
 export interface AOIData {
   id?: number;
@@ -57,15 +25,16 @@ export interface AOIData {
   updated_at?: string;
 }
 
-// New interface for ortho metadata
-export interface OrthoMetadata {
+/** The map image's technical metadata (v2_cogs.cog_info, as rio-cogeo reports it). */
+export interface CogMetadata {
   dataset_id: number;
-  ortho_info: Record<string, unknown>;
-  created_at?: string;
-  updated_at?: string;
+  cog_info: Record<string, unknown> | null;
 }
 
-// Public view row for dataset audit info
+type LegacyQuality = "great" | "sentinel_ok" | "bad";
+
+/** A saved manual audit (dataset_audit_legacy, read through the dataset_audit view). Nothing
+ * writes these any more; the Audit Review page lists them as read-only history. */
 export interface DatasetAuditUserInfo {
   dataset_id: number;
   audit_date: string | null;
@@ -74,9 +43,9 @@ export interface DatasetAuditUserInfo {
   acquisition_date_notes: string | null;
   has_valid_phenology: boolean | null;
   phenology_notes: string | null;
-  deadwood_quality: PredictionQuality | null;
+  deadwood_quality: LegacyQuality | null;
   deadwood_notes: string | null;
-  forest_cover_quality: PredictionQuality | null;
+  forest_cover_quality: LegacyQuality | null;
   forest_cover_notes: string | null;
   aoi_done: boolean | null;
   has_cog_issue: boolean | null;
@@ -96,13 +65,13 @@ export interface DatasetAuditUserInfo {
   accept_suggested_acquisition_date?: boolean | null;
 }
 
-// Auditor-only: get all dataset audits (includes user emails)
-export function useDatasetAudits() {
+/** Every saved manual audit with emails (auditors only), read-only history. */
+export function useLegacyDatasetAudits() {
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
 
   return useQuery({
-    queryKey: ["dataset-audits"],
+    queryKey: ["legacy-dataset-audits"],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_dataset_audits_with_emails");
 
@@ -131,55 +100,6 @@ export function useDatasetContributors() {
   });
 }
 
-// Auditor-only: get a specific dataset audit (includes emails)
-export function useDatasetAudit(datasetId: number | undefined) {
-  const { user } = useAuth();
-  const { canAudit } = useCanAudit();
-
-  return useQuery({
-    queryKey: ["dataset-audit", datasetId],
-    queryFn: async () => {
-      if (!datasetId) return null;
-
-      const { data, error } = await supabase.rpc("get_dataset_audit_with_emails", {
-        p_dataset_id: datasetId,
-      });
-
-      if (error) throw error;
-
-      const rows = (Array.isArray(data) ? data : []) as DatasetAuditUserInfo[];
-      return rows.length > 0 ? rows[0] : null;
-    },
-    enabled: !!datasetId && !!user?.id && canAudit,
-  });
-}
-
-// Bulk hook to get audits for a set of dataset IDs
-export function useDatasetAuditsByIds(datasetIds: number[]) {
-  const idsKey = useMemo(
-    () => (datasetIds && datasetIds.length > 0 ? [...new Set(datasetIds)].sort((a, b) => a - b) : []),
-    [datasetIds],
-  );
-
-  const { user } = useAuth();
-  const { canAudit } = useCanAudit();
-
-  return useQuery({
-    queryKey: ["dataset-audits-by-ids", idsKey],
-    enabled: idsKey.length > 0 && !!user?.id && canAudit,
-    queryFn: async () => {
-      // We already need auditor privileges for emails; fetch once then filter locally.
-      const { data, error } = await supabase.rpc("get_dataset_audits_with_emails");
-      if (error) throw error;
-
-      const rows = ((data || []) as DatasetAuditUserInfo[]).filter((row) => idsKey.includes(row.dataset_id));
-      const map = new Map<number, DatasetAuditUserInfo>();
-      rows.forEach((row) => map.set(row.dataset_id, row));
-      return map;
-    },
-  });
-}
-
 // Hook to get AOI data for a dataset
 export function useDatasetAOI(datasetId: number | undefined) {
   return useQuery({
@@ -197,7 +117,7 @@ export function useDatasetAOI(datasetId: number | undefined) {
       if (error) throw error;
 
       // Return the first item if it exists, otherwise null
-      return data && data.length > 0 ? data[0] : null;
+      return data && data.length > 0 ? withoutEmptyGeometry(data[0]) : null;
     },
     enabled: !!datasetId,
   });
@@ -279,122 +199,21 @@ export function useSaveDatasetAOI() {
     onSuccess: (savedAOI, { aoi }) => {
       queryClient.setQueryData(["dataset-aoi", aoi.dataset_id], savedAOI);
       queryClient.invalidateQueries({ queryKey: ["dataset-aoi", aoi.dataset_id] });
+      // the review results read whether the dataset has an AOI
+      queryClient.invalidateQueries({ queryKey: AUDIT_RESULTS_KEY });
     },
   });
 }
 
-// Update the existing useSaveDatasetAudit hook
-export function useSaveDatasetAudit() {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ values: auditData, leaseId }: { values: AuditFormValues; leaseId: string }) => {
-      const dataToSave = {
-        ...auditData,
-        audited_by: user?.id,
-        audit_date: new Date().toISOString(),
-      };
-
-      // Check if audit already exists
-      const { data: existingAudits } = await supabase
-        .from("dataset_audit")
-        .select("dataset_id")
-        .eq("dataset_id", auditData.dataset_id)
-        .limit(1);
-
-      const existingAudit = existingAudits && existingAudits.length > 0 ? existingAudits[0] : null;
-
-      let auditResult;
-      if (existingAudit) {
-        // Update existing audit
-        const { data, error } = await withAuditLease(
-          supabase.from("dataset_audit").update(dataToSave).eq("dataset_id", auditData.dataset_id),
-          leaseId,
-        )
-          .select()
-          .single();
-
-        if (error) throw error;
-        auditResult = data;
-      } else {
-        // Insert new audit
-        const { data, error } = await withAuditLease(supabase.from("dataset_audit").insert(dataToSave), leaseId)
-          .select()
-          .single();
-
-        if (error) throw error;
-        auditResult = data;
-      }
-
-      return auditResult;
-    },
-    onSuccess: (_, { values }) => {
-      // Invalidate relevant queries
-      queryClient.invalidateQueries({ queryKey: ["dataset-audits"] });
-      queryClient.invalidateQueries({ queryKey: ["dataset-audit", values.dataset_id] });
-      queryClient.invalidateQueries({ queryKey: ["dataset-aoi", values.dataset_id] });
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
-      // saving records a date decision and may change the dataset's date
-      queryClient.invalidateQueries({ queryKey: ["acquisition-date-estimate", values.dataset_id] });
-      queryClient.invalidateQueries({ queryKey: ["acquisition-date-decisions", values.dataset_id] });
-    },
-  });
-}
-
-// New hook to fetch ortho metadata
-export function useOrthoMetadata(datasetId: number | undefined) {
+/** The dataset's map image metadata (v2_cogs.cog_info), or null before the COG exists. */
+export function useCogMetadata(datasetId: number | undefined) {
   return useQuery({
-    queryKey: ["ortho-metadata", datasetId],
+    queryKey: ["cog-metadata", datasetId],
     queryFn: async () => {
-      if (!datasetId) return null;
-
-      const { data, error } = await supabase
-        .from("v2_orthos")
-        .select("dataset_id, ortho_info")
-        .eq("dataset_id", datasetId)
-        .single();
-
-      if (error) {
-        if (error.code === "PGRST116") {
-          // No data found
-          return null;
-        }
-        throw error;
-      }
-
-      return data as OrthoMetadata;
+      const { data, error } = await supabase.from("v2_cogs").select("dataset_id, cog_info").eq("dataset_id", datasetId!).maybeSingle();
+      if (error) throw error;
+      return (data as CogMetadata | null) ?? null;
     },
     enabled: !!datasetId,
-  });
-}
-
-// Hook to mark a dataset audit as reviewed
-export function useMarkAsReviewed() {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ datasetId, leaseId }: { datasetId: number; leaseId: string }) => {
-      const { data, error } = await withAuditLease(
-        supabase
-          .from("dataset_audit")
-          .update({
-            reviewed_at: new Date().toISOString(),
-            reviewed_by: user?.id,
-          })
-          .eq("dataset_id", datasetId),
-        leaseId,
-      )
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: (_, { datasetId }) => {
-      queryClient.invalidateQueries({ queryKey: ["dataset-audits"] });
-      queryClient.invalidateQueries({ queryKey: ["dataset-audit", datasetId] });
-    },
   });
 }

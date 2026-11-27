@@ -1,22 +1,22 @@
+import { useEffect, useMemo } from "react";
 import { message } from "antd";
-import { useAuth } from "../../../hooks/useAuthProvider";
-import { useSaveAuditAnswers } from "../../../hooks/useAuditChecks";
-import type { AuditLayer, IAuditAssessment, IAuditCheckEvidence } from "../../../types/auditChecks";
-import { QUALITY_VERDICT, automatedRows, myAnswer, type IAuditSectionDef } from "../../../utils/auditChecks";
-import type { CropAnswerRow } from "../../../utils/cropAnswers";
-import { cropMajor, type PredictionLayer } from "../../../utils/cropCalls";
+import { useSaveTileReview } from "../../../hooks/useAuditChecks";
+import type { IAuditCheckEvidence, IAuditReviews, ITileJudgement, TileReviewInput } from "../../../types/auditChecks";
+import type { IAuditSectionDef } from "../../../utils/auditChecks";
 import CropReviewer from "../review/CropReviewer";
-import { useAddToBenchmark } from "../benchmark/useAddToBenchmark";
+import { OVERLAY } from "../review/CropAnswerPanel";
+import { useBenchmarkToggle } from "../benchmark/useBenchmarkToggle";
 import { modelViewImage } from "./auditCheckView";
-import LayerRatingLine from "./LayerRatingLine";
-import { useLayerRating } from "./useLayerRating";
 
 export interface AuditCropReviewProps {
 	datasetId: number;
 	/** the open prediction step: one layer */
 	section: IAuditSectionDef;
 	evidence: IAuditCheckEvidence;
-	people: IAuditAssessment[];
+	/** the tile calls and the reviews they rest on */
+	reviews: IAuditReviews | undefined;
+	/** each model's answer per tile and layer */
+	judgements: ITileJudgement[];
 	cropId: number | null;
 	onSelectCrop: (cropId: number) => void;
 	onShowMap: () => void;
@@ -25,23 +25,28 @@ export interface AuditCropReviewProps {
 	disabled: boolean;
 }
 
-/** A prediction step's crops in the crop review, over the map: your answers become person rows
- * on the check's run, and Enter after the last crop stores the layer rating that follows from
- * them, which moves the audit on to the next step. */
-export default function AuditCropReview({ datasetId, section, evidence, people, cropId, onSelectCrop, onShowMap, onNextStep, disabled }: AuditCropReviewProps) {
-	const { user } = useAuth();
-	const { mutateAsync: save } = useSaveAuditAnswers();
-	const { calls, crops, rating, answered, layer } = useLayerRating(section, evidence, people);
-	const checkKey = section.checkKey!;
-	const runId = evidence.run.id;
-	// operators send a crop into the prediction benchmark with B
-	const addToBenchmark = useAddToBenchmark(checkKey, datasetId);
-	// the prediction the layer's rule row judged, as the step's Enter stores it
-	const labelOf = (l: AuditLayer) => automatedRows(evidence, l)[0]?.label_id ?? null;
+/** A prediction step's tiles in the crop review, over the map; each answer is stored at once as a
+ * tile review on the prediction shown. The layer itself never needs review. B adds the tile to
+ * the layer's benchmark, labeled with your answer, or takes it out again (operators). */
+export default function AuditCropReview({ datasetId, section, evidence, reviews, judgements, cropId, onSelectCrop, onShowMap, onNextStep, disabled }: AuditCropReviewProps) {
+	const { mutateAsync: save } = useSaveTileReview();
+	const layer = section.layer!;
+	const calls = useMemo(() => new Map((reviews?.tileCalls ?? []).filter((c) => c.layer === layer).map((c) => [c.tile_id, c])), [reviews, layer]);
+	const benchmark = useBenchmarkToggle(layer, datasetId);
+	const tiles = evidence.tiles;
+	const first = tiles[0];
 
-	const onAnswer = async (id: number, rows: CropAnswerRow[]) => {
+	useEffect(() => {
+		if (cropId === null && first) onSelectCrop(first.id);
+		// only when the review opens: a tile picked later stays
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
+	const onAnswer = async (id: number, answer: Pick<TileReviewInput, "verdict" | "problems">, inBenchmark: boolean) => {
 		try {
-			await save(rows.map((row) => ({ ...row, check_key: checkKey, dataset_id: datasetId, run_id: runId, crop_id: id, label_id: row.layer === "image" ? null : labelOf(row.layer) })));
+			// the answer judges the prediction the tile shows
+			const prediction = modelViewImage(evidence, id, OVERLAY[layer])?.prediction_label_id ?? null;
+			await save({ ...answer, dataset_id: datasetId, tile_id: id, layer, prediction_label_id: prediction, in_benchmark: inBenchmark });
 			return true;
 		} catch {
 			message.error("Your crop answer was not saved. Please try again.");
@@ -49,42 +54,25 @@ export default function AuditCropReview({ datasetId, section, evidence, people, 
 		}
 	};
 
-	// Enter after the last crop: the layer's answer is its rating from the crops (stored again when
-	// your crop answers changed it), then the next step
-	const onDone = async () => {
-		if (!rating || disabled) return;
-		const verdict = QUALITY_VERDICT[rating.quality];
-		if (myAnswer(people, user?.id, runId, { checkKey, layer })?.verdict !== verdict) {
-			try {
-				await save([{ check_key: checkKey, dataset_id: datasetId, run_id: runId, layer, label_id: labelOf(layer), verdict, details: { from_crops: true } }]);
-			} catch {
-				message.error("Your answer was not saved. Please try again.");
-				return;
-			}
-		}
-		onNextStep();
-	};
-
 	return (
 		<CropReviewer
-			crops={crops.map((c) => ({ id: c.id, flagged: calls.get(c.id) === "major" }))}
-			layers={[layer as PredictionLayer]}
+			crops={tiles.map((t) => ({ id: t.id, verdict: calls.get(t.id)?.verdict ?? null }))}
+			layer={layer}
 			imageOf={(id, kind) => modelViewImage(evidence, id, kind)}
-			automated={evidence.automated}
-			mine={(id, l) => myAnswer(people, user?.id, runId, { checkKey, layer: l, cropId: id })}
-			checkMajor={(id, l) => cropMajor(evidence, id, l)}
+			judgements={judgements}
+			decidingJudgement={(id) => calls.get(id)?.judgement_id ?? null}
+			mine={(id) => reviews?.tileReviews.find((r) => r.id === calls.get(id)?.review_id) ?? null}
 			cropId={cropId}
 			onSelectCrop={onSelectCrop}
 			onAnswer={onAnswer}
-			onDone={() => void onDone()}
+			onDone={onNextStep}
 			onShowMap={onShowMap}
-			onAddToBenchmark={addToBenchmark && ((id) => void addToBenchmark(id))}
+			benchmark={benchmark}
 			active
 			disabled={disabled}
 			header={
-				<div className="flex flex-wrap items-baseline justify-between gap-2" data-testid="crop-review-header">
-					<span className="text-base font-semibold">{section.title}</span>
-					{rating && <LayerRatingLine rating={rating} extra={`you answered ${answered} of ${crops.length}`} />}
+				<div className="text-base font-semibold" data-testid="crop-review-header">
+					{section.title}
 				</div>
 			}
 		/>

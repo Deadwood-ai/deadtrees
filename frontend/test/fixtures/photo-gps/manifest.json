@@ -1,0 +1,71 @@
+{
+  "cases": [
+    {
+      "file": "gps.jpg",
+      "has_gps": true,
+      "note": "EXIF GPS position"
+    },
+    {
+      "file": "dji-xmp-only.jpg",
+      "has_gps": true,
+      "note": "DJI XMP position, no EXIF GPS (ODM reads XMP)"
+    },
+    {
+      "file": "no-exif.jpg",
+      "has_gps": false,
+      "note": "JPEG without any metadata"
+    },
+    {
+      "file": "exif-without-gps.jpg",
+      "has_gps": false,
+      "note": "EXIF camera tags but no GPS block"
+    },
+    {
+      "file": "gps-block-without-fix.jpg",
+      "has_gps": false,
+      "note": "GPS block with only its version tag: no fix"
+    },
+    {
+      "file": "gps-ifd-first.tif",
+      "has_gps": true,
+      "note": "little-endian TIFF, metadata before pixels"
+    },
+    {
+      "file": "gps-big-endian.tif",
+      "has_gps": true,
+      "note": "big-endian TIFF with GPS, metadata after pixels"
+    },
+    {
+      "file": "no-gps-metadata-at-end.tif",
+      "has_gps": false,
+      "note": "TIFF without GPS whose metadata follows the pixels (like dataset 15632)"
+    },
+    {
+      "file": "truncated.tif",
+      "has_gps": null,
+      "note": "TIFF cut before its metadata: unknown, never a rejection"
+    },
+    {
+      "file": "gps-block-cut-off.tif",
+      "has_gps": null,
+      "note": "TIFF whose GPS block points past the end: unknown, not \"no GPS\""
+    },
+    {
+      "file": "not-a-photo.jpg",
+      "has_gps": null,
+      "note": "unreadable bytes: unknown"
+    }
+  ],
+  "zips": [
+    {
+      "file": "no-gps-flight.zip",
+      "outcome": "reject",
+      "note": "12 photos, none with a GPS position"
+    },
+    {
+      "file": "gps-flight.zip",
+      "outcome": "accept",
+      "note": "first 3 photos lack a fix, the rest have GPS"
+    }
+  ]
+}

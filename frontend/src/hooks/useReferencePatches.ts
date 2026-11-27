@@ -543,18 +543,3 @@ export function useReferenceDatasetStatus(datasetId: number | undefined) {
     enabled: !!datasetId,
   });
 }
-
-// Get all dataset IDs that are in reference_datasets table
-export function useReferenceDatasetIds() {
-  return useQuery({
-    queryKey: ["reference-dataset-ids"],
-    queryFn: async (): Promise<Set<number>> => {
-      const { data, error } = await supabase.from("reference_datasets").select("dataset_id");
-
-      if (error) throw error;
-
-      // Return as a Set for O(1) lookup performance
-      return new Set((data || []).map((row: { dataset_id: number }) => row.dataset_id));
-    },
-  });
-}

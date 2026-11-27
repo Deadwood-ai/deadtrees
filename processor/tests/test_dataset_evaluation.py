@@ -1,10 +1,10 @@
-from contextlib import nullcontext
-
-"""Dataset evaluation check v1: inputs from the COG, band and duplicate rules, the model
-answer, the dataset rule and the model transports (external models faked at their
-process and HTTP boundaries)."""
+"""Dataset evaluation check: inputs from the COG, the band check, the model answer, the
+dataset rule and its rule-only recomputation, and the worker handler (external models,
+PostgREST and storage faked at their boundaries)."""
 
 import io
+from contextlib import nullcontext
+from functools import partial
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,19 +18,14 @@ from rasterio.transform import from_origin
 from processor.src.audit_worker.models import LoginExpired
 from processor.src.dataset_evaluation_v1 import check as check_module
 from processor.src.dataset_evaluation_v1 import handler
-from processor.src.dataset_evaluation_v1.check import evaluate, store_payload
+from processor.src.dataset_evaluation_v1.bands import band_check
+from processor.src.dataset_evaluation_v1.check import evaluate, payload as finish_payload
 from processor.src.dataset_evaluation_v1.handler import tile_of
 from processor.src.dataset_evaluation_v1.inputs import Tile, inside, padding, read_inputs
 from processor.src.dataset_evaluation_v1.prompt import AnswerError, build_prompt, parse_answer
-from processor.src.dataset_evaluation_v1.rules import (
-	Call,
-	band_check,
-	dataset_rule,
-	duplicate_check,
-	hamming,
-	phash,
-)
+from processor.src.utils import stored_inputs
 from processor.src.utils.stored_inputs import read_geometry
+from shared import pagination
 
 SHA = 'b' * 64
 # EPSG:3857 metres near Freiburg (48.0 N): 0.05 m map pixels are about 3.3 cm on the ground
@@ -111,12 +106,23 @@ def test_crops_are_the_same_on_a_rerun_and_move_with_the_seed(cog):
 
 
 @pytest.mark.unit
-def test_a_small_ortho_gives_crops_of_its_own_size(tmp_path):
+def test_a_small_ortho_gives_one_crop_of_its_own_size(tmp_path):
 	small = write_cog(tmp_path / 'small.tif', forest(300, 400))
 	inputs = read_inputs(str(small), overview_px=2048, crop_px=1024)
 
 	assert inputs.overview.shape == (300, 400, 3)
-	assert all(c.image.shape == (300, 400, 3) for c in inputs.crops)
+	# four points, one window: the same tile twice would break audit.finish_run's image key
+	assert [c.image.shape for c in inputs.crops] == [(300, 400, 3)]
+
+
+@pytest.mark.unit
+def test_an_ortho_about_one_crop_across_never_repeats_a_crop_window(tmp_path):
+	narrow = write_cog(tmp_path / 'narrow.tif', forest(1037, 589))
+	inputs = read_inputs(str(narrow), overview_px=2048, crop_px=1024)
+
+	windows = [c.cog_window for c in inputs.crops]
+	assert windows and len(set(windows)) == len(windows)
+	assert all(c.image.shape == (1024, 589, 3) for c in inputs.crops)
 
 
 @pytest.mark.unit
@@ -188,7 +194,6 @@ def clip_tiles(cog_path):
 
 @pytest.mark.unit
 def test_crops_are_spread_clip_tiles_rendered_at_5_cm(tmp_path):
-
 	big = tmp_path / 'big.tif'
 	rgb = forest(4500, 6000)
 	with rasterio.open(
@@ -248,6 +253,7 @@ def test_a_tile_row_reads_as_geojson_or_ewkb():
 # ---------------------------------------------------------------------------
 
 RGB_PROFILE = {'Bands': 4, 'Dtype': 'uint8', 'ColorInterp': ['red', 'green', 'blue', 'alpha']}
+BAND_MAJOR_AT = handler.RULES_CONFIG['band_major_at']
 
 
 def bands_of(rgb):
@@ -256,86 +262,46 @@ def bands_of(rgb):
 
 @pytest.mark.unit
 def test_true_colour_forest_passes_the_band_check():
-	call = band_check(RGB_PROFILE, *bands_of(forest(400, 400)))
+	band = band_check(RGB_PROFILE, *bands_of(forest(400, 400)))
 
-	assert call.verdict == 'ok' and call.major_likelihood == 0
-	assert call.model == 'band_check' and call.prompt_version == 'v1'
-	assert len(call.details['bands']) == 3
+	assert band['likelihood'] == 0 and band['findings'] == []
+	assert len(band['bands']) == 3
 
 
 @pytest.mark.unit
-def test_near_infrared_in_the_red_band_goes_to_a_person():
+def test_near_infrared_in_the_red_band_is_flagged():
 	# Healthy vegetation is bright in near-infrared: a NIR-R-G image looks red, like dataset 6036
 	img = forest(400, 400)
 	false_colour = np.stack([np.clip(img[..., 1].astype(int) + 60, 0, 255), img[..., 0], img[..., 2]], -1).astype(
 		np.uint8
 	)
-	call = band_check(RGB_PROFILE, *bands_of(false_colour))
+	band = band_check(RGB_PROFILE, *bands_of(false_colour))
 
-	assert call.verdict in ('unsure', 'major')
-	assert call.details['findings'][0]['code'] == 'false_colour_red'
-	assert call.modes['not_rgb']['likelihood'] >= 50
+	assert band['findings'][0]['code'] == 'false_colour_red'
+	assert band['likelihood'] >= 50
 
 
 @pytest.mark.unit
 def test_gray_or_single_band_imagery_is_not_rgb():
 	gray = np.repeat(forest(300, 300)[..., 1:2], 3, axis=2)
-	assert band_check(RGB_PROFILE, *bands_of(gray)).verdict == 'major'
+	assert band_check(RGB_PROFILE, *bands_of(gray))['likelihood'] >= BAND_MAJOR_AT
 
 	single = band_check({'Bands': 1, 'Dtype': 'float32', 'ColorInterp': ['gray']}, *bands_of(forest(300, 300)))
-	assert single.verdict == 'major'
-	assert single.details['findings'][0]['code'] == 'single_band'
+	assert single['likelihood'] >= BAND_MAJOR_AT
+	assert single['findings'][0]['code'] == 'single_band'
 
 
 @pytest.mark.unit
 def test_a_multispectral_upload_alone_is_only_noted():
 	profile = {'Bands': 10, 'Dtype': 'float32', 'ColorInterp': ['gray'] + ['undefined'] * 9}
-	call = band_check(profile, *bands_of(forest(300, 300)))
+	band = band_check(profile, *bands_of(forest(300, 300)))
 
-	assert call.verdict == 'ok' and call.major_likelihood == 40
-	assert call.details['findings'][0]['code'] == 'multispectral_source'
-
-
-# ---------------------------------------------------------------------------
-# Duplicates
-# ---------------------------------------------------------------------------
-
-
-def jpeg_roundtrip(rgb, quality=70):
-	out = io.BytesIO()
-	Image.fromarray(rgb).save(out, 'JPEG', quality=quality)
-	return np.asarray(Image.open(out))
-
-
-@pytest.mark.unit
-def test_the_perceptual_hash_survives_a_re_export_and_separates_other_scenes():
-	a = forest(600, 800, seed=1)
-	valid = np.ones(a.shape[:2], bool)
-	same = phash(a, valid)
-
-	assert -(1 << 63) <= same < (1 << 63)
-	assert phash(a, valid) == same
-	assert hamming(same, phash(jpeg_roundtrip(a), valid)) <= 6
-	assert hamming(same, phash(forest(600, 800, seed=2), valid)) > 12
-
-
-@pytest.mark.unit
-def test_duplicate_matches_flag_and_never_exclude():
-	assert duplicate_check([]).verdict == 'ok'
-
-	call = duplicate_check(
-		[
-			{'dataset_id': 9, 'kind': 'same_flight_day', 'hamming': 30, 'overlap': 0.98},
-			{'dataset_id': 4, 'kind': 'same_file', 'hamming': 0, 'overlap': 1.0},
-		]
-	)
-	assert call.verdict == 'unsure'
-	assert call.major_likelihood == 95
-	assert [c['dataset_id'] for c in call.details['candidates']] == [4, 9]
+	assert band['likelihood'] == 40
+	assert band['findings'][0]['code'] == 'multispectral_source'
 
 
 # ---------------------------------------------------------------------------
-# Model answer and dataset rule
+# Model answer
 # ---------------------------------------------------------------------------
 
 
@@ -369,20 +335,38 @@ def answer(verdict='keep', likelihood=5, reason='none', **flags):
 
 
 @pytest.mark.unit
-def test_a_reply_becomes_a_model_assessment_in_the_audit_vocabulary():
-	call = parse_answer('Here it is:\n```json\n' + answer('exclude', 88, 'blurry', blurry=90) + '\n```', 'haiku-5.5')
+def test_a_reply_becomes_a_dataset_judgement_in_the_audit_vocabulary():
+	j = parse_answer('Here it is:\n```json\n' + answer('exclude', 88, 'blurry', blurry=90) + '\n```', 'haiku-5.5')
 
-	assert (call.assessor_kind, call.model, call.prompt_version) == ('model', 'haiku-5.5', 'v2')
-	assert call.verdict == 'major' and call.major_likelihood == 88
-	assert call.modes['blurry'] == {'likelihood': 90.0}
-	assert call.details['reason'] == 'blurry' and call.details['scene'] == 'forest_interior'
+	assert j.judge == 'haiku-5.5' and j.verdict == 'major' and j.likelihood == 88
+	assert j.exclude_reason == 'blurry' and j.summary == 'Closed conifer forest, sharp.'
+	assert j.raw['flags']['blurry'] == 90.0 and j.raw['scene'] == 'forest_interior'
+	assert set(j.row()) == {
+		'judge',
+		'verdict',
+		'likelihood',
+		'cog_issue',
+		'thumbnail_issue',
+		'exclude_reason',
+		'summary',
+		'raw',
+	}, 'only columns audit.dataset_vlm_judgements has'
+
+
+@pytest.mark.unit
+def test_a_model_that_cannot_tell_is_not_assessable_and_issues_count_from_fifty():
+	assert parse_answer(answer('unsure', 50), 'haiku-5.5').verdict == 'not_assessable'
+	assert parse_answer(answer('fix', 10), 'haiku-5.5').verdict == 'minor'
+	j = parse_answer(answer('fix', 10, cog_issue=49, thumbnail_issue=50), 'haiku-5.5')
+	assert (j.cog_issue, j.thumbnail_issue) == (False, True)
+	assert parse_answer(answer('keep'), 'haiku-5.5').exclude_reason is None
 
 
 @pytest.mark.unit
 def test_a_category_outside_the_fixed_list_is_dropped_but_a_bad_verdict_fails():
 	value = json.loads(answer())
 	value['scene'] = 'a sunny forest'
-	assert parse_answer(json.dumps(value), 'luna-medium').details['scene'] is None
+	assert parse_answer(json.dumps(value), 'luna-medium').raw['scene'] is None
 
 	with pytest.raises(AnswerError):
 		parse_answer(answer().replace('"keep"', '"delete"'), 'luna-medium')
@@ -390,57 +374,6 @@ def test_a_category_outside_the_fixed_list_is_dropped_but_a_bad_verdict_fails():
 		parse_answer(answer(likelihood=140), 'luna-medium')
 	with pytest.raises(AnswerError):
 		parse_answer('I cannot see the images.', 'luna-medium')
-
-
-def calls(*replies):
-	return [parse_answer(r, m) for r, m in zip(replies, ('luna-medium', 'haiku-5.5'))]
-
-
-OK_BAND = band_check(RGB_PROFILE, *bands_of(forest(200, 200)))
-NO_DUP = duplicate_check([])
-
-
-@pytest.mark.unit
-def test_the_dataset_rule_excludes_when_both_models_do():
-	rule = dataset_rule(calls(answer('exclude', 90, 'no_trees'), answer('exclude', 70, 'no_trees')), OK_BAND, NO_DUP)
-
-	assert rule.assessor_kind == 'rule' and rule.model == 'dataset-evaluation-rule'
-	assert rule.verdict == 'major' and rule.major_likelihood == 80
-	assert rule.details['reason'] == 'no_trees' and rule.details['why'] == ['models_exclude']
-
-
-@pytest.mark.unit
-def test_the_dataset_rule_sends_disagreement_and_flags_to_a_person():
-	split = dataset_rule(calls(answer('exclude', 95, 'blurry'), answer('keep', 10)), OK_BAND, NO_DUP)
-	assert split.verdict == 'unsure' and split.details['why'] == ['models_disagree']
-
-	duplicate = duplicate_check([{'dataset_id': 4, 'kind': 'same_file', 'hamming': 0, 'overlap': 1.0}])
-	flagged = dataset_rule(calls(answer(), answer()), OK_BAND, duplicate)
-	assert flagged.verdict == 'unsure' and flagged.modes['duplicate']['likelihood'] == 95
-
-
-@pytest.mark.unit
-def test_a_clear_band_failure_excludes_even_when_the_models_keep():
-	gray = np.repeat(forest(200, 200)[..., :1], 3, axis=2)
-	rule = dataset_rule(calls(answer(), answer()), band_check(RGB_PROFILE, *bands_of(gray)), NO_DUP)
-
-	assert rule.verdict == 'major' and rule.details['reason'] == 'not_rgb'
-
-
-@pytest.mark.unit
-def test_fix_flags_keep_the_dataset_but_mark_it_for_fixing():
-	rule = dataset_rule(
-		calls(answer('keep', 5, thumbnail_issue=80), answer('fix', 10, thumbnail_issue=70)), OK_BAND, NO_DUP
-	)
-	assert rule.verdict == 'minor' and rule.modes['thumbnail_issue']['likelihood'] == 75
-	assert rule.details['fix_flags'] == ['thumbnail_issue']  # the page names what to fix
-
-	assert dataset_rule(calls(answer(), answer()), OK_BAND, NO_DUP).verdict == 'ok'
-	# one model alone asking for a fix is not enough, nor two models naming different problems
-	alone = dataset_rule(calls(answer(), answer('fix', 18, reprocess=75)), OK_BAND, NO_DUP)
-	assert alone.verdict == 'ok' and alone.details['fix_flags'] == []
-	apart = dataset_rule(calls(answer('fix', 10, cog_issue=80), answer('fix', 10, reprocess=80)), OK_BAND, NO_DUP)
-	assert apart.verdict == 'ok'
 
 
 # ---------------------------------------------------------------------------
@@ -472,51 +405,44 @@ def thumbnail_bytes():
 @pytest.mark.unit
 def test_a_run_judges_six_images_and_stores_every_answer(cog):
 	inputs = read_inputs(str(cog), seed=3, overview_px=1024, crop_px=512)
-	luna, haiku = Fake(answer('fix', 10, reprocess=55)), Fake(answer('fix', 20, reprocess=60))
-	image_hash = phash(inputs.overview, inputs.valid)
+	luna = Fake(answer('fix', 10, reprocess=55, thumbnail_issue=60))
+	haiku = Fake(answer('fix', 20, reprocess=60, thumbnail_issue=55))
 	evaluation = evaluate(
 		inputs,
 		{'luna-medium': luna, 'haiku-5.5': haiku},
 		source_profile=RGB_PROFILE,
-		image_hash=image_hash,
-		duplicate_candidates=[],
 		thumbnail=thumbnail_bytes(),
 	)
 
 	assert len(luna.images[0]) == 6 and all(isinstance(i, Image.Image) for i in luna.images[0])
 	assert luna.images[0][0].size == (1024, 768)
 	assert 'Judge the whole orthophoto' in luna.prompts[0] and 'Image 6 is the 256 px thumbnail' in luna.prompts[0]
-	# the models and the dataset verdict are the stored rows; the rules it folds in are run evidence
-	assert [c.model for c in evaluation.calls] == ['luna-medium', 'haiku-5.5', 'dataset-evaluation-rule']
-	assert list(evaluation.evidence['rules']) == ['band_check', 'duplicates']
-	assert evaluation.evidence['rules']['band_check']['verdict'] == 'ok'
-	assert evaluation.evidence['rules']['duplicates'] == {
-		'version': 'v1',
-		'verdict': 'ok',
-		'likelihood': 0.0,
-		'details': {'candidates': []},
-	}
-	assert evaluation.verdict.verdict == 'minor'
-	assert evaluation.calls[1].raw['attempt'] == 1 and evaluation.cost['haiku-5.5']['cost_usd'] is None
-	assert evaluation.evidence['settings'] == inputs.settings  # the crop settings are evidence
-	# the rule row says why in words: the fix flag, then what the surer model saw
-	assert evaluation.verdict.details['summary'] == evaluation.calls[1].details['summary']
+	# every model's judgement is stored; the band check is run evidence, the verdict the database's
+	assert [j.judge for j in evaluation.judgements] == ['luna-medium', 'haiku-5.5']
+	assert [(j.verdict, j.thumbnail_issue) for j in evaluation.judgements] == [('minor', True), ('minor', True)]
+	assert evaluation.evidence['band_check']['likelihood'] == 0 and evaluation.evidence['empty'] is False
+	assert 'phash' not in evaluation.evidence
+	assert evaluation.judgements[1].raw['attempt'] == 1 and evaluation.cost['haiku-5.5']['cost_usd'] is None
+	assert evaluation.evidence['settings'] == inputs.settings  # the tile settings are evidence
 
-	payload = store_payload(evaluation, inputs, 42, SHA)
-	assert [i['kind'] for i in payload['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
-	assert [i['crop_index'] for i in payload['images']] == [None, 1, 2, 3, 4, None]
-	# files are named by content: another run on this ortho cannot overwrite them
-	overview = evaluation.images[0]
-	assert payload['images'][0]['storage_path'] == (
-		f'audit/dataset_evaluation/42/{SHA[:16]}/overview-{overview.sha256[:16]}.jpg'
-	)
-	assert payload['images'][0]['sha256'] == overview.sha256
-	assert len({i['storage_path'] for i in payload['images']}) == 6
-	assert [a['model'] for a in payload['assessments']] == ['luna-medium', 'haiku-5.5', 'dataset-evaluation-rule']
-	assert len(payload['crops']) == 4 and payload['crops'][0]['pixel_window'] is None
-	assert payload['crops'][0]['selection']['picker'] == 'kmeans-inside-v1'
-	assert payload['phash'] == {'method': 'phash-dct64-v1', 'value': image_hash}
-	json.dumps(payload)  # the RPC argument must serialise
+	judged = {'ortho_sha256': SHA}
+	result = finish_payload(evaluation, inputs, 42, 7, judged)
+	assert set(result) == {'inputs', 'evidence', 'tiles', 'images', 'dataset_judgements', 'tile_judgements'}
+	assert result['inputs'] == judged and result['tile_judgements'] == []
+	assert [i['kind'] for i in result['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
+	assert [i['tile_index'] for i in result['images']] == [None, 1, 2, 3, 4, None]
+	# one folder per run: the ortho hash is in the run's inputs only
+	assert result['images'][0]['storage_path'] == 'audit/dataset_evaluation/42/run-7/overview.jpg'
+	assert result['images'][1]['storage_path'] == 'audit/dataset_evaluation/42/run-7/tile-1.jpg'
+	assert result['images'][0]['sha256'] == evaluation.images[0].sha256
+	assert len({i['storage_path'] for i in result['images']}) == 6
+	assert [j['judge'] for j in result['dataset_judgements']] == ['luna-medium', 'haiku-5.5']
+	assert len(result['tiles']) == 4 and result['tiles'][0]['pixel_window'] is None
+	assert set(result['tiles'][0]) == {'pixel_window', 'geometry', 'mpp', 'size_px'}
+	assert result['evidence']['tiles'][0]['picker'] == 'kmeans-inside-v1'
+	assert result['evidence']['coverage'] == {'tiles': 4, 'tile_picker': 'kmeans-inside-v1'}
+	assert not any(SHA in json.dumps(row) for row in result['tiles'] + result['images'])
+	json.dumps(result)  # the RPC argument must serialise
 
 
 @pytest.mark.unit
@@ -532,11 +458,12 @@ def test_the_overview_is_the_orthophoto_alone_with_no_data_hidden(cog):
 @pytest.mark.unit
 def test_a_malformed_reply_is_asked_again_once_and_login_errors_reach_the_worker(cog):
 	inputs = read_inputs(str(cog), overview_px=512, crop_px=256)
-	common = dict(source_profile=RGB_PROFILE, image_hash=0, duplicate_candidates=[])
+	common = dict(source_profile=RGB_PROFILE)
 
 	luna = Fake('not json', answer())
-	assert evaluate(inputs, {'luna-medium': luna, 'haiku-5.5': Fake(answer())}, **common).verdict.verdict == 'ok'
-	assert len(luna.prompts) == 2
+	evaluation = evaluate(inputs, {'luna-medium': luna, 'haiku-5.5': Fake(answer())}, **common)
+	assert [j.verdict for j in evaluation.judgements] == ['ok', 'ok']
+	assert len(luna.prompts) == 2 and evaluation.judgements[0].raw['attempt'] == 2
 
 	with pytest.raises(AnswerError):
 		evaluate(inputs, {'luna-medium': Fake('no', 'still no'), 'haiku-5.5': Fake(answer())}, **common)
@@ -565,29 +492,57 @@ def test_the_prompt_lists_only_the_reasons_the_models_decide():
 
 
 class Rows:
-	"""Enough of a PostgREST table: select / eq / order / range / execute."""
+	"""Enough of a PostgREST table: select / eq / is_ / gt / gte / lte / order / range / limit /
+	execute, and insert."""
 
-	def __init__(self, rows):
-		self.rows, self.filters, self.span = rows, [], None
+	def __init__(self, rows, columns=None):
+		self.rows, self.columns, self.filters, self.bounds, self.span = rows, columns, [], [], None
 
-	def select(self, *_):
-		return Rows(self.rows)
+	def select(self, columns='*'):
+		return Rows(self.rows, None if columns == '*' else columns.split(','))
 
 	def eq(self, key, value):
 		self.filters.append((key, value))
 		return self
 
+	def is_(self, key, value):
+		self.filters.append((key, None if value == 'null' else value))
+		return self
+
+	def insert(self, row):
+		self.rows.append(row)
+		return SimpleNamespace(execute=lambda: SimpleNamespace(data=[row]))
+
 	def order(self, *_):
+		return self
+
+	def gt(self, key, value):
+		self.bounds.append(lambda r: r[key] > value)
+		return self
+
+	def gte(self, key, value):
+		self.bounds.append(lambda r: r[key] >= value)
+		return self
+
+	def lte(self, key, value):
+		self.bounds.append(lambda r: r[key] <= value)
 		return self
 
 	def range(self, start, end):
 		self.span = (start, end)
 		return self
 
+	def limit(self, count):
+		return self.range(0, count - 1)
+
 	def execute(self):
-		rows = [r for r in self.rows if all(r.get(k) == v for k, v in self.filters)]
+		rows = [r for r in self.rows if all(r.get(k) == v for k, v in self.filters) and all(b(r) for b in self.bounds)]
+		if self.bounds:
+			rows.sort(key=lambda r: r['id'])
 		if self.span:
 			rows = rows[self.span[0] : self.span[1] + 1]
+		if self.columns:
+			rows = [{k: r[k] for k in self.columns} for r in rows]
 		return SimpleNamespace(data=rows)
 
 
@@ -596,7 +551,7 @@ class FakeClient:
 		self.tables, self.calls = tables, []
 
 	def table(self, name):
-		return Rows(self.tables.get(name, []))
+		return Rows(self.tables.setdefault(name, []))
 
 	def schema(self, name):
 		assert name == 'audit'
@@ -604,16 +559,11 @@ class FakeClient:
 
 	def rpc(self, name, args):
 		self.calls.append((name, args))
-		data = (
-			[{'dataset_id': 9, 'kind': 'same_flight_day', 'hamming': 30, 'overlap': 0.9}]
-			if name == 'duplicate_candidates'
-			else [11, 12, 13, 14]  # store_dataset_evaluation answers the ids of the crops the run judged
-		)
-		return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
+		return SimpleNamespace(execute=lambda: SimpleNamespace(data=None))
 
 
 @pytest.mark.unit
-def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path, monkeypatch):
+def test_the_handler_uploads_the_images_and_returns_the_rows_to_store(cog, tmp_path, monkeypatch):
 	monkeypatch.setattr(handler, 'readable_cog', lambda *args: nullcontext(str(cog)))
 	monkeypatch.setattr(
 		handler, 'pull_file_from_storage_server', lambda remote, local, *a: Path(local).write_bytes(thumbnail_bytes())
@@ -638,66 +588,73 @@ def test_the_handler_uploads_the_images_before_it_stores_the_rows(cog, tmp_path,
 			'v2_tile_embeddings': [],
 		}
 	)
-	events = []
-	client.rpc = (lambda rpc: lambda name, args: (events.append(name), rpc(name, args))[1])(client.rpc)
+	uploaded, refreshed = [], []
 	ctx = SimpleNamespace(
 		run={'id': 7, 'dataset_id': 42},
-		# a version registered with its own duplicate threshold
-		version={'config': {'duplicates': {'max_hamming': 4, 'min_overlap': 0.5}}},
+		version={'version': 'v3', 'config': {}},
 		client=client,
 		token='t',
 		judges={
 			'luna-medium': Fake(answer('exclude', 90, 'blurry')),
 			'haiku-5.5': Fake(answer('exclude', 80, 'blurry')),
 		},
-		put_image=lambda path, data, dataset_id: events.append(path),
+		refresh=lambda: refreshed.append(len(uploaded)),
+		put_image=lambda path, data, dataset_id: uploaded.append(path),
 	)
-	summary = handler.handle(ctx)
+	result = handler.handle(ctx)
 
-	assert events[0] == 'duplicate_candidates' and events[-1] == 'store_dataset_evaluation'
-	assert len(events) == 8
-	assert events[1].rsplit('/', 1)[1].startswith('overview-') and events[6].rsplit('/', 1)[1].startswith('thumbnail-')
-	stored = dict(client.calls)['store_dataset_evaluation']
-	assert stored['p_run_id'] == 7
-	assert [a['model'] for a in stored['p_result']['assessments']] == [
-		'luna-medium',
-		'haiku-5.5',
-		'dataset-evaluation-rule',
+	# the handler uploads the files and returns the rows: storing them is the worker's finish_run
+	assert client.calls == [] and refreshed == [0], 'the login is renewed before the uploads'
+	assert uploaded == [i['storage_path'] for i in result['images']]
+	assert uploaded[0] == 'audit/dataset_evaluation/42/run-7/overview.jpg' and uploaded[5].endswith('/thumbnail.jpg')
+	assert [(j['judge'], j['verdict'], j['exclude_reason']) for j in result['dataset_judgements']] == [
+		('luna-medium', 'major', 'blurry'),
+		('haiku-5.5', 'major', 'blurry'),
 	]
-	assert stored['p_result']['assessments'][-1]['verdict'] == 'major'
-	assert summary['evidence']['rules']['duplicates']['verdict'] == 'unsure'  # the same-day duplicate flag
-	assert summary['coverage'] == {'crops': 4, 'crop_picker': 'kmeans-inside-v1'}
-	assert set(summary) == {'inputs', 'evidence', 'coverage', 'cost'}
-	# the run's inputs have the one shape the queueing compares, and the run names what it judged
-	assert summary['inputs'] == handler.inputs(client, 42) == {'ortho_sha256': SHA}
-	judged = summary['evidence']['judged']
-	assert judged['crop_ids'] == [11, 12, 13, 14]
-	assert [i['kind'] for i in judged['images']] == ['overview', 'raw', 'raw', 'raw', 'raw', 'thumbnail']
-	assert judged['images'][0]['storage_path'] == events[1]
-	# the duplicate lookup runs with the registered version's thresholds
-	assert dict(client.calls)['duplicate_candidates']['p_max_hamming'] == 4
+	assert 'phash' not in result['evidence'] and result['evidence']['band_check']['likelihood'] == 0
+	assert result['evidence']['coverage'] == {'tiles': 4, 'tile_picker': 'kmeans-inside-v1'}
+	# what the run judged
+	assert result['inputs'] == {'ortho_sha256': SHA}
 
 
 @pytest.mark.unit
-def test_a_run_of_an_earlier_version_is_not_judged_by_this_code():
-	"""Version 1 judged inside the AOI: its runs must not get this code's answers under its name."""
+def test_the_tiles_are_read_a_page_at_a_time_after_the_last_id(monkeypatch):
+	monkeypatch.setattr(stored_inputs, 'iter_pages_by_id', partial(pagination.iter_pages_by_id, page_size=2))
+	# ids of another dataset lie between this one's, inside a page's range
+	square = {'type': 'Polygon', 'coordinates': [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
+	tiles = [
+		{'id': i, 'dataset_id': d, 'pixel_x0': 0, 'pixel_y0': 0, 'pixel_x1': 1, 'pixel_y1': 1, 'geometry': square}
+		for i, d in [(1, 42), (2, 7), (3, 42), (4, 42), (5, 42), (6, 7), (7, 42)]
+	]
+	rows = stored_inputs.tile_rows(FakeClient({'v2_tile_embeddings': tiles}), 42)
+
+	assert [r['id'] for r in rows] == [1, 3, 4, 5, 7]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('earlier', ['v1', 'v2'])
+def test_a_run_of_an_earlier_version_is_not_judged_by_this_code(earlier):
+	"""Version 1 judged inside the AOI and version 2 had the duplicate check: their runs must not
+	get this code's answers under their name."""
 	ctx = SimpleNamespace(
-		run={'id': 7, 'dataset_id': 42}, version={'version': 'v1', 'config': {}}, client=None, token='t'
+		run={'id': 7, 'dataset_id': 42}, version={'version': earlier, 'config': {}}, client=None, token='t'
 	)
-	with pytest.raises(ValueError, match='the run is of version v1; this code judges v2'):
+	with pytest.raises(ValueError, match=f'the run is of version {earlier}; this code judges v3'):
 		handler.handle(ctx)
 
 
 @pytest.mark.unit
-def test_the_handler_runs_after_the_cog_thumbnail_and_tiles_and_is_registered():
+def test_the_handler_is_registered():
 	from processor.src.audit_worker import worker
 
 	assert worker.HANDLERS['dataset_evaluation'] == 'processor.src.dataset_evaluation_v1.handler'
 	handlers, missing = worker.load_handlers()
-	assert not missing and handlers['dataset_evaluation'].VERSION == 'v2'
+	evaluation = handlers['dataset_evaluation']
+	assert not missing and evaluation.VERSION == 'v3' and not hasattr(evaluation, 'recompute')
+	# what is asked is the version; how the answers turn into keep or exclude, its rules
+	assert (evaluation.RULES, evaluation.RULES_CONFIG) == ('rules-v1', {'decider': 'haiku', 'band_major_at': 90})
+	assert not {'duplicates', 'phash', 'rules', 'rule_config'} & set(evaluation.CONFIG)
 	assert set(handlers['dataset_evaluation'].CONFIG['models']) == {'luna-medium', 'haiku-5.5'}
-	assert handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': True})
-	assert not handler.ready({'is_cog_done': True, 'is_thumbnail_done': True, 'is_embeddings_done': False})
 
 
 # ---------------------------------------------------------------------------
@@ -711,7 +668,7 @@ def never(prompt, images):
 
 @pytest.mark.unit
 @pytest.mark.parametrize('kept', [0, 6])
-def test_a_cog_without_a_usable_image_is_excluded_by_rule_without_a_model(tmp_path, kept):
+def test_a_cog_without_a_usable_image_is_judged_by_no_model(tmp_path, kept):
 	rgb = np.zeros((1200, 1600, 3), np.uint8)
 	rgb[:kept, :kept] = forest(max(kept, 1), max(kept, 1))[:kept, :kept]  # a few stray pixels at most
 	empty = write_cog(tmp_path / 'empty.tif', rgb)
@@ -722,21 +679,19 @@ def test_a_cog_without_a_usable_image_is_excluded_by_rule_without_a_model(tmp_pa
 		inputs,
 		{'luna-medium': never, 'haiku-5.5': never},
 		source_profile=RGB_PROFILE,
-		image_hash=None,
-		duplicate_candidates=[],
 		thumbnail=thumbnail_bytes(),
 	)
-	(call,) = evaluation.calls
-	assert (call.assessor_kind, call.model, call.prompt_version, call.verdict) == ('rule', 'empty_cog', 'v1', 'major')
-	assert call.modes == {'broken_ortho': {'likelihood': 100.0}} and call.details['reason'] == 'broken_ortho'
-	payload = store_payload(evaluation, inputs, 3327, SHA)
-	assert 'phash' not in payload and payload['crops'] == []
-	assert [i['kind'] for i in payload['images']] == ['overview', 'thumbnail']
-	json.dumps(payload)
+	# the rules exclude it as a broken ortho from the evidence
+	assert evaluation.judgements == [] and evaluation.evidence['empty'] is True
+	assert 'band_check' not in evaluation.evidence
+	result = finish_payload(evaluation, inputs, 3327, 8, {'ortho_sha256': SHA})
+	assert result['tiles'] == [] and result['dataset_judgements'] == []
+	assert [i['kind'] for i in result['images']] == ['overview', 'thumbnail']
+	json.dumps(result)
 
 
 @pytest.mark.unit
-def test_the_handler_skips_the_duplicate_lookup_for_an_empty_cog(tmp_path, monkeypatch):
+def test_the_handler_finishes_an_empty_cog_without_a_model_call(tmp_path, monkeypatch):
 	empty = write_cog(tmp_path / 'empty.tif', np.zeros((800, 800, 3), np.uint8))
 	monkeypatch.setattr(handler, 'readable_cog', lambda *args: nullcontext(str(empty)))
 	client = FakeClient(
@@ -755,13 +710,14 @@ def test_the_handler_skips_the_duplicate_lookup_for_an_empty_cog(tmp_path, monke
 		client=client,
 		token='t',
 		judges={'luna-medium': never, 'haiku-5.5': never},
+		refresh=lambda: None,
 		put_image=lambda path, data, dataset_id: uploaded.append(path),
 	)
-	summary = handler.handle(ctx)
+	result = handler.handle(ctx)
 
-	assert [name for name, _ in client.calls] == ['store_dataset_evaluation']
-	assert len(uploaded) == 1 and uploaded[0].startswith(f'audit/dataset_evaluation/42/{SHA[:16]}/overview-')
-	assert summary['coverage'] == {'crops': 0, 'crop_picker': None} and summary['cost'] == {}
+	assert uploaded == ['audit/dataset_evaluation/42/run-8/overview.jpg']
+	assert result['evidence']['empty'] is True and result['dataset_judgements'] == []
+	assert result['evidence']['coverage'] == {'tiles': 0, 'tile_picker': None} and result['evidence']['cost'] == {}
 
 
 @pytest.mark.unit
@@ -797,56 +753,12 @@ def test_a_reply_of_the_wrong_shape_is_asked_again_not_failed(reply):
 
 
 @pytest.mark.unit
-def test_a_colour_ratio_guess_never_excludes_by_rule():
-	"""Red soil or autumn foliage is red too: the ratio flags for a person, the models decide."""
+def test_a_colour_ratio_guess_stays_below_the_rules_threshold():
+	"""Red soil or autumn foliage is red too: the ratio is noted, the models decide."""
 	red = np.zeros((3, 64, 64), np.uint8)
 	red[0], red[1], red[2] = 220, 90, 80
 	red[:, ::2, ::2] += 9  # not three identical bands
 	band = band_check(RGB_PROFILE, red, np.ones((64, 64), bool))
 
-	assert band.details['findings'][0]['code'] == 'false_colour_red'
-	assert band.major_likelihood == 85 and band.verdict == 'unsure'
-
-
-@pytest.mark.unit
-def test_a_model_that_votes_to_exclude_below_the_threshold_sends_the_dataset_to_a_person():
-	ok = Call('rule', 'x', 'v1', 'ok', 0.0)
-	models = [
-		Call('model', 'luna-medium', 'v1', 'major', 55.0, details={'reason': 'blurry'}),
-		Call('model', 'haiku-5.5', 'v1', 'major', 55.0, details={'reason': 'blurry'}),
-	]
-	verdict = dataset_rule(models, ok, ok)
-
-	assert verdict.verdict == 'unsure' and verdict.details['why'] == ['model_excludes_below_threshold']
-	assert verdict.details['reason'] == 'blurry'
-
-
-@pytest.mark.unit
-def test_the_verdict_says_its_cause_in_words():
-	ok = Call('rule', 'x', 'v1', 'ok', 0.0)
-	models = [
-		Call('model', 'luna-medium', 'v1', 'ok', 5.0, details={'reason': None, 'summary': 'Sharp forest scene.'}),
-		Call('model', 'haiku-5.5', 'v1', 'ok', 10.0, details={'reason': None, 'summary': 'Usable forest image.'}),
-	]
-	duplicate = duplicate_check([{'dataset_id': 123, 'kind': 'same_file', 'hamming': None, 'overlap': 1.0}])
-	flagged = dataset_rule(models, ok, duplicate)
-	assert flagged.verdict == 'unsure' and flagged.details['reason'] == 'duplicate'
-	assert flagged.details['summary'] == 'Possible duplicate of dataset 123 (same file). Usable forest image.'
-
-	apart = [
-		models[0],
-		Call('model', 'haiku-5.5', 'v1', 'major', 80.0, details={'reason': 'blurry', 'summary': 'Blurry.'}),
-	]
-	disagree = dataset_rule(apart, ok, ok)
-	assert disagree.details['summary'].startswith('The models disagree on excluding it (luna-medium 5, haiku-5.5 80).')
-	# without a rule cause the sentence is the surer model's own
-	assert dataset_rule(models, ok, ok).details['summary'] == 'Usable forest image.'
-
-
-@pytest.mark.unit
-def test_the_rule_runs_with_the_thresholds_of_its_version():
-	ok = Call('rule', 'x', 'v1', 'ok', 0.0)
-	models = [Call('model', n, 'v1', 'ok', 45.0, details={'reason': 'blurry'}) for n in ('luna-medium', 'haiku-5.5')]
-
-	assert dataset_rule(models, ok, ok).verdict == 'ok'
-	assert dataset_rule(models, ok, ok, {'major_at': 40, 'disagree_at': 50, 'fix_at': 50}).verdict == 'major'
+	assert band['findings'][0]['code'] == 'false_colour_red'
+	assert band['likelihood'] == 85 < BAND_MAJOR_AT

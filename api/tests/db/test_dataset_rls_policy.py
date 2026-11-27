@@ -13,6 +13,19 @@ from shared.models import (
 from shared.testing.fixtures import test_processor_user
 
 
+def exclude_by_review(dataset_id, reviewer):
+	"""A reviewer's evaluation decision exclude, the only reason a dataset leaves the public surface."""
+	with use_service_client() as client:
+		client.schema('audit').table('dataset_human_reviews').insert(
+			{
+				'check_key': 'dataset_evaluation',
+				'dataset_id': dataset_id,
+				'reviewed_by': reviewer,
+				'decision': 'exclude',
+			}
+		).execute()
+
+
 @pytest.fixture(scope='function')
 def setup_processor_privileges(auth_token, test_processor_user):
 	"""Ensure processor user has the necessary privileges in the privileged_users table"""
@@ -377,14 +390,7 @@ def test_archive_items_include_private_datasets_for_authorized_users(
 		assert len(response.data) == 1
 		assert response.data[0]['data_access'] == DatasetAccessEnum.private.value
 
-	with use_client(processor_token) as client:
-		client.table('dataset_audit').insert(
-			{
-				'dataset_id': archive_ready_private_dataset,
-				'audited_by': test_processor_user,
-				'final_assessment': 'exclude_completely',
-			}
-		).execute()
+	exclude_by_review(archive_ready_private_dataset, test_processor_user)
 
 	with use_client(user_token) as client:
 		response = (
@@ -530,15 +536,7 @@ def test_label_rls_policy_follows_dataset_visibility(
 		visible_label_ids = {row['label_id'] for row in response.data}
 		assert visible_label_ids == {public_forest_cover_label_id}
 
-	processor_token = login(settings.PROCESSOR_USERNAME, settings.PROCESSOR_PASSWORD, use_cached_session=False)
-	with use_client(processor_token) as processor_client:
-		processor_client.table('dataset_audit').insert(
-			{
-				'dataset_id': datasets_with_mixed_access['public_id'],
-				'audited_by': test_processor_user,
-				'final_assessment': 'exclude_completely',
-			}
-		).execute()
+	exclude_by_review(datasets_with_mixed_access['public_id'], test_processor_user)
 
 	with use_anon_client() as public_client:
 		response = (
@@ -630,11 +628,7 @@ def test_home_stats_omit_hidden_datasets(archive_ready_private_dataset, test_use
 		assert 'Private Archive Test Author' in before['contributor_names']
 	with use_service_client() as client:
 		if hidden_state == 'excluded':
-			client.table('dataset_audit').insert({
-				'dataset_id': archive_ready_private_dataset,
-				'audited_by': test_user,
-				'final_assessment': 'exclude_completely',
-			}).execute()
+			exclude_by_review(archive_ready_private_dataset, test_user)
 		elif hidden_state == 'archived':
 			client.table(settings.datasets_table).update({'archived': True}).eq('id', archive_ready_private_dataset).execute()
 		else:

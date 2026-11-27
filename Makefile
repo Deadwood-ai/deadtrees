@@ -30,7 +30,7 @@ GADM_URL := $(ASSETS_BASE_URL)/gadm/gadm_410.gpkg
 BIOME_URL := $(ASSETS_BASE_URL)/biom/terres_ecosystems.gpkg
 PHENOLOGY_ARCHIVE_URL := $(ASSETS_BASE_URL)/pheno/modispheno_aggregated_normalized_filled.zarr.tar.gz
 # acquisition-date model (scripts/package_doy_estimation_model.py): manifest, 10 seed files, DINOv2 backbone
-DOY_MODEL_ARCHIVE_URL := $(ASSETS_BASE_URL)/models/doy_estimation_v1.tar.gz
+DOY_MODEL_ARCHIVE_URL := $(ASSETS_BASE_URL)/models/doy_estimation_v2.tar.gz
 # georeferencing-check matcher (scripts/package_georef_check_model.py): RoMa v2 safetensors + DINOv3 hub code
 GEOREF_MODEL_ARCHIVE_URL := $(ASSETS_BASE_URL)/models/georef_check_v1.tar.gz
 
@@ -48,8 +48,8 @@ GADM := $(GADM_DIR)/gadm_410.gpkg
 BIOME := $(BIOME_DIR)/terres_ecosystems.gpkg
 PHENOLOGY_DATA := $(PHENO_DIR)/modispheno_aggregated_normalized_filled.zarr
 PHENOLOGY_ARCHIVE := $(PHENO_DIR)/modispheno_aggregated_normalized_filled.zarr.tar.gz
-DOY_MODEL := $(MODELS_DIR)/doy_estimation_v1/manifest.json
-DOY_MODEL_ARCHIVE := $(MODELS_DIR)/doy_estimation_v1.tar.gz
+DOY_MODEL := $(MODELS_DIR)/doy_estimation_v2/manifest.json
+DOY_MODEL_ARCHIVE := $(MODELS_DIR)/doy_estimation_v2.tar.gz
 GEOREF_MODEL := $(MODELS_DIR)/georef_check_v1/manifest.json
 GEOREF_MODEL_ARCHIVE := $(MODELS_DIR)/georef_check_v1.tar.gz
 
@@ -190,8 +190,8 @@ $(DOY_MODEL):
 	@$(call download,$(DOY_MODEL_ARCHIVE),$(DOY_MODEL_ARCHIVE_URL))
 	@rm -rf $(DOY_MODEL_ARCHIVE).extract && mkdir -p $(DOY_MODEL_ARCHIVE).extract
 	@tar -xzf $(DOY_MODEL_ARCHIVE) -C $(DOY_MODEL_ARCHIVE).extract
-	@test -s $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v1/manifest.json
-	@rm -rf $(dir $@) && mv $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v1 $(dir $@)
+	@test -s $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v2/manifest.json
+	@rm -rf $(dir $@) && mv $(DOY_MODEL_ARCHIVE).extract/doy_estimation_v2 $(dir $@)
 	@rm -rf $(DOY_MODEL_ARCHIVE) $(DOY_MODEL_ARCHIVE).extract
 
 $(GEOREF_MODEL):

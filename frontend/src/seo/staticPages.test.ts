@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { renderShell, renderSitemap, renderStaticPage } from "./staticPages";
+import {
+  renderLlmsTxt,
+  renderShell,
+  renderSitemap,
+  renderStaticPage,
+} from "./staticPages";
 
 const INDEX_HTML = `<!doctype html>
 <html lang="en">
@@ -45,7 +50,9 @@ describe("renderStaticPage", () => {
   it("gives crawlers without JavaScript the page text and links", () => {
     const html = renderStaticPage(shell, "/about");
     expect(html).toContain("<noscript><h1>About the initiative</h1>");
-    expect(html).toContain('<a href="/dataset">');
+    expect(html).toContain(
+      '<a href="/dataset">Drone orthophoto archive of forests worldwide</a>',
+    );
     expect(html).toContain('<div id="root"></div>');
   });
 
@@ -72,5 +79,24 @@ describe("renderSitemap", () => {
     expect(sitemap).not.toContain("/factory");
     expect(sitemap).not.toContain("disturbance-benchmark");
     expect(sitemap).not.toContain("sentinel-2-satellite-map");
+  });
+});
+
+describe("renderLlmsTxt", () => {
+  const llms = renderLlmsTxt();
+
+  it("names the site and links each public page with its description", () => {
+    expect(llms.startsWith("# deadtrees.earth\n")).toBe(true);
+    expect(llms).toContain(
+      "- [About the initiative](https://deadtrees.earth/about): ",
+    );
+    expect(llms).toContain("https://deadtrees.earth/releases/dte-aerial-bench");
+    expect(llms).toContain("(https://deadtrees.earth/sitemap.xml)");
+  });
+
+  it("leaves out sign-in, internal and private pages", () => {
+    expect(llms).not.toContain("/sign-in");
+    expect(llms).not.toContain("/factory");
+    expect(llms).not.toContain("disturbance-benchmark");
   });
 });

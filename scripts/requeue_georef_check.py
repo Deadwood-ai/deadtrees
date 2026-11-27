@@ -3,14 +3,13 @@
 Queue the georeferencing check (georef_check_v1) for datasets that need it.
 
 The stage reads the stored COG and AOI, so it runs on its own (no geotiff) and
-is queued at the lowest priority behind real uploads. A rerun replaces the check
-and its is_georeferenced audit suggestion; saved audits are never changed. Where
-a Good/Poor call disagrees with a saved audit, the dataset shows up in
-`audit_review_queue` (the Re-review tab of the audit page).
+is queued at the lowest priority behind real uploads. A rerun replaces the check;
+the Audit Review computes its output (audit.georef_output_v1) from the stored row,
+and a georeferencing status that needs review shows up in its Pending audit reviews.
 
 Selection (default): every non-archived dataset with a COG whose check is
 missing or was made with other rules or another matcher. --audited restricts
-that to datasets with a saved audit (the backfill against existing audits);
+that to datasets with an audit evaluation decision (audit.evaluation_decisions);
 --all picks every dataset with a COG.
 
 Example:
@@ -61,7 +60,7 @@ def main() -> int:
 	group = parser.add_mutually_exclusive_group()
 	group.add_argument('--all', action='store_true', help='every dataset with a COG')
 	group.add_argument('--dataset-ids', help='comma-separated dataset ids')
-	parser.add_argument('--audited', action='store_true', help='only datasets with a saved audit')
+	parser.add_argument('--audited', action='store_true', help='only datasets with an audit evaluation decision')
 	parser.add_argument('--rules-version', default=RULES_VERSION)
 	parser.add_argument('--model-version', default=MODEL_VERSION)
 	parser.add_argument('--priority', type=int, default=1, help='5=highest, 1=lowest (default: 1)')
@@ -89,8 +88,14 @@ def main() -> int:
 			for r in _select_all(supabase_url, headers, 'v2_statuses', 'dataset_id', {'is_cog_done': 'is.true'})
 		}
 		datasets = _select_all(supabase_url, headers, 'v2_datasets', 'id', {'archived': 'is.false'})
+		audit_schema = {**headers, 'Accept-Profile': 'audit'}
 		audited = (
-			{r['dataset_id'] for r in _select_all(supabase_url, headers, 'dataset_audit', 'dataset_id')}
+			{
+				r['dataset_id']
+				for r in _select_all(
+					supabase_url, audit_schema, 'evaluation_decisions', 'dataset_id', {'decision': 'not.is.null'}
+				)
+			}
 			if args.audited
 			else None
 		)

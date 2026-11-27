@@ -29,41 +29,6 @@ export interface PendingCorrectionLocation {
 }
 
 /**
- * Hook to fetch datasets that have pending geometry corrections.
- * Uses v2_full_dataset_view which computes counts server-side.
- * Returns a map of dataset_id -> pending_count for quick lookup.
- */
-export function usePendingCorrections() {
-	return useQuery({
-		queryKey: ["pendingCorrections"],
-		queryFn: async () => {
-			// Query the view which has pre-computed correction counts
-			const { data, error } = await supabase
-				.from("v2_full_dataset_view")
-				.select("id, pending_corrections_count")
-				.gt("pending_corrections_count", 0);
-
-			if (error) {
-				console.error("Error fetching pending corrections:", error);
-				throw error;
-			}
-
-			// Build map of dataset_id -> pending_count
-			const countMap = new Map<number, number>();
-			
-			if (data) {
-				data.forEach((row) => {
-					countMap.set(row.id, row.pending_corrections_count);
-				});
-			}
-
-			return countMap;
-		},
-		staleTime: 30000, // 30 seconds
-	});
-}
-
-/**
  * Hook to get correction statistics for a specific dataset.
  * Returns pending, approved, rejected, and total counts.
  */
@@ -96,19 +61,6 @@ export function useCorrectionStats(datasetId: number | undefined) {
 		enabled: !!datasetId,
 		staleTime: 10000, // 10 seconds - shorter for detail view
 	});
-}
-
-/**
- * Hook to get datasets that need review (have pending corrections or flags).
- * Combines correction data with flag data.
- */
-export function useDatasetsNeedingReview() {
-	const { data: correctionsMap, isLoading: isCorrectionsLoading } = usePendingCorrections();
-	
-	return {
-		correctionsMap: correctionsMap ?? new Map<number, number>(),
-		isLoading: isCorrectionsLoading,
-	};
 }
 
 export interface CorrectionContributor {

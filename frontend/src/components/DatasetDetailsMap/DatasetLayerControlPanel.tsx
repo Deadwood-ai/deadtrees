@@ -5,16 +5,12 @@ import {
   FlagOutlined,
   EditOutlined,
   AuditOutlined,
-  WarningOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
   InfoCircleOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 import { mapColors } from "../../theme/mapColors";
 import { standingDeadwoodLayerExplanation } from "../../utils/standingDeadwoodInfo";
 import { ILabel } from "../../types/labels";
-
-type QualityRating = "great" | "sentinel_ok" | "bad" | null | undefined;
 
 interface DatasetLayerControlPanelProps {
   // Basemap
@@ -33,10 +29,10 @@ interface DatasetLayerControlPanelProps {
   hasForestCover: boolean;
   hasDeadwood: boolean;
   hasAOI?: boolean;
-  // Quality ratings from audit
-  forestCoverQuality?: QualityRating;
-  deadwoodQuality?: QualityRating;
-  canBypassQualityRestriction?: boolean;
+  /** the AOI model found no usable area: the AOI item stays, unchecked and marked, with nothing to show */
+  aoiEmpty?: boolean;
+  /** a red mark on the deadwood layer with this warning on hover, e.g. outside the greenness period */
+  deadwoodWarning?: string | null;
   // Model variant selection (auditors only)
   canAudit?: boolean;
   deadwoodVariants?: ILabel[];
@@ -49,32 +45,13 @@ interface DatasetLayerControlPanelProps {
   opacity: number;
   setOpacity: (value: number) => void;
   // Feedback actions
-  onReportClick: () => void;
+  /** without it (and without edit actions) the panel has no Feedback section, e.g. on the audit map */
+  onReportClick?: () => void;
   onEditForestCover?: () => void;
   onEditDeadwood?: () => void;
   onAuditClick?: () => void;
   isLoggedIn: boolean;
 }
-
-// Quality indicator component
-const QualityIcon = ({ quality }: { quality: QualityRating }) => {
-  if (!quality) return null;
-
-  const config = {
-    great: { icon: <CheckCircleOutlined />, color: "text-green-500", tooltip: "Quality: Great" },
-    sentinel_ok: { icon: <ExclamationCircleOutlined />, color: "text-yellow-500", tooltip: "Quality: OK for Sentinel" },
-    bad: { icon: <WarningOutlined />, color: "text-red-500", tooltip: "Quality: Poor" },
-  };
-
-  const { icon, color, tooltip } = config[quality] || {};
-  if (!icon) return null;
-
-  return (
-    <Tooltip title={tooltip} placement="left">
-      <span className={`ml-1 ${color}`}>{icon}</span>
-    </Tooltip>
-  );
-};
 
 // Basemap options matching DeadtreesMap
 const basemapOptions = [
@@ -109,9 +86,8 @@ const DatasetLayerControlPanel = ({
   hasForestCover,
   hasDeadwood,
   hasAOI,
-  forestCoverQuality,
-  deadwoodQuality,
-  canBypassQualityRestriction = false,
+  aoiEmpty = false,
+  deadwoodWarning,
   canAudit = false,
   deadwoodVariants,
   forestVariants,
@@ -159,14 +135,12 @@ const DatasetLayerControlPanel = ({
               <Checkbox
                 checked={showForestCover}
                 onChange={(e) => setShowForestCover(e.target.checked)}
-                disabled={forestCoverQuality === "bad" && !canBypassQualityRestriction}
               >
-                <span className={`flex items-center gap-2 ${forestCoverQuality === "bad" && !canBypassQualityRestriction ? "opacity-50" : ""}`}>
+                <span className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.forest.fill }} />
                   <span className="text-xs text-gray-600">Tree cover</span>
                 </span>
               </Checkbox>
-              <QualityIcon quality={forestCoverQuality} />
             </div>
             {canAudit && forestVariants && forestVariants.length >= 1 && (
               <Select
@@ -189,18 +163,21 @@ const DatasetLayerControlPanel = ({
               <Checkbox
                 checked={showDeadwood}
                 onChange={(e) => setShowDeadwood(e.target.checked)}
-                disabled={deadwoodQuality === "bad" && !canBypassQualityRestriction}
               >
-                <span className={`flex items-center gap-2 ${deadwoodQuality === "bad" && !canBypassQualityRestriction ? "opacity-50" : ""}`}>
+                <span className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: mapColors.deadwood.fill }} />
                   <span className="text-xs text-gray-600">Deadwood cover</span>
                 </span>
               </Checkbox>
               <div className="flex items-center gap-1">
+                {deadwoodWarning && (
+                  <Tooltip title={<div className="max-w-xs text-xs leading-relaxed">{deadwoodWarning}</div>} placement="left">
+                    <WarningOutlined className="cursor-help text-xs text-red-500" data-testid="deadwood-layer-warning" />
+                  </Tooltip>
+                )}
                 <Tooltip title={<div className="max-w-xs text-xs leading-relaxed">{standingDeadwoodLayerExplanation}</div>} placement="left">
                   <InfoCircleOutlined className="cursor-help text-xs text-gray-400 hover:text-gray-600" />
                 </Tooltip>
-                <QualityIcon quality={deadwoodQuality} />
               </div>
             </div>
             {canAudit && deadwoodVariants && deadwoodVariants.length >= 1 && (
@@ -227,24 +204,32 @@ const DatasetLayerControlPanel = ({
             <span className="text-xs text-gray-600">Drone Imagery</span>
           </span>
         </Checkbox>
-        {hasAOI && setShowAOI && (
-          <Checkbox
-            checked={showAOI}
-            onChange={(e) => setShowAOI(e.target.checked)}
-          >
-            <span className="flex items-center gap-2">
-              <span
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: 2,
-                  border: `2px solid ${mapColors.aoi.stroke}`,
-                  display: "inline-block",
-                }}
-              />
-              <span className="text-xs text-gray-600">Area of Interest</span>
-            </span>
-          </Checkbox>
+        {(hasAOI || aoiEmpty) && setShowAOI && (
+          <div className="flex items-center justify-between">
+            <Checkbox
+              checked={showAOI && !aoiEmpty}
+              disabled={aoiEmpty}
+              onChange={(e) => setShowAOI(e.target.checked)}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: 2,
+                    border: `2px solid ${mapColors.aoi.stroke}`,
+                    display: "inline-block",
+                  }}
+                />
+                <span className="text-xs text-gray-600">Area of Interest</span>
+              </span>
+            </Checkbox>
+            {aoiEmpty && (
+              <Tooltip title={<div className="max-w-xs text-xs leading-relaxed">Empty: the model found no usable area in this image.</div>} placement="left">
+                <WarningOutlined className="cursor-help text-xs text-amber-500" data-testid="aoi-layer-empty" />
+              </Tooltip>
+            )}
+          </div>
         )}
       </div>
 
@@ -313,6 +298,7 @@ const DatasetLayerControlPanel = ({
       )}
 
       {/* Feedback Section */}
+      {(onReportClick || onEditForestCover || onEditDeadwood || onAuditClick) && (
       <div className="-mx-4 -mb-4 mt-3 bg-[#F8FAF9] px-4 pb-4 pt-3 border-t border-gray-100">
         <div className="mb-1 text-xs font-medium text-gray-500">Feedback</div>
         <p className="mb-3 text-xs text-gray-500">
@@ -320,7 +306,7 @@ const DatasetLayerControlPanel = ({
         </p>
         <div className="flex flex-col gap-2">
           {/* Report button - always visible for logged-in users */}
-          {isLoggedIn && (
+          {isLoggedIn && onReportClick && (
             <Button
               size="small"
               icon={<FlagOutlined />}
@@ -361,7 +347,7 @@ const DatasetLayerControlPanel = ({
               onClick={onAuditClick}
               block
             >
-              Audit dataset
+              Audit Review
             </Button>
           )}
 
@@ -376,6 +362,7 @@ const DatasetLayerControlPanel = ({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };

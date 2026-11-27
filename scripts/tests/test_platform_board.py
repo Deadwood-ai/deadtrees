@@ -280,6 +280,13 @@ def test_finding_lines_cover_rows_and_failed_main_jobs():
 	assert lines[1].endswith('issue/DT-2)')
 
 
+def test_a_failure_cause_finding_line_names_processing_failures():
+	item = findings.finding('yellow', findings.FAILURE_SURFACE, 'odm_processing:abc', 'odm_processing failure: exit code 137')
+	[line] = platform_board.finding_lines([], [item], {item['fingerprint']: 'DT-3'})
+	assert line.startswith('- [finding] processing failures: odm_processing failure: exit code 137')
+	assert line.endswith('issue/DT-3)')
+
+
 # --- Main CI ------------------------------------------------------------------
 
 
@@ -369,3 +376,15 @@ def test_the_night_allows_two_slots_before_it_calls_a_stall(tmp_path):
 	(tmp_path / board_wait.OUTBOX).mkdir()
 	assert board_wait.pending(tmp_path, night, night)['notes'] == []
 	assert len(board_wait.pending(tmp_path, night + timedelta(minutes=40), night)['notes']) == 1
+
+
+def test_the_messaging_wait_reports_its_own_notes_and_no_stall(tmp_path):
+	write_tick(tmp_path, '2026-11-05T11:00:00Z')  # stalled for the board
+	folder = tmp_path / board_wait.MESSAGING_OUTBOX
+	folder.mkdir()
+	assert board_wait.pending(tmp_path, NOON, NOON, board_wait.MESSAGING_OUTBOX) == {'notes': [], 'heartbeat': False}
+	assert not (tmp_path / board_wait.OUTBOX).exists()
+	note = folder / '20261105T120000Z.md'
+	note.write_text('- [gmail] Dominik Sperlich: LFV stations')
+	assert board_wait.pending(tmp_path, NOON, NOON, board_wait.MESSAGING_OUTBOX)['notes'] == [str(note)]
+

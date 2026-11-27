@@ -4,14 +4,16 @@ import type { Plugin } from "vite";
 
 import { getStaticPagePaths } from "../src/seo/pageMeta";
 import {
+  renderLlmsTxt,
   renderShell,
   renderSitemap,
   renderStaticPage,
 } from "../src/seo/staticPages";
 
-// Fills the shell and, after the build, writes sitemap.xml and one HTML file per
-// public page next to the bundled index.html. `/` stays the plain shell because
-// Hosting also serves that file for every URL without a static page.
+// Fills the shell and, after the build, writes sitemap.xml, llms.txt and one
+// HTML file per public page next to the bundled index.html. `/` stays the
+// plain shell because Hosting also serves that file for every URL without a
+// static page.
 export const seoPagesPlugin = (): Plugin => {
   let outDir = "dist";
 
@@ -30,6 +32,7 @@ export const seoPagesPlugin = (): Plugin => {
       if (!shell) return;
 
       await writeFile(join(outDir, "sitemap.xml"), renderSitemap());
+      await writeFile(join(outDir, "llms.txt"), renderLlmsTxt());
       await Promise.all(
         getStaticPagePaths()
           .filter((path) => path !== "/")

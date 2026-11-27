@@ -1,6 +1,6 @@
 """Choose which uploaded files ODM gets, before any ODM container runs (DT-1312).
 
-Three input shapes made ODM fail on otherwise usable uploads:
+Four input shapes made ODM fail on otherwise usable uploads:
 
 * DJI cameras that save every frame twice, as JPG and DNG. ODM decodes the DNG with
   LibRaw, which fails on many DJI raws (DT-913), and the pair doubles the image count.
@@ -9,6 +9,9 @@ Three input shapes made ODM fail on otherwise usable uploads:
   tries a multi-camera band alignment our RGB pipeline does not want.
 * A few frames with a broken GPS fix (e.g. 0/0 or thousands of km away). They stretch the
   reconstruction bounds until the orthophoto raster needs hundreds of GB.
+* Photos zipped together with an earlier ODM or WebODM project. ODM then reconstructs its
+  texture atlases and report charts as if they were camera shots, and texrecon aborts
+  (dataset 15756, DT-1583).
 
 The functions here only drop files; they never edit images.
 """
@@ -16,21 +19,23 @@ The functions here only drop files; they never edit images.
 from __future__ import annotations
 
 import math
-import re
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image
 
+from shared.photo_gps import has_gps_position, read_gps_position
 from shared.upload_validation import (
 	MULTISPECTRAL_ONLY_MESSAGE,
+	NO_GPS_MESSAGE,
 	RAW_CAMERA_EXTENSIONS,
 	TIFF_EXTENSIONS,
+	gps_sample,
 	is_multispectral_band,
+	photos_lack_gps,
 )
 
-GPS_IFD = 0x8825
 METRES_PER_DEGREE = 111_320.0
 # A frame is a GPS outlier when it lies this many times further from the flight's median
 # position than the median frame does, and at least OUTLIER_MIN_DISTANCE_M away.
@@ -42,12 +47,26 @@ MIN_IMAGES_FOR_OUTLIER_CHECK = 3
 # Ground an image covers around its camera position; keeps a long thin line of positions from having ~0 area.
 FOOTPRINT_MARGIN_M = 100.0
 FAILED_FIX = (0.0, 0.0)
-# ODM 3.6 lets DJI XMP drone-dji:Latitude/Longitude override the EXIF GPS (opendm/photo.py).
-# DJI writes its XMP packet near the start of the JPEG.
-_XMP_SCAN_BYTES = 2 * 1024 * 1024
-_XMP_GPS_PATTERN = re.compile(
-	rb'drone-dji:(?P<attr>Latitude|Longitude)\s*=\s*["\']\s*(?P<attr_value>[+-]?[\d.]+)'
-	rb'|<drone-dji:(?P<element>Latitude|Longitude)>\s*(?P<element_value>[+-]?[\d.]+)'
+# Folders an ODM/WebODM project writes next to its ``images`` folder; files in them are outputs, not photos.
+ODM_PROJECT_FOLDERS = frozenset(
+	{
+		'odm_dem',
+		'odm_filterpoints',
+		'odm_georeferencing',
+		'odm_meshing',
+		'odm_orthophoto',
+		'odm_report',
+		'odm_texturing',
+		'odm_texturing_25d',
+		'opensfm',
+		'openmvs',
+		'3d_tiles',
+		'entwine_pointcloud',
+	}
+)
+ODM_OUTPUTS_ONLY_MESSAGE = (
+	'This ZIP only contains results of an earlier ODM or WebODM run (for example odm_orthophoto.tif). '
+	'Please upload the original drone photos, or upload the orthophoto as a GeoTIFF.'
 )
 
 
@@ -61,6 +80,20 @@ class OdmImageSelection:
 	# Human-readable reason -> files left out for it, in the order the rules ran.
 	dropped: dict[str, list[Path]] = field(default_factory=dict)
 	extent_km2: float | None = None
+
+
+def _is_odm_output(image_file: Path) -> bool:
+	if image_file.name.lower().startswith('odm_'):
+		return True
+	return any(folder.lower() in ODM_PROJECT_FOLDERS for folder in image_file.parent.parts)
+
+
+def drop_odm_outputs(image_files: list[Path]) -> tuple[list[Path], list[Path]]:
+	"""Drop images an earlier ODM run wrote: files named ``odm_*`` or inside an ODM project folder."""
+	kept, dropped = [], []
+	for image_file in image_files:
+		(dropped if _is_odm_output(image_file) else kept).append(image_file)
+	return kept, dropped
 
 
 def drop_paired_raw_images(image_files: list[Path]) -> tuple[list[Path], list[Path]]:
@@ -97,48 +130,6 @@ def drop_multispectral_bands(image_files: list[Path]) -> tuple[list[Path], list[
 	for image_file in image_files:
 		(dropped if _is_band_image(image_file) else kept).append(image_file)
 	return kept, dropped
-
-
-def _gps_degrees(values) -> float:
-	degrees, minutes, seconds = (float(v) for v in values)
-	return degrees + minutes / 60 + seconds / 3600
-
-
-def _exif_gps(image_file: Path) -> dict[str, float]:
-	try:
-		with Image.open(image_file) as image:
-			gps = image.getexif().get_ifd(GPS_IFD)
-		return {
-			'Latitude': _gps_degrees(gps[2]) * (-1 if gps.get(1) == 'S' else 1),
-			'Longitude': _gps_degrees(gps[4]) * (-1 if gps.get(3) == 'W' else 1),
-		}
-	except Exception:
-		return {}
-
-
-def _xmp_gps(image_file: Path) -> dict[str, float]:
-	try:
-		with open(image_file, 'rb') as f:
-			head = f.read(_XMP_SCAN_BYTES)
-	except OSError:
-		return {}
-	found = {}
-	for match in _XMP_GPS_PATTERN.finditer(head):
-		name = (match['attr'] or match['element']).decode()
-		try:
-			found.setdefault(name, float(match['attr_value'] or match['element_value']))
-		except ValueError:
-			continue
-	return found
-
-
-def read_gps_position(image_file: Path) -> tuple[float, float] | None:
-	"""The latitude/longitude ODM will use: DJI XMP over EXIF GPS, or None when unknown."""
-	gps = {**_exif_gps(image_file), **_xmp_gps(image_file)}
-	latitude, longitude = gps.get('Latitude'), gps.get('Longitude')
-	if latitude is None or longitude is None or not (math.isfinite(latitude) and math.isfinite(longitude)):
-		return None
-	return latitude, longitude
 
 
 def _offset_metres(origin: tuple[float, float], position: tuple[float, float]) -> tuple[float, float]:
@@ -181,13 +172,20 @@ def gps_extent_km2(positions: list[tuple[float, float]]) -> float:
 
 
 def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImageSelection:
-	"""Apply the DNG, multispectral and GPS-outlier rules, then check the mosaic extent.
+	"""Apply the ODM-output, DNG, multispectral and GPS-outlier rules, then check the mosaic extent.
 
-	Raises OdmInputError when only multispectral band images remain, or when the remaining
-	images span more than ``max_extent_km2``: one ODM run cannot mosaic that area within its
-	memory, so the upload needs to be split.
+	Raises OdmInputError when only earlier ODM outputs or only multispectral band images remain,
+	when no sampled image has a GPS position, or when the remaining images span more than
+	``max_extent_km2``: one ODM run cannot mosaic that area within its memory, so the upload
+	needs to be split.
 	"""
 	selection = OdmImageSelection(kept=list(image_files))
+
+	selection.kept, odm_outputs = drop_odm_outputs(selection.kept)
+	if odm_outputs:
+		if not selection.kept:
+			raise OdmInputError(ODM_OUTPUTS_ONLY_MESSAGE)
+		selection.dropped['outputs of an earlier ODM run'] = odm_outputs
 
 	selection.kept, paired_raw = drop_paired_raw_images(selection.kept)
 	if paired_raw:
@@ -200,6 +198,9 @@ def select_odm_images(image_files: list[Path], max_extent_km2: float) -> OdmImag
 		selection.dropped['multispectral band images'] = bands
 
 	positions = {f: p for f in selection.kept if (p := read_gps_position(f)) is not None}
+	# Uploads before the API checked GPS (DT-1582) can still reach ODM without it.
+	if not positions and photos_lack_gps(has_gps_position(f) for f in gps_sample(sorted(selection.kept))):
+		raise OdmInputError(NO_GPS_MESSAGE)
 	positions, outliers = drop_gps_outliers(positions)
 	if outliers:
 		selection.dropped['images with a GPS position far from the rest of the flight'] = outliers

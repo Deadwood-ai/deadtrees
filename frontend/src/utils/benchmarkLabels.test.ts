@@ -1,101 +1,40 @@
 import { describe, expect, it } from "vitest";
-import type { IAuditAssessment } from "../types/auditChecks";
-import { agreement, benchmarkFilters, cropVerdicts, evaluationAnswerRow, filterTargets, labelersDisagree, nextOpen } from "./benchmarkLabels";
+import type { IAuditImage } from "../types/auditChecks";
+import { stratified, targetKey, targetNoun, tileImages } from "./benchmarkLabels";
 
-const person = (user: string, overrides: Partial<IAuditAssessment>): IAuditAssessment => ({
-	id: 1,
-	check_key: "prediction_quality",
-	dataset_id: 7,
-	crop_id: 70,
-	run_id: null,
-	layer: "deadwood",
-	label_id: 11,
-	assessor_kind: "person",
-	assessor_user_id: user,
-	model: null,
-	prompt_version: null,
-	assessor: user,
-	verdict: "ok",
-	modes: {},
-	reason_code: null,
-	reason_text: null,
-	details: {},
-	...overrides,
+describe("naming benchmark targets", () => {
+	it("names a target in the URL by its tile or dataset, and calls them tiles or datasets", () => {
+		expect(targetKey({ dataset_id: 7, tile_id: 70 })).toBe("tile-70");
+		expect(targetKey({ dataset_id: 7, tile_id: null })).toBe("dataset-7");
+		expect(targetNoun(true)).toBe("tiles");
+		expect(targetNoun(false, 1)).toBe("dataset");
+	});
+
 });
 
-describe("labelers", () => {
-	it("reads a crop answer as can't tell or a verdict per layer", () => {
-		expect(cropVerdicts([person("a", { layer: "image", verdict: "major" }), person("a", {})])).toBe("cant_tell");
-		expect(cropVerdicts([person("a", { layer: "image" }), person("a", { verdict: "minor" }), person("a", { layer: "forest_cover" })])).toEqual({
-			deadwood: "minor",
-			forest_cover: "ok",
-		});
-	});
-
-	it("finds labelers who disagree on a layer verdict or the image gate", () => {
-		const a = [person("a", { layer: "image" }), person("a", { verdict: "major" })];
-		const b = [person("b", { layer: "image" }), person("b", { verdict: "major" })];
-		expect(labelersDisagree("prediction_quality", [...a, ...b])).toBe(false);
-		expect(labelersDisagree("prediction_quality", [...a, person("c", { layer: "image", verdict: "major" })])).toBe(true);
-		expect(labelersDisagree("prediction_quality", a)).toBe(false);
-		const keep = person("a", { check_key: "dataset_evaluation", layer: "image", crop_id: null, verdict: "minor" });
-		expect(labelersDisagree("dataset_evaluation", [keep, { ...keep, assessor_user_id: "b", assessor: "b", verdict: "ok" }])).toBe(false);
-		expect(labelersDisagree("dataset_evaluation", [keep, { ...keep, assessor_user_id: "b", assessor: "b", verdict: "major" }])).toBe(true);
-	});
-
-	it("marks who found a problem the other did not", () => {
-		expect(agreement("ok", "major")).toBe("they_flag");
-		expect(agreement("major", "ok")).toBe("you_flag");
-		expect(agreement("minor", "minor")).toBe("agree");
-		expect(agreement("minor", "major")).toBe("other");
-		expect(agreement(null, "major")).toBeNull();
+describe("stratified order", () => {
+	it("takes one target per dataset in turn", () => {
+		const t = (id: number, dataset_id: number) => ({ id, dataset_id });
+		expect(stratified([t(1, 5), t(2, 5), t(3, 5), t(4, 6), t(5, 7), t(6, 7)]).map((x) => x.id)).toEqual([1, 4, 5, 2, 6, 3]);
+		expect(stratified([])).toEqual([]);
 	});
 });
 
-describe("stepping through a benchmark", () => {
-	const targets = [1, 2, 3].map((id) => ({ id, people: id === 2 ? [person("me", {})] : [] }));
+describe("a tile's images", () => {
+	const image = (id: number, run_id: number, kind: IAuditImage["kind"], prediction_label_id: number | null = null) =>
+		({ id, run_id, dataset_id: 5, tile_id: 70, kind, prediction_label_id, storage_path: `audit/${id}.jpg`, width: 1, height: 1 }) satisfies IAuditImage;
+	// run 1 judged prediction 41, run 2 prediction 52; run 3 is the dataset evaluation, raw only
+	const images = [image(1, 1, "raw"), image(2, 1, "deadwood_overlay", 41), image(3, 2, "raw"), image(4, 2, "deadwood_overlay", 52), image(5, 3, "raw")];
 
-	it("keeps a target answered in this visit in the open list", () => {
-		expect(filterTargets(targets, "open", "prediction_quality", "me").map((t) => t.id)).toEqual([1, 3]);
-		expect(filterTargets(targets, "open", "prediction_quality", "me", new Set([2])).map((t) => t.id)).toEqual([1, 2, 3]);
-		expect(filterTargets(targets, "all", "prediction_quality", "me")).toHaveLength(3);
+	it("are the newest run's raw image and overlay of the layer", () => {
+		expect(tileImages(images, "deadwood", null).map((i) => i.id)).toEqual([3, 4]);
 	});
 
-	it("goes to the next target without your answer, wrapping, and stops when none is left", () => {
-		expect(nextOpen(targets, 1, "me")?.id).toBe(3);
-		expect(nextOpen(targets, 3, "me")?.id).toBe(1);
-		expect(nextOpen([targets[1], targets[0]], 1, "me")).toBeNull();
-	});
-});
-
-describe("excluded datasets", () => {
-	it("steps through the crops whose dataset a person or a model excludes", () => {
-		const targets = [
-			{ id: 1, people: [], excludedBy: "person" as const },
-			{ id: 2, people: [], excludedBy: null },
-			{ id: 3, people: [], excludedBy: "model" as const },
-		];
-		expect(filterTargets(targets, "excluded", "prediction_quality", "me").map((t) => t.id)).toEqual([1, 3]);
+	it("keep the picture of the prediction the label judged", () => {
+		expect(tileImages(images, "deadwood", 41).map((i) => i.id)).toEqual([1, 2]);
 	});
 
-	it("is no filter of the dataset evaluation, which labels exclusion blind", () => {
-		expect(benchmarkFilters("prediction_quality").map((f) => f.value)).toContain("excluded");
-		expect(benchmarkFilters("dataset_evaluation").map((f) => f.value)).not.toContain("excluded");
-	});
-});
-
-describe("dataset evaluation labels", () => {
-	it("stores keep with a fix flag as keep, fix, with the run that judged the dataset", () => {
-		expect(evaluationAnswerRow({ verdict: "ok", reason: null, flags: ["cog_issue"], note: "" }, 5, 41)).toEqual({
-			row: expect.objectContaining({ verdict: "minor", reason_code: null, details: { fix_flags: ["cog_issue"] }, run_id: 41, crop_id: null, layer: "image" }),
-		});
-	});
-
-	it("needs a call, and a reason to exclude", () => {
-		expect(evaluationAnswerRow({ verdict: null, reason: null, flags: [], note: "" }, 5, null)).toEqual({ missing: expect.any(String) });
-		expect(evaluationAnswerRow({ verdict: "major", reason: null, flags: [], note: "" }, 5, null)).toEqual({ missing: "Excluding needs a reason" });
-		expect(evaluationAnswerRow({ verdict: "major", reason: "blurry", flags: [], note: " soft " }, 5, null)).toEqual({
-			row: expect.objectContaining({ verdict: "major", reason_code: "blurry", reason_text: "soft", details: { fix_flags: [] }, run_id: null }),
-		});
+	it("fall back to a raw image without an overlay of the layer", () => {
+		expect(tileImages(images, "forest_cover", null).map((i) => i.id)).toEqual([5]);
 	});
 });

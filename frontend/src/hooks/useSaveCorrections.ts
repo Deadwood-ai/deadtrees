@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearLocalSupabaseSession, supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
-import { withAuditLease } from "./useAuditLock";
 import { isInvalidSessionError } from "../utils/authSession";
 import { isTokenExpiringSoon } from "../utils/isTokenExpiringSoon";
+import { allRows } from "../utils/allRows";
 import type Feature from "ol/Feature";
 import type { Geometry } from "ol/geom";
 import MultiPolygon from "ol/geom/MultiPolygon";
@@ -29,8 +29,6 @@ interface SaveCorrectionsParams {
   layerType: LayerType;
   deletions: Deletion[];
   additions: Addition[];
-  /** Set when saving from an audit page, which must hold the dataset's audit lease. */
-  auditLeaseId?: string | null;
 }
 
 interface SaveCorrectionsResult {
@@ -91,19 +89,23 @@ export function useLoadGeometriesForEditing(labelId: number | undefined, layerTy
 
       // Note: correction_status is computed via RPC functions (JOINs with corrections table)
       // It's not a column on the geometry tables, so we don't query for it here
-      const { data, error } = await supabase
-        .from(tableName)
-        .select("id, geometry, updated_at, is_deleted")
-        .eq("label_id", labelId)
-        .eq("is_deleted", false);
-
-      if (error) throw error;
-      if (!data) return [];
+      // The API returns at most 1,000 rows per request, so a layer is read in pages; otherwise the
+      // editor would silently miss every polygon after the first page.
+      const data = await allRows<GeometryRow>((from, to) =>
+        supabase
+          .from(tableName)
+          .select("id, geometry, updated_at, is_deleted")
+          .eq("label_id", labelId)
+          .eq("is_deleted", false)
+          .order("id")
+          .range(from, to)
+          .overrideTypes<GeometryRow[], { merge: false }>(),
+      );
 
       // Dynamically import OpenLayers Feature to avoid SSR issues
       const { default: Feature } = await import("ol/Feature");
 
-      return (data as GeometryRow[]).map((row) => {
+      return data.map((row) => {
         const feature = new Feature(
           geoJson.readGeometry(row.geometry, {
             dataProjection: "EPSG:4326",
@@ -231,19 +233,16 @@ export function useSaveCorrections() {
 
       const sessionId = crypto.randomUUID();
 
-      const { data, error } = await withAuditLease(
-        supabase.rpc("save_prediction_corrections", {
-          p_dataset_id: params.datasetId,
-          p_label_id: params.labelId,
-          p_user_id: user.id,
-          p_layer_type: params.layerType,
-          p_session_id: sessionId,
-          p_deletions: params.deletions.map((d) => d.id),
-          p_deletion_timestamps: params.deletions.map((d) => d.updated_at),
-          p_additions: params.additions,
-        }),
-        params.auditLeaseId,
-      );
+      const { data, error } = await supabase.rpc("save_prediction_corrections", {
+        p_dataset_id: params.datasetId,
+        p_label_id: params.labelId,
+        p_user_id: user.id,
+        p_layer_type: params.layerType,
+        p_session_id: sessionId,
+        p_deletions: params.deletions.map((d) => d.id),
+        p_deletion_timestamps: params.deletions.map((d) => d.updated_at),
+        p_additions: params.additions,
+      });
 
       if (error) throw error;
       if (!data) {
@@ -296,8 +295,6 @@ export function useCorrectionHistory(datasetId: number | undefined) {
 
 interface CorrectionReview {
   correctionId: number;
-  /** The reviewing audit page's lease. */
-  auditLeaseId: string | null;
 }
 
 /**
@@ -308,16 +305,13 @@ export function useApproveCorrection() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ correctionId, auditLeaseId }: CorrectionReview): Promise<boolean> => {
+    mutationFn: async ({ correctionId }: CorrectionReview): Promise<boolean> => {
       if (!user?.id) throw new Error("User must be logged in");
 
-      const { data, error } = await withAuditLease(
-        supabase.rpc("approve_correction", {
-          p_correction_id: correctionId,
-          p_reviewer_id: user.id,
-        }),
-        auditLeaseId,
-      );
+      const { data, error } = await supabase.rpc("approve_correction", {
+        p_correction_id: correctionId,
+        p_reviewer_id: user.id,
+      });
 
       if (error) throw error;
       return data as boolean;
@@ -336,16 +330,13 @@ export function useRevertCorrection() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ correctionId, auditLeaseId }: CorrectionReview): Promise<boolean> => {
+    mutationFn: async ({ correctionId }: CorrectionReview): Promise<boolean> => {
       if (!user?.id) throw new Error("User must be logged in");
 
-      const { data, error } = await withAuditLease(
-        supabase.rpc("revert_correction", {
-          p_correction_id: correctionId,
-          p_reviewer_id: user.id,
-        }),
-        auditLeaseId,
-      );
+      const { data, error } = await supabase.rpc("revert_correction", {
+        p_correction_id: correctionId,
+        p_reviewer_id: user.id,
+      });
 
       if (error) throw error;
       return data as boolean;

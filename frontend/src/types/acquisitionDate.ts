@@ -38,18 +38,7 @@ export interface IAcquisitionDateEstimate extends IDoyDistribution {
   updated_at: string;
 }
 
-/** One row of dataset_audit_suggestions: a machine-proposed audit form value. */
-export interface IAuditSuggestion {
-  dataset_id: number;
-  field: string;
-  value: unknown;
-  source: string;
-  reason: string | null;
-  details: Record<string, unknown>;
-  updated_at: string;
-}
-
-/** One row of acquisition_date_decisions: the outcome of a date check. */
+/** One row of acquisition_date_decisions: the outcome of an earlier date check, kept as history. */
 export interface IAcquisitionDateDecision {
   id: number;
   dataset_id: number;
@@ -78,15 +67,4 @@ export interface IAcquisitionDateDecision {
   };
   superseded_at: string | null;
   superseded_reason: "new_decision" | "estimate_contradicts" | "date_edited" | "cutoff" | null;
-}
-
-/** One row of audit_review_queue: a saved audit item newer machine evidence disagrees with. */
-export interface IAuditReviewItem {
-  dataset_id: number;
-  /** "acquisition_date", or the audit field a suggestion disagrees with */
-  item: string;
-  /** audit form fields the page offers the current suggestion for */
-  fields: string[];
-  reason: string;
-  since: string;
 }

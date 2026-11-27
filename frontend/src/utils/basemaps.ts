@@ -13,6 +13,7 @@ import { XYZ } from "ol/source";
 import Stroke from "ol/style/Stroke";
 import { apply } from "ol-mapbox-style";
 
+import { createImageryFallbackTileLoadFunction } from "./imageryTileFallback";
 import { getWaybackTileUrl } from "./waybackVersions";
 
 export const OPENFREEMAP_LIBERTY_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
@@ -213,6 +214,7 @@ export const createWorldImagerySource = () =>
     attributions: WORLD_IMAGERY_ATTRIBUTION,
     maxZoom: 19,
     crossOrigin: "anonymous",
+    tileLoadFunction: createImageryFallbackTileLoadFunction(WORLD_IMAGERY_TILE_URL),
   });
 
 // One shared source so toggling basemaps (or remounting a map) keeps the
@@ -230,13 +232,16 @@ export const createWorldImageryTileLayer = () =>
     source: getSharedWorldImagerySource(),
   });
 
-const createWaybackSource = (releaseNum: number) =>
-  new XYZ({
-    url: getWaybackTileUrl(releaseNum),
+const createWaybackSource = (releaseNum: number) => {
+  const url = getWaybackTileUrl(releaseNum);
+  return new XYZ({
+    url,
     attributions: WAYBACK_ATTRIBUTION,
     maxZoom: 19,
     crossOrigin: "anonymous",
+    tileLoadFunction: createImageryFallbackTileLoadFunction(url),
   });
+};
 
 // Reuse one XYZ source per Wayback release so switching releases (or toggling
 // the basemap style) keeps each release's OpenLayers tile cache alive instead

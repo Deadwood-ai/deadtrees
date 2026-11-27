@@ -9,16 +9,16 @@ browser: browser
 parallel_safe: false
 mutation_level: local-write
 routes:
-  - /dataset-audit?tab=to-review
+  - /dataset-audit?tab=pending
   - /dataset-audit/91090
 ```
 
 ## Purpose
 
-Verify the audit page as oversight of the automated checks (DT-1486): the sections
-in order, each check's map mode, answers stored as person rows in
-`audit.assessments`, the stored images the checks judged, the derived decision and
-the check queue tabs.
+Verify the Audit Review page (DT-1486, data model DT-1606): the seven steps in order, each
+check's map mode, answers stored as reviews in `audit.dataset_human_reviews` and
+`audit.tile_human_reviews`, the stored images the checks judged, the evaluation decision
+(OK or Exclude) and the list tabs.
 
 ## Preconditions
 
@@ -30,42 +30,46 @@ the check queue tabs.
 
 ## Steps
 
-1. Open `/dataset-audit?tab=to-review`; the seeded dataset lists one row per check
-   result with its automated result and reason. Open `Disagreements`.
-2. Open `/dataset-audit/91090?section=georef`. The map shows the Bing reference under
-   the drone image with match lines; the panel switches reference and opacity.
-3. Before answering, other reviewers' and the models' answers are hidden. Mark the
-   check wrong with a reason and a note; the answer, the models and the other
-   reviewer's answer appear, and the read-only saved audit field follows the answer.
-4. Open `1. Dataset evaluation`: agree; the four crops show on the map and
-   "Show what the model saw" loads the overview, then a crop's image after a click.
-5. Open `6. Prediction quality`: step through crops with n / p, answer a crop, and
-   switch the model image between raw, deadwood and forest.
-6. Confirm the derived decision, add a note and save.
+1. Open `/dataset-audit?tab=pending`; the seeded dataset is listed with "Review required"
+   for the dataset evaluation and georeferencing (not for the prediction layers).
+2. Open `/dataset-audit/91090?section=georef`. The map shows the reference under the
+   drone image with match lines; the panel switches reference and opacity. The step says
+   the references do not support a reliable offset estimate. Answer Passed, Not passed or
+   No reference imagery.
+3. Open `1. Dataset evaluation`: the COG and thumbnail facts with the COG issue flagged,
+   "The evaluation could not decide", and the decision OK or Exclude (no Fix).
+4. Open `5. Phenology`: the probability and, where the site has a curve, the phenology
+   indicator bar with the acquisition date.
+5. Open `7. Deadwood prediction`: the crop review opens on the first tile; answer it with
+   4 (Ambiguous) and see "Answered 1 of" and the Ambiguous count in the step.
+6. Pick OK, add a note and save.
 
 ## Expected Observations
 
-- Sections read: user reports, 1 Dataset evaluation, 2 AOI, 3 Georeferencing,
-  4 Acquisition date ("Not run yet" without an estimate), 5 Phenology (manual),
-  6 Prediction quality.
-- Each answer is a new `audit.assessments` row with `assessor_kind = 'person'`, the
-  current `run_id` and, for "Check wrong", `reason_code` and `reason_text`.
-- Crop answers carry `crop_id` and the layer.
+- Steps read: 1 Dataset evaluation, 2 Area of interest, 3 Georeferencing, 4 Acquisition
+  date ("Not run yet" without an estimate), 5 Phenology, 6 Tree cover prediction,
+  7 Deadwood prediction.
+- Save adds one `audit.dataset_human_reviews` row per answered step (`check_key`
+  `dataset_evaluation` with `decision` `keep` or `exclude`, `georef` with
+  `georef_status`); `reviewed_by` is the auditor and `evidence_key` was filled by the
+  database.
+- A tile answer is a new `audit.tile_human_reviews` row, stored at once, with the tile,
+  the layer and the `prediction_label_id` the tile showed; Ambiguous is verdict
+  `ambiguous`. `audit.tile_calls` then shows `by_person` for that tile.
 - Images load through `/api/v1/audit/images/files/<ticket>/...`.
-- An answer sends one request and the page does not reload its checks.
-- After a reload without saving, the saved audit fields of answered checks still show the answers.
-- `dataset_audit` holds the confirmed final assessment and the fields the answers set.
+- `audit.dataset_outcomes` for the dataset reflects the answers: the evaluation decision
+  `keep` and its source `reviewer`, and the answered checks leave `review_required`.
 
 ## Failure Signals
 
 - A section's map mode leaves layers behind after closing it, or the drone opacity
   stays changed.
-- Answers of others are visible before answering without "Show now".
-- An answer is stored without a run, or on the wrong layer or crop.
+- A tile answer is stored on the wrong layer, tile or prediction.
 - Images are requested from a static path or fail for an auditor.
 
 ## Evidence To Capture
 
 - URL of the section opened.
 - Screenshots of the georef, evaluation and prediction map modes.
-- Focused DB rows from `audit.assessments` and `dataset_audit` for the dataset.
+- Focused DB rows from `audit.dataset_human_reviews`, `audit.tile_human_reviews` and
+  `audit.dataset_outcomes` for the dataset.

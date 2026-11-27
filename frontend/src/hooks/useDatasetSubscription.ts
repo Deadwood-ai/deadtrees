@@ -82,11 +82,11 @@ export function useDatasetSubscription() {
             const hadError = oldStatusData && oldStatusData.has_error;
             const hasErrorNow = statusData && statusData.has_error;
 
-            // Refresh account rows and any open status/review details together.
+            // Refresh account rows, any open status panel and its audit findings together.
             await Promise.all([
               queryClient.invalidateQueries({ queryKey: ["userDatasets", session?.user?.id] }),
               queryClient.invalidateQueries({ queryKey: ["owner-dataset-status", session?.user?.id, statusData.dataset_id] }),
-              queryClient.invalidateQueries({ queryKey: ["owner-review-details", session?.user?.id, statusData.dataset_id] }),
+              queryClient.invalidateQueries({ queryKey: ["dataset-audit-summary", statusData.dataset_id] }),
             ]);
 
             // Show completion notification if processing just completed

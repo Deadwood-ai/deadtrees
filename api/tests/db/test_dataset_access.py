@@ -245,7 +245,7 @@ def test_map_tiles_follow_label_visibility(access_accounts, make_dataset, data_a
 			db.execute('UPDATE public.v2_datasets SET archived = true WHERE id = %s', (dataset_id,))
 		if state == 'excluded':
 			db.execute(
-				"INSERT INTO public.dataset_audit (dataset_id, final_assessment) VALUES (%s, 'exclude_completely')",
+				"INSERT INTO audit.legacy_decisions(dataset_id,decision,decided_at) VALUES (%s,'exclude',now())",
 				(dataset_id,),
 			)
 	context = use_anon_client() if actor == 'anonymous' else use_client(access_accounts[actor]['token'])

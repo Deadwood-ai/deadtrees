@@ -1,4 +1,4 @@
-"""Choosing ODM input images (DT-1312): paired DNGs, multispectral bands, GPS outliers, extent."""
+"""Choosing ODM input images (DT-1312, DT-1583): ODM outputs, paired DNGs, bands, GPS outliers, extent."""
 
 from pathlib import Path
 
@@ -9,6 +9,7 @@ from processor.src.utils.odm_inputs import (
 	OdmInputError,
 	drop_gps_outliers,
 	drop_multispectral_bands,
+	drop_odm_outputs,
 	drop_paired_raw_images,
 	gps_extent_km2,
 	read_gps_position,
@@ -41,6 +42,28 @@ def _photo(path: Path, position: tuple[float, float] | None = None, mode: str = 
 
 def _grid(count: int, spacing_degrees: float = 0.0005) -> list[tuple[float, float]]:
 	return [(FLIGHT[0] + (i // 5) * spacing_degrees, FLIGHT[1] + (i % 5) * spacing_degrees) for i in range(count)]
+
+
+def test_an_earlier_odm_project_zipped_with_the_photos_is_left_out(tmp_path):
+	# Dataset 15756: the ZIP held a whole ODM project, flat and in its folders.
+	photos = [tmp_path / 'DJI_0399.JPG', tmp_path / 'images' / 'DJI_0400.JPG']
+	outputs = [
+		tmp_path / 'odm_textured_model_geo_material0020_map_Kd.png',
+		tmp_path / 'ODM_Orthophoto.tif',
+		tmp_path / 'odm_report' / 'overlap.png',
+		tmp_path / 'opensfm' / 'undistorted' / 'images' / 'DJI_0399.JPG',
+	]
+
+	kept, dropped = drop_odm_outputs([*photos, *outputs])
+
+	assert kept == photos
+	assert dropped == outputs
+
+
+def test_odm_folder_names_above_the_upload_do_not_count(tmp_path):
+	photo = tmp_path / 'odm_temp_15756' / 'raw_images_15756' / 'DJI_0399.JPG'
+
+	assert drop_odm_outputs([photo]) == ([photo], [])
 
 
 def test_paired_dng_is_dropped_and_lone_dng_kept(tmp_path):
@@ -173,12 +196,45 @@ def test_select_odm_images_rejects_an_area_too_large_for_one_mosaic(tmp_path):
 
 
 def test_select_odm_images_records_band_drops_under_the_shared_reason(tmp_path):
-	rgb = _photo(tmp_path / 'DJI_0010.JPG')
+	rgb = _photo(tmp_path / 'DJI_0010.JPG', FLIGHT)
 	band = _photo(tmp_path / 'DJI_0011.TIF', mode='L')
 
 	selection = select_odm_images([rgb, band], max_extent_km2=30)
 
 	assert selection.dropped == {'multispectral band images': [band]}
+
+
+def test_select_odm_images_records_odm_outputs_and_keeps_the_photos(tmp_path):
+	frames = [_photo(tmp_path / f'DJI_{i:04d}.JPG', p) for i, p in enumerate(_grid(5))]
+	atlas = _photo(tmp_path / 'odm_textured_model_geo_material0001_map_Kd.png')
+
+	selection = select_odm_images([*frames, atlas], max_extent_km2=30)
+
+	assert selection.kept == frames
+	assert selection.dropped == {'outputs of an earlier ODM run': [atlas]}
+
+
+def test_select_odm_images_rejects_an_upload_of_odm_outputs_only(tmp_path):
+	outputs = [tmp_path / 'odm_orthophoto' / 'odm_orthophoto.png', tmp_path / 'odm_texturing' / 'atlas.png']
+
+	with pytest.raises(OdmInputError, match='earlier ODM or WebODM run'):
+		select_odm_images(outputs, max_extent_km2=30)
+
+
+def test_select_odm_images_rejects_photos_without_gps(tmp_path):
+	"""Uploads from before the API checked GPS (dataset 15632) stop before ODM with the upload message."""
+	frames = [_photo(tmp_path / f'{i}.tif') for i in range(14)]
+
+	with pytest.raises(OdmInputError, match='None of the checked photos'):
+		select_odm_images(frames, max_extent_km2=30)
+
+
+def test_select_odm_images_keeps_photos_whose_metadata_cannot_be_read(tmp_path):
+	frames = [tmp_path / f'{i}.dng' for i in range(3)]
+	for frame in frames:
+		frame.write_bytes(b'raw')
+
+	assert select_odm_images(frames, max_extent_km2=30).kept == frames
 
 
 def test_select_odm_images_rejects_band_only_uploads(tmp_path):

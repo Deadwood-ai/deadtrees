@@ -166,7 +166,7 @@ const DeadtreesMap = () => {
     Form.useForm<PublicTreeObservationFormValues>();
   const [mobileMapPanel, setMobileMapPanel] =
     useState<MobileMapPanel | null>(null);
-  const [showPublicContributions, setShowPublicContributions] = useState(true);
+  const [showPublicContributions, setShowPublicContributions] = useState(false);
   const [isPlacingPublicObservation, setIsPlacingPublicObservation] =
     useState(false);
   const [publicObservationCoordinate, setPublicObservationCoordinate] =

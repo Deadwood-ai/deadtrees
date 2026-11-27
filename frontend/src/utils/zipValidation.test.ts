@@ -2,8 +2,8 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { validateZipUpload } from "./fileValidation";
 
-const fixture = async (name = "mixed-stored.zip") =>
-  new Uint8Array(await readFile(new URL(`../../test/fixtures/zip/${name}`, import.meta.url)));
+const fixture = async (name = "mixed-stored.zip", folder = "zip") =>
+  new Uint8Array(await readFile(new URL(`../../test/fixtures/${folder}/${name}`, import.meta.url)));
 const file = (bytes: Uint8Array<ArrayBuffer>) => new File([bytes], "images.zip");
 
 describe("ZIP validation feedback", () => {
@@ -25,6 +25,15 @@ describe("ZIP validation feedback", () => {
     expect(warnings).toHaveLength(2);
     expect(warnings[0]).toMatch(/only 3 photos/);
     expect(warnings[1]).toMatch(/raw DNG photos/);
+  });
+
+  it("rejects a flight whose photos have no GPS position before upload", async () => {
+    await expect(validateZipUpload(file(await fixture("no-gps-flight.zip", "photo-gps"))))
+      .rejects.toThrow(/None of the checked photos.*GPS position.*GeoTIFF/);
+  });
+
+  it("accepts a flight whose first photos lack a fix but later ones have GPS", async () => {
+    await expect(validateZipUpload(file(await fixture("gps-flight.zip", "photo-gps")))).resolves.toEqual([]);
   });
 
   it("explains missing archive metadata without claiming a known cause", async () => {

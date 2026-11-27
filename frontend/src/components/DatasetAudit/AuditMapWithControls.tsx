@@ -1,7 +1,4 @@
-import { useRef, forwardRef, useImperativeHandle, useEffect, useCallback, useState } from "react";
-import { message, Tag, Tooltip } from "antd";
-import { EditOutlined, CheckCircleOutlined } from "@ant-design/icons";
-import { useQueryClient } from "@tanstack/react-query";
+import { useRef, forwardRef, useImperativeHandle, useCallback, useState } from "react";
 import type { Map as OLMap } from "ol";
 import type TileLayerWebGL from "ol/layer/WebGLTile.js";
 
@@ -9,16 +6,9 @@ import { IDataset } from "../../types/dataset";
 import DatasetAuditMap, { DatasetAuditMapHandle } from "./DatasetAuditMap";
 import { AOIToolbarState } from "../DatasetDetailsMap/hooks/useAOIEditor";
 import DatasetLayerControlPanel from "../DatasetDetailsMap/DatasetLayerControlPanel";
-import EditorToolbar from "../PolygonEditor/EditorToolbar";
 import { useDatasetDetailsMap } from "../../hooks/useDatasetDetailsMapProvider";
 import { useDatasetLabelTypes } from "../../hooks/useDatasetLabelTypes";
-import { useApproveCorrection, useRevertCorrection } from "../../hooks/useSaveCorrections";
-import { useCorrectionStats, useCorrectionContributors, usePendingCorrectionLocations } from "../../hooks/usePendingCorrections";
-import { useAuth } from "../../hooks/useAuthProvider";
-import { useDatasetEditing } from "../../hooks/useDatasetEditing";
-import { mapColors } from "../../theme/mapColors";
 import { MAP_FLOATING_TOP_CLASS } from "../../theme/mapLayout";
-import { trackAppEvent } from "../../utils/analytics";
 import { hasForestCoverPredictionOutput } from "../../utils/predictionAvailability";
 import AuditCheckMap, { type IAuditCheckMapProps } from "./checks/AuditCheckMap";
 
@@ -26,9 +16,6 @@ interface AuditMapWithControlsProps {
 	dataset: IDataset;
 	onAOIChange: (geometry: GeoJSON.MultiPolygon | GeoJSON.Polygon | null) => void;
 	onToolbarStateChange: (state: AOIToolbarState) => void;
-	onEditingStateChange?: (isEditing: boolean, layerType: "deadwood" | "forest_cover" | null) => void;
-	/** This page's audit lease; null once another page holds it (then nothing here can be changed). */
-	auditLeaseId: string | null;
 	/** the open audit section's map mode */
 	checkMap: IAuditCheckMapProps;
 }
@@ -55,17 +42,12 @@ export interface AuditMapWithControlsHandle {
 }
 
 /**
- * Map component with controls for the audit detail view
- * Uses the dedicated DatasetAuditMap component
+ * The audit detail view's map: the layers and their controls, the AOI editor and the open step's
+ * check. Suggested edits and editing the predictions live on the Edits & flags page.
  */
 const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWithControlsProps>(
-	({ dataset, onAOIChange, onToolbarStateChange, onEditingStateChange, auditLeaseId, checkMap }, ref) => {
-		const readOnly = auditLeaseId === null;
-		// Map ref - use the DatasetAuditMapHandle type
+	({ dataset, onAOIChange, onToolbarStateChange, checkMap }, ref) => {
 		const mapRef = useRef<DatasetAuditMapHandle>(null);
-
-		// Get current user for editing
-		const { user } = useAuth();
 
 		// Get layer control state from context
 		const {
@@ -86,29 +68,6 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 
 		const hasDeadwood = !!deadwood.data?.id;
 		const hasForestCover = !!forestCover.data?.id && hasForestCoverPredictionOutput(dataset);
-
-		// Editing hook for polygon corrections
-		const editing = useDatasetEditing({ datasetId: dataset?.id, user, auditLeaseId });
-		const { isEditing, editingLayerType, editor, ai, refreshKey } = editing;
-
-		// Losing the audit lease ends any prediction edit before it can be saved here.
-		const { handleCancelEditing } = editing;
-		useEffect(() => {
-			if (readOnly && isEditing) handleCancelEditing();
-		}, [readOnly, isEditing, handleCancelEditing]);
-		const startDeadwoodEdit = hasDeadwood && !readOnly ? () => editing.handleStartEditing("deadwood") : undefined;
-		const startForestCoverEdit =
-			hasForestCover && !readOnly ? () => editing.handleStartEditing("forest_cover") : undefined;
-
-		// Notify parent of editing state changes
-		useEffect(() => {
-			onEditingStateChange?.(isEditing, editingLayerType);
-		}, [isEditing, editingLayerType, onEditingStateChange]);
-
-		// Correction approval/revert mutations
-		const queryClient = useQueryClient();
-		const { mutateAsync: approveCorrection } = useApproveCorrection();
-		const { mutateAsync: revertCorrection } = useRevertCorrection();
 
 		// Expose methods to parent - delegate to mapRef
 		useImperativeHandle(ref, () => ({
@@ -133,262 +92,57 @@ const AuditMapWithControls = forwardRef<AuditMapWithControlsHandle, AuditMapWith
 			undoAOIChange: () => mapRef.current?.undoAOIChange(),
 		}), []);
 
-		// Handlers for correction review
-		const handleApproveCorrection = async (correctionId: number, geometryId: number) => {
-			try {
-				void geometryId;
-				const result = await approveCorrection({ correctionId, auditLeaseId });
-				if (result) {
-					trackAppEvent("correction_approved", {
-						dataset_id: dataset.id,
-					});
-					message.success("Correction approved");
-					queryClient.invalidateQueries({ queryKey: ["pendingCorrections"] });
-					queryClient.invalidateQueries({ queryKey: ["correctionStats", dataset?.id] });
-					queryClient.invalidateQueries({ queryKey: ["correctionContributors", dataset?.id] });
-					queryClient.invalidateQueries({ queryKey: ["pendingCorrectionLocations", dataset?.id] });
-					mapRef.current?.refreshVectorLayers();
-				} else {
-					message.error("Failed to approve correction");
-				}
-			} catch (error) {
-				console.error("Error approving correction:", error);
-				message.error("Failed to approve correction");
-			}
-		};
-
-		const handleRevertCorrection = async (correctionId: number, geometryId: number) => {
-			try {
-				void geometryId;
-				const result = await revertCorrection({ correctionId, auditLeaseId });
-				if (result) {
-					trackAppEvent("correction_reverted", {
-						dataset_id: dataset.id,
-					});
-					message.success("Correction reverted");
-					queryClient.invalidateQueries({ queryKey: ["pendingCorrections"] });
-					queryClient.invalidateQueries({ queryKey: ["correctionStats", dataset?.id] });
-					queryClient.invalidateQueries({ queryKey: ["correctionContributors", dataset?.id] });
-					queryClient.invalidateQueries({ queryKey: ["pendingCorrectionLocations", dataset?.id] });
-					mapRef.current?.refreshVectorLayers();
-				} else {
-					message.error("Failed to revert correction");
-				}
-			} catch (error) {
-				console.error("Error reverting correction:", error);
-				message.error("Failed to revert correction");
-			}
-		};
-
-		// Correction stats
-		const { data: correctionStats } = useCorrectionStats(dataset?.id);
-		const { data: contributors } = useCorrectionContributors(dataset?.id);
-		const { data: pendingLocations } = usePendingCorrectionLocations(dataset?.id);
-
-		const pendingDeadwood = pendingLocations?.filter(p => p.layerType === "deadwood").length ?? 0;
-		const pendingForestCover = pendingLocations?.filter(p => p.layerType === "forest_cover").length ?? 0;
-
-		// Flash pending corrections
-		const handleFlashPending = (layerType?: "deadwood" | "forest_cover") => {
-			if (!pendingLocations || pendingLocations.length === 0) return;
-
-			const filtered = layerType
-				? pendingLocations.filter(p => p.layerType === layerType)
-				: pendingLocations;
-
-			if (filtered.length === 0) return;
-
-			const minLon = Math.min(...filtered.map(p => p.minLon));
-			const minLat = Math.min(...filtered.map(p => p.minLat));
-			const maxLon = Math.max(...filtered.map(p => p.maxLon));
-			const maxLat = Math.max(...filtered.map(p => p.maxLat));
-
-			mapRef.current?.zoomToExtent(minLon, minLat, maxLon, maxLat, 50);
-
-			filtered.forEach((loc, index) => {
-				setTimeout(() => {
-					mapRef.current?.flashLocation(loc.centroidLon, loc.centroidLat);
-				}, index * 200);
-			});
-		};
-
 		// The OpenLayers map and drone layer for the check modes; the state only signals readiness.
 		const olMapRef = useRef<OLMap | null>(null);
 		const orthoLayerRef = useRef<TileLayerWebGL | null>(null);
 		const [checkLayersReady, setCheckLayersReady] = useState(0);
 
-		// Map ready callback - pass to editing hook
 		const handleMapReady = useCallback((map: OLMap) => {
 			olMapRef.current = map;
 			setCheckLayersReady((n) => n + 1);
-			editing.handleMapReady(map);
-		}, [editing]);
+		}, []);
 
-		// Ortho layer ready callback - pass to editing hook
 		const handleOrthoLayerReady = useCallback((layer: TileLayerWebGL) => {
 			orthoLayerRef.current = layer;
 			setCheckLayersReady((n) => n + 1);
-			editing.handleOrthoLayerReady(layer);
-		}, [editing]);
+		}, []);
 
 		return (
 			<div className="relative h-full w-full flex-1">
-				{/* Correction Stats Indicator */}
-				{!isEditing && correctionStats && correctionStats.total > 0 && (
-					<div className="absolute left-3 top-3 z-50 pointer-events-auto md:left-[calc(420px+2rem)] md:top-24">
-						<div className="flex flex-col gap-1.5 rounded-lg bg-white/95 p-2.5 shadow-lg backdrop-blur-sm">
-							<div className="text-xs font-medium text-gray-600 mb-1">Edit Review Progress</div>
-							{correctionStats.pending > 0 ? (
-								<>
-									<Tooltip title="Click to zoom and flash all pending edits">
-										<Tag
-											icon={<EditOutlined />}
-											color="orange"
-											className="m-0 cursor-pointer hover:opacity-80"
-											onClick={() => handleFlashPending()}
-										>
-											{correctionStats.pending} pending
-										</Tag>
-									</Tooltip>
-									<div className="flex flex-col gap-1 ml-2">
-										{pendingDeadwood > 0 && (
-												<Tooltip title="Click to show pending deadwood cover edits">
-												<div
-													className="flex items-center gap-1.5 text-[10px] text-gray-600 cursor-pointer hover:text-orange-600"
-													onClick={() => handleFlashPending("deadwood")}
-												>
-													<span className="h-2 w-2 rounded-sm" style={{ backgroundColor: mapColors.deadwood.fill }} />
-														<span>{pendingDeadwood} deadwood cover</span>
-												</div>
-											</Tooltip>
-										)}
-										{pendingForestCover > 0 && (
-												<Tooltip title="Click to show pending tree cover edits">
-												<div
-													className="flex items-center gap-1.5 text-[10px] text-gray-600 cursor-pointer hover:text-green-600"
-													onClick={() => handleFlashPending("forest_cover")}
-												>
-													<span className="h-2 w-2 rounded-sm bg-green-500" />
-														<span>{pendingForestCover} tree cover</span>
-												</div>
-											</Tooltip>
-										)}
-									</div>
-								</>
-							) : (
-								<Tooltip title="All edits have been reviewed">
-									<Tag icon={<CheckCircleOutlined />} color="green" className="m-0">
-										All reviewed
-									</Tag>
-								</Tooltip>
-							)}
-							{correctionStats.approved > 0 && (
-								<Tooltip title={`${correctionStats.approved} edits approved`}>
-									<Tag color="green" className="m-0">
-										{correctionStats.approved} approved
-									</Tag>
-								</Tooltip>
-							)}
-							{correctionStats.rejected > 0 && (
-								<Tooltip title={`${correctionStats.rejected} edits reverted`}>
-									<Tag color="default" className="m-0">
-										{correctionStats.rejected} reverted
-									</Tag>
-								</Tooltip>
-							)}
-							{contributors && contributors.length > 0 && (
-								<div className="border-t border-gray-200 mt-1.5 pt-1.5">
-									<div className="text-[10px] text-gray-500 mb-1">Contributors:</div>
-									{contributors.slice(0, 3).map((contributor, idx) => (
-										<div key={idx} className="text-[10px] text-gray-600 truncate" title={contributor.email}>
-											{contributor.email.split('@')[0]} ({contributor.count})
-										</div>
-									))}
-									{contributors.length > 3 && (
-										<div className="text-[10px] text-gray-400">
-											+{contributors.length - 3} more
-										</div>
-									)}
-								</div>
-							)}
-						</div>
-					</div>
-				)}
-
-				{/* Layer Control Panel */}
-				{!isEditing && (
-					<div className={`absolute right-4 ${MAP_FLOATING_TOP_CLASS} z-50 pointer-events-auto`}>
-						<DatasetLayerControlPanel
-							mapStyle={layerControl.mapStyle}
-							onMapStyleChange={setMapStyle}
-							showForestCover={layerControl.showForestCover}
-							setShowForestCover={setShowForestCover}
-							showDeadwood={layerControl.showDeadwood}
-							setShowDeadwood={setShowDeadwood}
-							showDroneImagery={layerControl.showDroneImagery}
-							setShowDroneImagery={setShowDroneImagery}
-							showAOI={layerControl.showAOI}
-							setShowAOI={setShowAOI}
-							hasForestCover={hasForestCover}
-							hasDeadwood={hasDeadwood}
-							hasAOI={true}
-							opacity={layerControl.layerOpacity}
-							setOpacity={setLayerOpacity}
-							onReportClick={() => { }}
-							onEditForestCover={startForestCoverEdit}
-							onEditDeadwood={startDeadwoodEdit}
-							isLoggedIn={true}
-						/>
-					</div>
-				)}
+				<div className={`absolute right-4 ${MAP_FLOATING_TOP_CLASS} z-50 pointer-events-auto`}>
+					<DatasetLayerControlPanel
+						mapStyle={layerControl.mapStyle}
+						onMapStyleChange={setMapStyle}
+						showForestCover={layerControl.showForestCover}
+						setShowForestCover={setShowForestCover}
+						showDeadwood={layerControl.showDeadwood}
+						setShowDeadwood={setShowDeadwood}
+						showDroneImagery={layerControl.showDroneImagery}
+						setShowDroneImagery={setShowDroneImagery}
+						showAOI={layerControl.showAOI}
+						setShowAOI={setShowAOI}
+						hasForestCover={hasForestCover}
+						hasDeadwood={hasDeadwood}
+						hasAOI={true}
+						opacity={layerControl.layerOpacity}
+						setOpacity={setLayerOpacity}
+						isLoggedIn={true}
+					/>
+				</div>
 
 				{/* The open section's check on the map */}
-				{!isEditing && checkLayersReady > 0 && (
+				{checkLayersReady > 0 && (
 					<AuditCheckMap key={`${dataset.id}:${checkMap.section?.id ?? "none"}`} map={olMapRef.current} orthoLayer={orthoLayerRef.current} {...checkMap} />
 				)}
 
-				{/* Editor Toolbar */}
-				{isEditing && editingLayerType && (
-					<EditorToolbar
-						type={editingLayerType}
-						isDrawing={editor.isDrawing}
-						hasSelection={editor.selection.length > 0}
-						selectionCount={editor.selection.length}
-						isAIActive={ai.isActive}
-						isAIProcessing={ai.isProcessing}
-						onToggleDraw={() => editor.toggleDraw()}
-						onCutHole={editor.cutHoleWithDrawn}
-						onMerge={editor.mergeSelected}
-						onClip={editor.clipSelected}
-						onToggleAI={() => (ai.isActive ? ai.disable() : ai.enable())}
-						onFindTrees={() => void ai.findConcept("tree")}
-						onDeleteSelected={editor.deleteSelected}
-						onUndo={editor.undo}
-						canUndo={editor.canUndo}
-						onSave={editing.handleSaveEdits}
-						onCancel={editing.handleCancelEditing}
-						position="top-right"
-							title={`Editing ${editingLayerType === "deadwood" ? "deadwood cover" : "tree cover"}`}
-					/>
-				)}
-
-				{/* Audit Map - dedicated component */}
 				<DatasetAuditMap
 					ref={mapRef}
 					data={dataset}
 					onMapReady={handleMapReady}
 					onOrthoLayerReady={handleOrthoLayerReady}
-					isEditing={isEditing}
-					editingLayerType={editingLayerType}
-					enableAOIEditing={!isEditing}
+					enableAOIEditing
 					onAOIChange={onAOIChange}
 					onToolbarStateChange={onToolbarStateChange}
-					canReviewCorrections={!isEditing && !readOnly}
-					onApproveCorrection={handleApproveCorrection}
-					onRevertCorrection={handleRevertCorrection}
-					onEditDeadwood={startDeadwoodEdit}
-					onEditForestCover={startForestCoverEdit}
-					refreshKey={refreshKey}
 				/>
 			</div>
 		);

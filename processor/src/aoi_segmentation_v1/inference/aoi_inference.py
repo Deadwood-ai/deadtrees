@@ -175,8 +175,11 @@ def _smooth_geometry(geometry, simplify_tolerance: float, chaikin_iterations: in
 		if isinstance(smoothed, Polygon):
 			smoothed = _chaikin_polygon(smoothed, chaikin_iterations)
 		elif isinstance(smoothed, MultiPolygon):
-			parts = [_chaikin_polygon(part, chaikin_iterations) for part in smoothed.geoms if not part.is_empty]
-			smoothed = MultiPolygon([part for part in parts if not part.is_empty])
+			# Repairing a smoothed part (buffer(0)) can split it into a MultiPolygon, which the
+			# MultiPolygon constructor rejects, so the parts are joined with a union.
+			smoothed = unary_union(
+				[_chaikin_polygon(part, chaikin_iterations) for part in smoothed.geoms if not part.is_empty]
+			)
 	if not smoothed.is_valid:
 		smoothed = smoothed.buffer(0)
 	return smoothed if not smoothed.is_empty else geometry

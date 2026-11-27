@@ -26,6 +26,31 @@ def fetch_all_rows(build_query: Callable[[], object], page_size: int = PAGE_SIZE
 	return [row for page in iter_pages(build_query, page_size) for row in page]
 
 
+def iter_pages_by_id(
+	build_query: Callable[[str], object], columns: str, page_size: int = PAGE_SIZE
+) -> Iterator[List[Dict]]:
+	"""Yield every page of one owner's rows in id order, where an index on (owner, id) exists
+	(a dataset's CLIP tiles). `build_query(select)` must return a fresh query of the owner's rows
+	selecting `select`; the pages hold `columns`.
+
+	Each page is two reads: the next ids after the last one, which the index alone answers, then
+	the rows from the first to the last of those ids. Asked for the rows after the last id
+	directly, Postgres underestimated how many were left, read and sorted all of them for every
+	page, and a dataset of 53,000 tiles ran past the statement timeout. An offset reads every
+	earlier row again.
+	"""
+	last = None
+	while True:
+		query = build_query('id')
+		if last is not None:
+			query = query.gt('id', last)
+		ids = [row['id'] for row in query.order('id').limit(page_size).execute().data or []]
+		if not ids:
+			return
+		yield build_query(columns).gte('id', ids[0]).lte('id', ids[-1]).order('id').execute().data or []
+		last = ids[-1]
+
+
 def iter_pages_by_creation(build_query: Callable[[], object], page_size: int = PAGE_SIZE) -> Iterator[List[Dict]]:
 	"""Yield every page of a PostgREST query in (created_at, id) order, continuing after the last row.
 

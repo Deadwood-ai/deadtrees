@@ -388,6 +388,35 @@ def test_failed_publication_rolls_back_deactivation(prediction):
 	assert publish(prediction, new.id)['is_active']
 
 
+@pytest.mark.parametrize('rpc', ['publish_model_prediction_label', 'replace_model_prediction_label'])
+def test_publication_outlasts_the_role_statement_timeout(prediction, rpc):
+	"""Counting a freshly uploaded 800k-polygon label exceeded the authenticated
+	role's 8 s budget after a complete upload (DT-721); publication has its own."""
+	db = prediction['db']
+	assert db.execute("SELECT rolconfig FROM pg_roles WHERE rolname='authenticated'").fetchone()[0] == [
+		'statement_timeout=8s'
+	]
+	label = stage(prediction)
+	name = sql.Identifier(f'test_slow_publication_{prediction["dataset"]}')
+	db.execute(
+		sql.SQL("""CREATE FUNCTION public.{}() RETURNS trigger LANGUAGE plpgsql AS $fn$
+	BEGIN
+	  IF NEW.id={} AND NEW.is_active THEN PERFORM pg_sleep(8.2); END IF;
+	  RETURN NEW;
+	END $fn$""").format(name, sql.Literal(label.id))
+	)
+	db.execute(
+		sql.SQL('CREATE TRIGGER {} BEFORE UPDATE ON public.v2_labels FOR EACH ROW EXECUTE FUNCTION public.{}()').format(
+			name, name
+		)
+	)
+	try:
+		assert publish(prediction, label.id, rpc=rpc)['is_active']
+	finally:
+		db.execute(sql.SQL('DROP TRIGGER {} ON public.v2_labels').format(name))
+		db.execute(sql.SQL('DROP FUNCTION public.{}()').format(name))
+
+
 @pytest.fixture(scope='module')
 def oversized_polygon():
 	# Connected canopy with many small gaps: >2 MB in WKB, one feature with holes.

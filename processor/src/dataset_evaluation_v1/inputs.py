@@ -1,9 +1,8 @@
 """What the dataset evaluation looks at, read straight from the COG at run time.
 
 One read at most `overview_px` on the long side through the COG overviews gives the
-overview, its valid-data mask, per-band statistics and the perceptual hash. Four
-crops spread over the data show sharpness and
-artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
+overview, its valid-data mask and per-band statistics. Four crops spread over the data
+show sharpness and artifacts the overview cannot. They are CLIP tiles (v2_tile_embeddings: 51.2 m
 windows on the 10 cm UTM grid of the embedding stage), rendered at 5 cm or native
 when coarser, so the prediction quality check judges the same crops. A dataset
 without tiles gets native-resolution windows instead. Either way the crops are the
@@ -37,7 +36,7 @@ CROP_MPP = 0.05  # grid crops render at 5 cm, or native when coarser
 # The crop centres are found on a sample of the eligible overview pixels.
 MAX_CANDIDATES = 4000
 KMEANS_ROUNDS = 10
-# Below this share of valid overview pixels the COG holds no usable image (empty_cog rule).
+# Below this share of valid overview pixels the COG holds no usable image: no model is asked.
 MIN_VALID_SHARE = 0.005
 # Footprint padding without a mask: solid white or black (the thresholds of utils/nodata.py)
 WHITE_FILL_MIN = 250
@@ -200,9 +199,15 @@ def native_crops(src, valid: np.ndarray, scale: float, native_mpp: float, crop_p
 	eligible = inside(valid, half)
 	ys, xs = np.nonzero(eligible if eligible.any() else valid)
 	crops = []
+	windows = []
 	for x, y in spread_points(np.column_stack((xs, ys)).astype(float), count, seed):
 		col = int(np.clip((x + 0.5) * scale - cw / 2, 0, src.width - cw))
 		row = int(np.clip((y + 0.5) * scale - ch / 2, 0, src.height - ch))
+		# an ortho about one crop across clamps several points to one window: show it once
+		# (audit.finish_run keeps a tile and its image once)
+		if (col, row) in windows:
+			continue
+		windows.append((col, row))
 		window = Window(col, row, cw, ch)
 		crops.append(
 			Crop(

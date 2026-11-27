@@ -44,7 +44,10 @@ with input as (
         -- The combined v2 model sets only its own flag (DT-1354).
         and (is_combined_model_done or (is_deadwood_done and is_forest_cover_done))
     ),
-    'has_error_now', count(*) filter (where has_error),
+    -- Archived datasets are out of the factory, so their old errors do not count.
+    'has_error_now', count(*) filter (
+      where has_error and dataset_id not in (select id from v2_datasets where archived)
+    ),
     'statuses_error_24h', count(*) filter (where updated_at >= now() - interval '24 hours' and has_error),
     'non_idle_now', count(*) filter (where current_status <> 'idle'),
     'latest_status_update', max(updated_at),
@@ -97,10 +100,64 @@ with input as (
     )
   ) as data
   from v2_queue
+), failures as (
+  -- Live failures grouped by stage and error class, one group per cause, for
+  -- the platform monitor's failure findings. The two expressions copy
+  -- public.factory_failure_stage and public.factory_failure_kind (migration
+  -- 20261006090000_factory_attention_by_cause.sql), which the analyst role may
+  -- not execute; change them together. A test compares both.
+  select coalesce(jsonb_agg(to_jsonb(g) order by g.count desc, g.stage, g.kind), '[]'::jsonb) as data
+  from (
+    select
+      stage,
+      kind,
+      count(*)::int as count,
+      count(*) filter (where not team)::int as external,
+      count(distinct user_id)::int as contributors,
+      max(updated_at) as last_at,
+      (array_agg(dataset_id order by updated_at desc, dataset_id desc))[1:5] as samples
+    from (
+      select
+        s.dataset_id,
+        d.user_id,
+        s.updated_at,
+        exists (
+          select 1 from privileged_users p where p.user_id = d.user_id and p.can_audit
+        ) as team,
+        (select case raw when 'odm' then 'odm_processing'
+          when 'geotiff' then 'ortho_processing' when 'geotiff_dependency' then 'ortho_processing' when 'convert' then 'ortho_processing'
+          when 'metadata' then 'metadata_processing' when 'cog' then 'cog_processing' when 'thumbnail' then 'thumbnail_processing'
+          when 'deadwood' then 'deadwood_segmentation' when 'deadwood_v1' then 'deadwood_segmentation'
+          when 'treecover' then 'forest_cover_segmentation' when 'treecover_v1' then 'forest_cover_segmentation'
+          when 'treecover_segmentation' then 'forest_cover_segmentation'
+          when 'deadwood_treecover_combined_v2' then 'deadwood_treecover_combined_segmentation'
+          when 'aoi_v1' then 'aoi_segmentation' when 'embeddings_v1' then 'embedding_processing'
+          when 'doy_estimation_v1' then 'doy_estimation' when 'georef_check_v1' then 'georef_check'
+          when 'processing' then 'unknown' else raw end
+         from (select lower(coalesce(nullif(s.error_stage,''),
+          substring(s.error_message from '^Processing container crashed during (\w+)'),
+          substring(s.error_message from '^(\w+) processing failed'),
+          case when s.error_message ~* '^(ODM processing failed|No raw_images entry|No supported images|Invalid ZIP|Unsupported ZIP|Bad CRC|Bad magic number)'
+           then 'odm_processing' end,
+          'unknown')) as raw) r) as stage,
+        coalesce(nullif(left(btrim(regexp_replace(split_part(split_part(split_part(
+          regexp_replace(coalesce(s.error_message,''),'^((\w+ )?processing failed: )+',''),
+          E'\n',1),'. ',1),' stdout',1),'[0-9]{4,}','#','g')),80),''), 'unknown') as kind
+      from v2_statuses s
+      join v2_datasets d on d.id = s.dataset_id
+      where s.has_error and not d.archived
+    ) f
+    group by stage, kind
+  ) g
 ), trust as (
   select jsonb_build_object(
-    'audits_reviewed_7d', (select count(*) from dataset_audit where reviewed_at >= now() - interval '7 days'),
-    'audits_with_major_issue', (select count(*) from dataset_audit where has_major_issue),
+    -- Audit Review: datasets a reviewer gave an evaluation decision in 7 days, and the excluded ones
+    'audits_reviewed_7d', (
+      select count(distinct dataset_id)
+      from audit.dataset_human_reviews
+      where check_key = 'dataset_evaluation' and decision is not null and created_at >= now() - interval '7 days'
+    ),
+    'datasets_excluded', (select count(*) from audit.excluded_dataset_ids()),
     'open_flags', (select count(*) from dataset_flags where status is distinct from 'resolved'),
     'flags_created_7d', (select count(*) from dataset_flags where created_at >= now() - interval '7 days'),
     'reference_patches_total', (select count(*) from reference_patches),
@@ -156,9 +213,10 @@ select jsonb_build_object(
   'processing', processing.data,
   'queue', queue.data,
   'trust', trust.data,
-  'impact', impact.data
+  'impact', impact.data,
+  'failures', failures.data
 ) as scorecard
-from input, processing, queue, trust, impact;
+from input, processing, queue, failures, trust, impact;
 """.strip()
 
 
@@ -284,7 +342,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
 			'',
 			'## Trust',
 			f"- audits reviewed 7d: `{trust['audits_reviewed_7d']}`",
-			f"- audits with major issue: `{trust['audits_with_major_issue']}`",
+			f"- datasets excluded by the audit: `{trust['datasets_excluded']}`",
 			f"- open flags: `{trust['open_flags']}`; flags created 7d `{trust['flags_created_7d']}`",
 			f"- reference patches: `{trust['reference_patches_validated_both']}` validated both / `{trust['reference_patches_total']}` total",
 			f"- reference patches created 7d: `{trust['reference_patches_created_7d']}`",

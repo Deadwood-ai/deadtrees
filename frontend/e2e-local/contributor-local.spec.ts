@@ -175,6 +175,10 @@ test.describe("contributor local e2e", () => {
     await expect(error).toContainText("only contains multispectral band images");
     await expect(modal.locator(".ant-upload-list-item")).toHaveCount(0);
 
+    await input.setInputFiles(path.resolve(__dirname, "../test/fixtures/photo-gps/no-gps-flight.zip"));
+    await expect(error).toContainText("None of the checked photos in this ZIP has a GPS position");
+    await expect(modal.locator(".ant-upload-list-item")).toHaveCount(0);
+
     await input.setInputFiles(
       path.resolve(__dirname, "../test/fixtures/geotiff/upload-validation/no-crs-coordinates-real-crop.tif"),
     );
@@ -316,6 +320,7 @@ test.describe("contributor local e2e", () => {
           "deadwood_treecover_combined_v2",
           "embeddings_v1",
           "doy_estimation_v1",
+          "georef_check_v1",
         ],
         priority: 4,
       });

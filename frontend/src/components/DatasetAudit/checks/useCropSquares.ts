@@ -6,26 +6,21 @@ import GeoJSON from "ol/format/GeoJSON";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style, Text } from "ol/style";
-import type { IAuditCrop } from "../../../types/auditChecks";
+import type { IAuditTile } from "../../../types/auditChecks";
 
 const format = new GeoJSON({ dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" });
 const CROP_COLOR = "#7fd3e6";
-/** A crop the check counted major: orange and dashed, so it does not rest on colour alone
- * (red and green look alike to many people). */
-const FLAGGED_COLOR = "#ff8a00";
 
 interface UseCropSquaresOptions {
 	map: OLMap | null;
 	/** the crops in display order; their number is the position + 1 */
-	crops: IAuditCrop[] | null;
+	crops: IAuditTile[] | null;
 	selectedId: number | null;
-	/** crops the check counted major: drawn orange, thicker and dashed */
-	flagged?: Set<number>;
 	onSelect: (cropId: number) => void;
 }
 
 /** The crops a check judged as numbered squares on the audit map; a click selects one. */
-export function useCropSquares({ map, crops, selectedId, flagged, onSelect }: UseCropSquaresOptions) {
+export function useCropSquares({ map, crops, selectedId, onSelect }: UseCropSquaresOptions) {
 	const layerRef = useRef<VectorLayer<VectorSource> | null>(null);
 	const [epoch, setEpoch] = useState(0);
 	const onSelectRef = useRef(onSelect);
@@ -60,16 +55,15 @@ export function useCropSquares({ map, crops, selectedId, flagged, onSelect }: Us
 			crops.map((crop, i) => {
 				const feature = format.readFeature(crop.geometry) as Feature;
 				const selected = crop.id === selectedId;
-				const marked = !!flagged?.has(crop.id);
-				const color = selected ? "#ffffff" : marked ? FLAGGED_COLOR : CROP_COLOR;
+				const color = selected ? "#ffffff" : CROP_COLOR;
 				feature.set("cropId", crop.id);
 				feature.setStyle(
 					new Style({
 						// a near-transparent fill keeps the whole square clickable
 						fill: new Fill({ color: selected ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.01)" }),
-						stroke: new Stroke({ color, width: selected ? 4 : marked ? 3 : 2, lineDash: marked && !selected ? [10, 6] : undefined }),
+						stroke: new Stroke({ color, width: selected ? 4 : 2 }),
 						text: new Text({
-							text: marked ? `${i + 1} !` : String(i + 1),
+							text: String(i + 1),
 							font: "bold 14px system-ui, sans-serif",
 							fill: new Fill({ color: "#fff" }),
 							stroke: new Stroke({ color: "rgba(0,0,0,0.6)", width: 3 }),
@@ -79,11 +73,11 @@ export function useCropSquares({ map, crops, selectedId, flagged, onSelect }: Us
 				return feature;
 			}),
 		);
-	}, [epoch, crops, selectedId, flagged]);
+	}, [epoch, crops, selectedId]);
 }
 
 /** Zoom the map to one crop, keeping some context around it. */
-export function zoomToCrop(map: OLMap | null, crop: IAuditCrop | undefined) {
+export function zoomToCrop(map: OLMap | null, crop: IAuditTile | undefined) {
 	if (!map || !crop) return;
 	const geometry = format.readGeometry(crop.geometry);
 	if (!geometry) return;

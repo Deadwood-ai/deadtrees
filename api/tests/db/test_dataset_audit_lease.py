@@ -1,4 +1,5 @@
-"""Audit lease contracts on isolated PostgreSQL: claim, renew, expiry, release and save guard."""
+"""Audit lease contracts on isolated PostgreSQL: claim, renew, expiry, release and the guard on audit edits
+(manual AOIs, flags and corrections; the Audit Review stores insert-only reviews without a lease)."""
 import json
 import threading
 import time
@@ -215,42 +216,6 @@ def expect_write_rejected(db, statement, params):
 	db.execute('ROLLBACK TO SAVEPOINT rejected_write')
 
 
-def test_only_the_lease_page_can_write_the_audit(lease_db):
-	db = lease_db
-	owner, first, second = create_user(db, False), create_user(db, True), create_user(db, True)
-	dataset = create_dataset(db, owner)
-	first_page, other_tab = uuid.uuid4(), uuid.uuid4()
-	act_as(db, first)
-	claim(db, dataset, first_page)
-	act_as(db, first, lease=first_page)
-	db.execute("INSERT INTO public.dataset_audit(dataset_id,audited_by,notes) VALUES (%s,%s,'first saved')", (dataset, first))
-
-	update = "UPDATE public.dataset_audit SET notes='overwritten' WHERE dataset_id=%s"
-	act_as(db, second, lease=first_page)
-	expect_write_rejected(db, update, (dataset,))
-	act_as(db, first)
-	expect_write_rejected(db, update, (dataset,))
-	act_as(db, first, lease=other_tab)
-	expect_write_rejected(db, update, (dataset,))
-
-	# The lease page saves and marks reviewed.
-	act_as(db, first, lease=first_page)
-	db.execute('UPDATE public.dataset_audit SET reviewed_at=now(),reviewed_by=%s WHERE dataset_id=%s', (first, dataset))
-
-	# After a takeover by the holder's new page, the old page is stale.
-	act_as(db, first)
-	claim(db, dataset, other_tab, take_over=True)
-	act_as(db, first, lease=first_page)
-	expect_write_rejected(db, update, (dataset,))
-
-	# Once the lease expires unclaimed, saving is no longer blocked.
-	expire_lease(db, dataset)
-	act_as(db, second)
-	db.execute("UPDATE public.dataset_audit SET notes='second saved' WHERE dataset_id=%s", (dataset,))
-	as_admin(db)
-	assert db.execute('SELECT notes FROM public.dataset_audit WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 'second saved'
-
-
 GEOMETRY = json.dumps({'type': 'MultiPolygon', 'coordinates': [[[[13.4, 52.5], [13.4, 52.6], [13.5, 52.6], [13.4, 52.5]]]]})
 # shared.models.aoi_insert_payload omits `source`; the processor and owner label uploads send this shape.
 INSERT_AOI_WITHOUT_SOURCE = (
@@ -325,52 +290,6 @@ def test_processor_and_owner_aoi_writes_are_not_audit_edits(lease_db, processor_
 	db.execute('DELETE FROM public.v2_aois WHERE id=%s', (upload,))
 
 
-def test_stale_page_cannot_delete_the_audit(lease_db):
-	db = lease_db
-	owner, auditor = create_user(db, False), create_user(db, True)
-	dataset = create_dataset(db, owner)
-	page = uuid.uuid4()
-	act_as(db, auditor)
-	claim(db, dataset, page)
-	act_as(db, auditor, lease=page)
-	db.execute("INSERT INTO public.dataset_audit(dataset_id,audited_by,notes) VALUES (%s,%s,'saved')", (dataset, auditor))
-
-	delete = 'DELETE FROM public.dataset_audit WHERE dataset_id=%s'
-	act_as(db, auditor, lease=uuid.uuid4())
-	expect_write_rejected(db, delete, (dataset,))
-	act_as(db, auditor)
-	expect_write_rejected(db, delete, (dataset,))
-	act_as(db, auditor, lease=page)
-	assert db.execute(delete + ' RETURNING dataset_id', (dataset,)).fetchone()[0] == dataset
-
-
-def test_stale_page_cannot_move_a_leased_audit_to_another_dataset(lease_db):
-	db = lease_db
-	owner, auditor = create_user(db, False), create_user(db, True)
-	leased, unlocked = create_dataset(db, owner), create_dataset(db, owner)
-	page = uuid.uuid4()
-	act_as(db, auditor)
-	claim(db, leased, page)
-	act_as(db, auditor, lease=page)
-	db.execute("INSERT INTO public.dataset_audit(dataset_id,audited_by,notes) VALUES (%s,%s,'saved')", (leased, auditor))
-
-	move = 'UPDATE public.dataset_audit SET dataset_id=%s WHERE dataset_id=%s'
-	for lease in (uuid.uuid4(), None, page):
-		act_as(db, auditor, lease=lease)
-		db.execute('SAVEPOINT move_audit')
-		with pytest.raises(psycopg.errors.InsufficientPrivilege):
-			db.execute(move, (unlocked, leased))
-		db.execute('ROLLBACK TO SAVEPOINT move_audit')
-
-	# Ordinary saves from the lease page still work; service-role maintenance may still move rows.
-	act_as(db, auditor, lease=page)
-	db.execute("UPDATE public.dataset_audit SET notes='resaved' WHERE dataset_id=%s", (leased,))
-	as_admin(db)
-	assert db.execute('SELECT notes FROM public.dataset_audit WHERE dataset_id=%s', (leased,)).fetchone()[0] == 'resaved'
-	db.execute(move, (unlocked, leased))
-	assert db.execute('SELECT dataset_id FROM public.dataset_audit WHERE dataset_id=%s', (unlocked,)).fetchone()[0] == unlocked
-
-
 POLYGON = {'type': 'Polygon', 'coordinates': [[[13.4, 52.5], [13.4, 52.6], [13.5, 52.6], [13.4, 52.5]]]}
 
 
@@ -395,9 +314,10 @@ def save_correction(db, dataset, label, user):
 	).fetchone()[0]
 
 
-def test_stale_page_cannot_review_flags_or_corrections_right_after_takeover(lease_db):
+def test_flags_and_corrections_are_reviewed_while_another_page_holds_the_lease(lease_db):
+	"""User reports and suggested edits are not part of the audit (Edits & flags page): no lease guards them."""
 	db = lease_db
-	owner, auditor = create_user(db, False), create_user(db, True)
+	owner, auditor, other_auditor = create_user(db, False), create_user(db, True), create_user(db, True)
 	dataset, other_dataset = create_dataset(db, owner), create_dataset(db, owner)
 	label = create_deadwood_prediction(db, dataset, owner)
 	flag = db.execute(
@@ -405,11 +325,9 @@ def test_stale_page_cannot_review_flags_or_corrections_right_after_takeover(leas
 		"VALUES (%s,%s,true,false,'blurry','open') RETURNING id",
 		(dataset, owner),
 	).fetchone()[0]
-	old_page, new_page = uuid.uuid4(), uuid.uuid4()
-	act_as(db, auditor)
-	claim(db, dataset, old_page)
+	act_as(db, other_auditor)
+	claim(db, dataset, uuid.uuid4())
 
-	# The owner (not an auditor) can still propose corrections while the dataset is audited.
 	act_as(db, owner)
 	assert save_correction(db, dataset, label, owner) is True
 	as_admin(db)
@@ -417,45 +335,18 @@ def test_stale_page_cannot_review_flags_or_corrections_right_after_takeover(leas
 		"SELECT id FROM public.v2_geometry_corrections WHERE dataset_id=%s AND review_status='pending'", (dataset,)
 	).fetchone()[0]
 
-	# Another tab of the auditor takes over; the old page has not renewed yet.
 	act_as(db, auditor)
-	claim(db, dataset, new_page, take_over=True)
+	db.execute("SELECT public.update_flag_status(%s,'acknowledged')", (flag,))
+	assert db.execute('SELECT public.approve_correction(%s,%s)', (pending, auditor)).fetchone()[0] is True
+	assert save_correction(db, dataset, label, auditor) is True
 
-	stale_writes = [
-		("SELECT public.update_flag_status(%s,'acknowledged')", (flag,)),
-		("SELECT public.approve_correction(%s,%s)", (pending, auditor)),
-		("SELECT public.revert_correction(%s,%s)", (pending, auditor)),
-		(
-			"SELECT * FROM public.save_prediction_corrections(%s,%s,%s,'deadwood',%s,'{}'::bigint[],'{}'::timestamptz[],%s::jsonb)",
-			(dataset, label, auditor, uuid.uuid4(), json.dumps([{'geometry': POLYGON}])),
-		),
-	]
-	for lease in (old_page, None):
-		for statement, params in stale_writes:
-			act_as(db, auditor, lease=lease)
-			expect_write_rejected(db, statement, params)
-
-	# Recording the leased label's correction under another dataset id does not dodge the lease.
-	act_as(db, auditor, lease=old_page)
+	# a correction still records its label's dataset
 	db.execute('SAVEPOINT forged_dataset')
 	with pytest.raises(psycopg.errors.CheckViolation):
 		save_correction(db, other_dataset, label, auditor)
 	db.execute('ROLLBACK TO SAVEPOINT forged_dataset')
-
 	as_admin(db)
-	assert db.execute('SELECT status FROM public.dataset_flags WHERE id=%s', (flag,)).fetchone()[0] == 'open'
-	assert db.execute('SELECT review_status FROM public.v2_geometry_corrections WHERE id=%s', (pending,)).fetchone()[0] == 'pending'
-
-	# The page that now holds the lease reviews normally.
-	act_as(db, auditor, lease=new_page)
-	db.execute("SELECT public.update_flag_status(%s,'acknowledged')", (flag,))
-	assert db.execute('SELECT public.approve_correction(%s,%s)', (pending, auditor)).fetchone()[0] is True
-
-	# Once released, the auditor's own edits from the dataset page (no audit page) work again.
-	act_as(db, auditor)
-	release(db, dataset, new_page)
-	act_as(db, auditor)
-	assert save_correction(db, dataset, label, auditor) is True
+	assert db.execute('SELECT status FROM public.dataset_flags WHERE id=%s', (flag,)).fetchone()[0] == 'acknowledged'
 
 
 def test_lease_works_for_dataset_ids_beyond_32_bits(lease_db):
@@ -471,10 +362,8 @@ def test_lease_works_for_dataset_ids_beyond_32_bits(lease_db):
 
 	act_as(db, auditor)
 	assert claim(db, dataset, page)['acquired'] is True
-	act_as(db, auditor, lease=page)
-	db.execute("INSERT INTO public.dataset_audit(dataset_id,audited_by,notes) VALUES (%s,%s,'saved')", (dataset, auditor))
 	act_as(db, auditor, lease=uuid.uuid4())
-	expect_write_rejected(db, 'DELETE FROM public.dataset_audit WHERE dataset_id=%s', (dataset,))
+	expect_write_rejected(db, INSERT_MANUAL_AOI, (dataset, auditor, GEOMETRY))
 	act_as(db, auditor)
 	release(db, dataset, page)
 	assert lock_row(db, dataset) is None
@@ -516,11 +405,14 @@ def committed_lease_dataset():
 			for user in (first, second):
 				admin.execute('INSERT INTO public.privileged_users(user_id,can_audit) VALUES (%s,true)', (user,))
 			dataset = create_dataset(admin, owner)
-			admin.execute("INSERT INTO public.dataset_audit(dataset_id,audited_by,notes) VALUES (%s,%s,'saved')", (dataset, first))
+			admin.execute(
+				"INSERT INTO public.v2_aois(dataset_id,user_id,geometry,source,notes) VALUES (%s,%s,%s::jsonb,'manual','saved')",
+				(dataset, first, GEOMETRY),
+			)
 			yield admin, dataset, first, second
 		finally:
 			if dataset:
-				for table in ('dataset_audit_locks', 'dataset_audit', 'v2_statuses'):
+				for table in ('dataset_audit_locks', 'v2_aois', 'v2_statuses'):
 					admin.execute(f'DELETE FROM public.{table} WHERE dataset_id=%s', (dataset,))
 				admin.execute('DELETE FROM public.v2_datasets WHERE id=%s', (dataset,))
 			admin.execute('DELETE FROM public.privileged_users WHERE user_id = ANY(%s)', ([first, second],))
@@ -556,7 +448,7 @@ def claim_and_commit(user, dataset, lease, take_over):
 
 
 @pytest.mark.parametrize('handover', ['same_auditor_takeover', 'other_auditor_claims_expired_lease'])
-def test_lease_handover_waits_for_an_in_flight_audit_write(committed_lease_dataset, handover):
+def test_lease_handover_waits_for_an_in_flight_audit_edit(committed_lease_dataset, handover):
 	admin, dataset, first, second = committed_lease_dataset
 	old_page, new_page = uuid.uuid4(), uuid.uuid4()
 	with page_connection() as conn:
@@ -570,22 +462,22 @@ def test_lease_handover_waits_for_an_in_flight_audit_write(committed_lease_datas
 
 	with page_connection() as writer:
 		act_as(writer, first, lease=old_page)
-		writer.execute("UPDATE public.dataset_audit SET notes='old page' WHERE dataset_id=%s", (dataset,))
+		writer.execute("UPDATE public.v2_aois SET notes='old page' WHERE dataset_id=%s", (dataset,))
 
 		thread, outcome = run_blocked(lambda: claim_and_commit(claimant, dataset, new_page, take_over=True))
 		thread.join(timeout=1)
-		assert thread.is_alive(), 'the handover must wait for the in-flight audit write'
+		assert thread.is_alive(), 'the handover must wait for the in-flight audit edit'
 		write_committed_at = time.monotonic()
 		writer.commit()
 
 	thread.join(timeout=10)
 	assert outcome['result']['acquired'] is True
 	assert outcome['finished_at'] > write_committed_at
-	assert admin.execute('SELECT notes FROM public.dataset_audit WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 'old page'
+	assert admin.execute('SELECT notes FROM public.v2_aois WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 'old page'
 	assert admin.execute('SELECT holder_id,lease_id FROM public.dataset_audit_locks WHERE dataset_id=%s', (dataset,)).fetchone() == (claimant, new_page)
 
 
-def test_audit_write_waits_for_an_in_flight_takeover_and_is_then_rejected(committed_lease_dataset):
+def test_audit_edit_waits_for_an_in_flight_takeover_and_is_then_rejected(committed_lease_dataset):
 	admin, dataset, first, _ = committed_lease_dataset
 	old_page, new_page = uuid.uuid4(), uuid.uuid4()
 	with page_connection() as conn:
@@ -596,7 +488,7 @@ def test_audit_write_waits_for_an_in_flight_takeover_and_is_then_rejected(commit
 	def stale_write():
 		with page_connection() as writer:
 			act_as(writer, first, lease=old_page)
-			writer.execute("UPDATE public.dataset_audit SET notes='stale page' WHERE dataset_id=%s", (dataset,))
+			writer.execute("UPDATE public.v2_aois SET notes='stale page' WHERE dataset_id=%s", (dataset,))
 			writer.commit()
 
 	with page_connection() as claimer:
@@ -604,11 +496,11 @@ def test_audit_write_waits_for_an_in_flight_takeover_and_is_then_rejected(commit
 		assert claim(claimer, dataset, new_page, take_over=True)['acquired'] is True
 		thread, outcome = run_blocked(stale_write)
 		thread.join(timeout=1)
-		assert thread.is_alive(), 'the audit write must wait for the in-flight takeover'
+		assert thread.is_alive(), 'the audit edit must wait for the in-flight takeover'
 		takeover_committed_at = time.monotonic()
 		claimer.commit()
 
 	thread.join(timeout=10)
 	assert isinstance(outcome.get('error'), psycopg.errors.ObjectInUse)
 	assert outcome['finished_at'] > takeover_committed_at
-	assert admin.execute('SELECT notes FROM public.dataset_audit WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 'saved'
+	assert admin.execute('SELECT notes FROM public.v2_aois WHERE dataset_id=%s', (dataset,)).fetchone()[0] == 'saved'

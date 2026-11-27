@@ -40,7 +40,7 @@ const defaultNavigation = [
 // Additional navigation item for users who can audit
 const auditNavigation = {
   key: "/dataset-audit",
-  label: "Audit Datasets",
+  label: "Audit Panel",
 };
 
 // Internal operations workspace for users with the operator privilege

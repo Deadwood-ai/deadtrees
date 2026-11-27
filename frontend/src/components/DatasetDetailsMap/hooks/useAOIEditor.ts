@@ -6,11 +6,12 @@ import type Geometry from "ol/geom/Geometry";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Draw, Modify, Select } from "ol/interaction";
-import { click, shiftKeyOnly } from "ol/events/condition";
+import { click } from "ol/events/condition";
 import { Circle as CircleStyle, Fill, Stroke, Style } from "ol/style";
 
 import { mapColors } from "../../../theme/mapColors";
 import { palette } from "../../../theme/palette";
+import { EditorPolygonDraw } from "../../PolygonEditor/polygonFinishGuard";
 import {
 	clipAOIGeometries,
 	cutAOIGeometry,
@@ -180,10 +181,8 @@ export function useAOIEditor({
 		clearInteractions();
 		setEditableLayerVisibility(true);
 
-		const draw = new Draw({
+		const draw = new EditorPolygonDraw({
 			source,
-			type: "Polygon",
-			freehandCondition: shiftKeyOnly,
 			style: new Style({
 				stroke: new Stroke({
 					color: mapColors.aoi.stroke,
@@ -421,10 +420,8 @@ export function useAOIEditor({
 		select.setActive(false);
 		modifyInteractionRef.current?.setActive(false);
 
-		const draw = new Draw({
+		const draw = new EditorPolygonDraw({
 			source: new VectorSource<Feature<Geometry>>(),
-			type: "Polygon",
-			freehandCondition: shiftKeyOnly,
 			style: new Style({
 				stroke: new Stroke({ color: palette.state.selected, width: 3 }),
 				fill: new Fill({ color: "rgba(255, 200, 0, 0.35)" }),

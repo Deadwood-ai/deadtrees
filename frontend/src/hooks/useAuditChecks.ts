@@ -1,18 +1,24 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useCanAudit } from "./useUserPrivileges";
 import { fetchAuditImages } from "../api/auditImages";
 import { freshUntilExpiry, refreshBeforeExpiry } from "../utils/signedFilesGrant";
-import { mergeAnswers, runEvidence } from "../utils/auditChecks";
+import { unwrap } from "../utils/allRows";
 import type {
-  IAuditAnswerInput,
-  IAuditAssessment,
+  AuditCheckKey,
+  DatasetReviewInput,
   IAuditChecks,
-  IAuditCrop,
   IAuditImage,
-  IAuditQueueRow,
-  IAuditRun,
+  IAuditReviews,
+  IAuditTile,
+  ICurrentRun,
+  IDatasetJudgement,
+  IDatasetReview,
+  ITileCall,
+  ITileJudgement,
+  ITileReview,
+  TileReviewInput,
 } from "../types/auditChecks";
 
 export const audit = () => supabase.schema("audit");
@@ -20,62 +26,69 @@ export const audit = () => supabase.schema("audit");
 /** PostgREST answers this while the audit schema is not in its exposed schemas. */
 export const SCHEMA_NOT_EXPOSED = "PGRST106";
 
-/** The columns the page reads of an assessment; the model's raw reply stays on the server. The major
- * likelihood and the error modes come along so the page can mark the crops the check counted major
- * and say what each model saw in a crop (utils/cropCalls). */
-export const ASSESSMENT_COLUMNS =
-  "id, check_key, dataset_id, crop_id, run_id, layer, label_id, assessor_kind, assessor_user_id, model, prompt_version, assessor, verdict, major_likelihood, modes, reason_code, reason_text, details";
-export const QUEUE_COLUMNS = "dataset_id, check_key, layer, run_id, verdict, reason";
+export const CURRENT_RUN_COLUMNS = "dataset_id, check_key, run_id";
+export const IMAGE_COLUMNS = "id, run_id, dataset_id, tile_id, prediction_label_id, kind, storage_path, width, height";
+export const DATASET_JUDGEMENT_COLUMNS = "id, run_id, dataset_id, judge, verdict, cog_issue, thumbnail_issue, exclude_reason, summary";
+export const TILE_JUDGEMENT_COLUMNS = "id, run_id, tile_id, layer, judge, verdict, problems, summary";
+export const DATASET_REVIEW_COLUMNS =
+  "id, dataset_id, check_key, decision, exclude_reason, cog_issue, thumbnail_issue, georef_status, date_replace, note, in_benchmark, reviewed_by, created_at";
+/** The newest review per check, its id named as in the table. */
+export const CURRENT_REVIEW_COLUMNS =
+  "id:review_id, dataset_id, check_key, decision, exclude_reason, cog_issue, thumbnail_issue, georef_status, date_replace, note, in_benchmark, reviewed_by, created_at, stale";
+export const TILE_REVIEW_COLUMNS = "id, dataset_id, tile_id, layer, prediction_label_id, verdict, problems, note, in_benchmark, reviewed_by, created_at";
+
+/** Every query on audit.dataset_outcomes starts with this key, so an answer or a benchmark change refreshes them all. */
+export const AUDIT_RESULTS_KEY = ["audit-dataset-results"];
 
 export const auditChecksKey = (datasetId: number | undefined) => ["audit-checks", datasetId];
+export const auditReviewsKey = (datasetId: number | undefined) => ["audit-reviews", datasetId];
+export const benchmarkMembershipKey = (datasetId: number | undefined) => ["audit-benchmark-membership", datasetId];
 
-function unwrap<T>(result: { data: T[] | null; error: { code?: string; message: string } | null }): T[] {
-  if (result.error) throw result.error;
-  return result.data ?? [];
-}
+const NOTHING: IAuditChecks = { available: true, checks: {}, datasetJudgements: [], tileJudgements: [], evaluationJudgementId: null };
 
 async function loadAuditChecks(datasetId: number): Promise<IAuditChecks> {
-  const current = await audit().from("current_runs").select("run_id").eq("dataset_id", datasetId);
-  if (current.error?.code === SCHEMA_NOT_EXPOSED) return { available: false, checks: {}, people: [] };
-  const runIds = unwrap(current).map((c: { run_id: number }) => c.run_id);
+  const current = await audit().from("current_runs").select(CURRENT_RUN_COLUMNS).eq("dataset_id", datasetId);
+  if (current.error?.code === SCHEMA_NOT_EXPOSED) return { ...NOTHING, available: false };
+  const runs = unwrap(current) as ICurrentRun[];
   // most datasets have no check yet: one request tells
-  if (!runIds.length) return { available: true, checks: {}, people: [] };
-  const [runs, automated, queue, people, crops, images] = await Promise.all([
-    audit().from("runs").select("id, check_key, inputs, evidence, version:check_versions(config)").in("id", runIds),
-    audit().from("current_assessments").select(ASSESSMENT_COLUMNS).eq("dataset_id", datasetId),
-    audit().from("review_queue").select(QUEUE_COLUMNS).eq("dataset_id", datasetId),
-    audit()
-      .from("latest_assessments")
-      .select(ASSESSMENT_COLUMNS)
-      .eq("dataset_id", datasetId)
-      .eq("assessor_kind", "person")
-      .is("imported_from", null),
-    audit().from("crops").select("id, crop_sets, geometry, ortho_sha256").eq("dataset_id", datasetId),
-    audit().from("images").select("id, crop_id, label_id, kind, storage_path, width, height, ortho_sha256").eq("dataset_id", datasetId),
+  if (!runs.length) return NOTHING;
+  const runOf = (checkKey: AuditCheckKey) => runs.find((r) => r.check_key === checkKey)?.run_id ?? -1;
+  const [images, tiles, datasetJudgements, tileJudgements, evaluationCall] = await Promise.all([
+    audit().from("images").select(IMAGE_COLUMNS).in("run_id", runs.map((r) => r.run_id)).order("id"),
+    audit().from("tiles").select("id, dataset_id, geometry").eq("dataset_id", datasetId).order("id"),
+    audit().from("dataset_vlm_judgements").select(DATASET_JUDGEMENT_COLUMNS).eq("run_id", runOf("dataset_evaluation")),
+    audit().from("tile_vlm_judgements").select(TILE_JUDGEMENT_COLUMNS).eq("run_id", runOf("prediction_quality")),
+    audit().from("evaluation_calls").select("judgement_id").eq("dataset_id", datasetId),
   ]);
-  const dataset = {
-    automated: unwrap(automated) as IAuditAssessment[],
-    queue: unwrap(queue) as IAuditQueueRow[],
-    crops: unwrap(crops) as IAuditCrop[],
-    images: unwrap(images) as IAuditImage[],
-  };
+  const allImages = unwrap(images) as IAuditImage[];
+  const allTiles = unwrap(tiles) as IAuditTile[];
   const checks: IAuditChecks["checks"] = {};
-  // the embedded check version is one row (many-to-one), typed as a list by the client
-  for (const run of unwrap(runs) as unknown as IAuditRun[]) checks[run.check_key] = runEvidence(run, dataset);
-  return { available: true, checks, people: await withEmails(unwrap(people) as IAuditAssessment[]) };
+  for (const run of runs) {
+    // a run's images are its own; its tiles are the ones it cut images of
+    const own = allImages.filter((i) => i.run_id === run.run_id);
+    const tileIds = new Set(own.map((i) => i.tile_id));
+    checks[run.check_key] = { run, images: own, tiles: allTiles.filter((t) => tileIds.has(t.id)) };
+  }
+  return {
+    available: true,
+    checks,
+    datasetJudgements: unwrap(datasetJudgements) as IDatasetJudgement[],
+    tileJudgements: unwrap(tileJudgements) as ITileJudgement[],
+    evaluationJudgementId: (unwrap(evaluationCall) as { judgement_id: number | null }[])[0]?.judgement_id ?? null,
+  };
 }
 
-/** Reviewers' emails for their answers (get_user_emails answers auditors only); ids stay when it fails. */
-export async function withEmails(rows: IAuditAssessment[]): Promise<IAuditAssessment[]> {
-  const ids = [...new Set(rows.map((r) => r.assessor_user_id).filter((id): id is string => !!id))];
+/** Reviewers' emails on their answers (get_user_emails answers auditors only); ids stay when it fails. */
+export async function withEmails<T extends { reviewed_by: string | null }>(rows: T[]): Promise<(T & { reviewer_email?: string | null })[]> {
+  const ids = [...new Set(rows.map((r) => r.reviewed_by).filter((id): id is string => !!id))];
   if (!ids.length) return rows;
   const { data, error } = await supabase.rpc("get_user_emails", { p_user_ids: ids });
   if (error || !data) return rows;
   const emails = new Map((data as { user_id: string; email: string | null }[]).map((r) => [r.user_id, r.email]));
-  return rows.map((r) => ({ ...r, assessor_email: emails.get(r.assessor_user_id ?? "") ?? null }));
+  return rows.map((r) => ({ ...r, reviewer_email: emails.get(r.reviewed_by ?? "") ?? null }));
 }
 
-/** The dataset's automated audit checks, their evidence and people's answers (auditors only). */
+/** The dataset's automated audit checks: each current run's tiles, images and the models' answers (auditors only). */
 export function useAuditChecks(datasetId: number | undefined) {
   const { user } = useAuth();
   const { canAudit } = useCanAudit();
@@ -86,32 +99,67 @@ export function useAuditChecks(datasetId: number | undefined) {
   });
 }
 
-/** Store the signed-in auditor's answers (one dataset, one or more targets) as new person rows;
- * earlier answers stay as history. The loaded checks take the new rows without a reload. */
-export function useSaveAuditAnswers() {
+async function loadAuditReviews(datasetId: number): Promise<IAuditReviews> {
+  const [current, calls] = await Promise.all([
+    audit().from("current_dataset_human_reviews").select(CURRENT_REVIEW_COLUMNS).eq("dataset_id", datasetId),
+    audit().from("tile_calls").select("dataset_id, run_id, tile_id, layer, prediction_label_id, verdict, by_person, review_id, judgement_id").eq("dataset_id", datasetId),
+  ]);
+  if (current.error?.code === SCHEMA_NOT_EXPOSED) return { datasetReviews: [], tileCalls: [], tileReviews: [] };
+  const tileCalls = unwrap(calls) as ITileCall[];
+  const reviewIds = tileCalls.map((c) => c.review_id).filter((id): id is number => id !== null);
+  const tileReviews = reviewIds.length ? (unwrap(await audit().from("tile_human_reviews").select(TILE_REVIEW_COLUMNS).in("id", reviewIds)) as ITileReview[]) : [];
+  const [datasetReviews, namedTileReviews] = await Promise.all([withEmails(unwrap(current) as IDatasetReview[]), withEmails(tileReviews)]);
+  return { datasetReviews, tileCalls, tileReviews: namedTileReviews };
+}
+
+/** People's answers on the dataset as they count now, and the tile calls they decide (auditors only). */
+export function useAuditReviews(datasetId: number | undefined) {
+  const { user } = useAuth();
+  const { canAudit } = useCanAudit();
+  return useQuery({
+    queryKey: auditReviewsKey(datasetId),
+    queryFn: () => loadAuditReviews(datasetId!),
+    enabled: !!datasetId && !!user?.id && canAudit,
+  });
+}
+
+/** An answer changes the dataset's reviews, what it still needs, what it reports and its benchmark
+ * membership; resolves once the dataset's reviews are read again. */
+function refreshAfterAnswer(queryClient: QueryClient, datasetId: number) {
+  void queryClient.invalidateQueries({ queryKey: AUDIT_RESULTS_KEY });
+  void queryClient.invalidateQueries({ queryKey: benchmarkMembershipKey(datasetId) });
+  return queryClient.invalidateQueries({ queryKey: auditReviewsKey(datasetId) });
+}
+
+/** Stores answers on whole datasets as new reviews (the database adds who and the evidence);
+ * earlier ones stay as history, the newest counts. */
+export function useSaveDatasetReviews() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (answers: IAuditAnswerInput[]) => {
+    mutationFn: async (reviews: DatasetReviewInput[]) => {
       if (!user?.id) throw new Error("Sign in to answer");
-      const { data, error } = await audit()
-        .from("assessments")
-        // several rows in one insert: a column a row leaves out takes its database default, not null
-        .insert(
-          answers.map((answer) => ({ ...answer, assessor_kind: "person", assessor_user_id: user.id })),
-          { defaultToNull: false },
-        )
-        .select(ASSESSMENT_COLUMNS);
+      // several rows in one insert: a column a row leaves out takes its database default, not null
+      const { data, error } = await audit().from("dataset_human_reviews").insert(reviews, { defaultToNull: false }).select(DATASET_REVIEW_COLUMNS);
       if (error) throw error;
-      return (data as IAuditAssessment[]).map((row) => ({ ...row, assessor_email: user.email ?? null }));
+      return (data as IDatasetReview[]).map((row) => ({ ...row, reviewer_email: user.email ?? null }));
     },
-    onSuccess: async (rows, answers) => {
-      const key = auditChecksKey(answers[0].dataset_id);
-      // a reload that started before the insert would bring back the checks without the answer
-      await queryClient.cancelQueries({ queryKey: key });
-      queryClient.setQueryData<IAuditChecks>(key, (checks) => checks && { ...checks, people: mergeAnswers(checks.people, rows) });
-      queryClient.invalidateQueries({ queryKey: ["audit-check-queue"] });
+    onSuccess: (_, reviews) => refreshAfterAnswer(queryClient, reviews[0].dataset_id),
+  });
+}
+
+/** Stores an answer on a tile and layer as a new review; the newest on the same prediction counts. */
+export function useSaveTileReview() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (review: TileReviewInput) => {
+      if (!user?.id) throw new Error("Sign in to answer");
+      const { data, error } = await audit().from("tile_human_reviews").insert(review).select(TILE_REVIEW_COLUMNS).single();
+      if (error) throw error;
+      return { ...(data as ITileReview), reviewer_email: user.email ?? null };
     },
+    onSuccess: (_, review) => refreshAfterAnswer(queryClient, review.dataset_id),
   });
 }
 

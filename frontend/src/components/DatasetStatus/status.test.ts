@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   canOpenOwnerMap,
-  generatedOutputs,
+  imageCheck,
   needsAttention,
   processingStatus,
-  reviewStatus,
   statusSummary,
   type ContributorDataset,
   type QueueState,
@@ -22,11 +21,7 @@ const complete: ContributorDataset = {
   is_deadwood_done: true,
   is_forest_cover_done: true,
   cog_path: "12/ortho.tif",
-  thumbnail_path: "12/thumb.png",
-  has_deadwood_prediction: true,
-  has_forest_cover_prediction: true,
-  final_assessment: "no_issues",
-  audit_date: "2026-08-09T10:00:00Z",
+  audit_decision: "keep",
 };
 const emptyQueue: QueueState = { state: "loaded" };
 
@@ -95,79 +90,53 @@ describe("processing outcome", () => {
   });
 
   it("keeps completed processing while a review lock is active", () => {
-    expect(processingStatus({ ...complete, is_in_audit: true }, emptyQueue).label).toBe("Results ready");
     expect(processingStatus({ ...complete, current_status: "audit_in_progress" }, emptyQueue).label).toBe(
       "Results ready",
     );
   });
 });
 
-describe("generated outputs", () => {
-  it("reports each artifact independently and never treats the map as proof of predictions", () => {
-    const dataset = { ...complete, has_deadwood_prediction: false, has_forest_cover_prediction: null };
-    expect(generatedOutputs(dataset)).toEqual({ map: true, preview: true, deadwood: false, treecover: false });
-    expect(canOpenOwnerMap(dataset)).toBe(true);
-    expect(canOpenOwnerMap({ ...dataset, cog_path: null })).toBe(false);
+describe("map image", () => {
+  it("opens the map only when the map image exists", () => {
+    expect(canOpenOwnerMap(complete)).toBe(true);
+    expect(canOpenOwnerMap({ ...complete, cog_path: null })).toBe(false);
+    expect(canOpenOwnerMap({ ...complete, is_cog_done: false })).toBe(false);
   });
 });
 
-describe("review outcome", () => {
-  it("names the hidden layer instead of a generic findings label", () => {
-    expect(reviewStatus({ ...complete, deadwood_quality: "bad" }).label).toBe("Reviewed · deadwood layer hidden");
-    expect(reviewStatus({ ...complete, forest_cover_quality: "bad" }).label).toBe(
-      "Reviewed · tree cover layer hidden",
-    );
-    expect(reviewStatus({ ...complete, deadwood_quality: "bad", forest_cover_quality: "bad" }).label).toBe(
-      "Reviewed · analysis layers hidden",
-    );
-  });
-
-  it("surfaces image findings even when the dataset assessment was accepted", () => {
-    expect(reviewStatus({ ...complete, has_cog_issue: true }).label).toBe("Reviewed · see findings");
-    expect(reviewStatus({ ...complete, is_georeferenced: false }).label).toBe("Reviewed · see findings");
-    expect(reviewStatus(complete).label).toBe("Reviewed · accepted");
-  });
-
-  it("keeps review findings visible when later processing fails", () => {
-    const dataset = { ...complete, has_error: true, error_stage: "cog_processing", deadwood_quality: "bad" as const };
-    expect(reviewStatus(dataset).kind).toBe("findings");
-    expect(reviewStatus(dataset).date).toBe("9 Aug 2026");
+describe("image check", () => {
+  it("reads the dataset evaluation's decision", () => {
+    expect(imageCheck(complete)?.label).toBe("Image accepted");
+    expect(imageCheck({ ...complete, audit_decision: "exclude" })?.label).toBe("Excluded from public map");
+    expect(imageCheck({ ...complete, audit_decision: null })?.kind).toBe("pending");
   });
 
   it("separates exclusion from completed processing", () => {
-    const dataset = { ...complete, final_assessment: "exclude_completely" as const };
-    expect(processingStatus(dataset, emptyQueue).label).toBe("Results ready");
-    expect(reviewStatus(dataset).label).toBe("Excluded from public map");
+    expect(processingStatus({ ...complete, audit_decision: "exclude" }, emptyQueue).label).toBe("Results ready");
   });
 
-  it("recognizes the current audit lock and the legacy ready value", () => {
-    expect(reviewStatus({ ...complete, is_in_audit: true }).label).toBe("Review in progress");
-    expect(reviewStatus({ ...complete, final_assessment: "ready" }).label).toBe("Reviewed · accepted");
-    expect(reviewStatus({ ...complete, final_assessment: null }).label).toBe("Not yet reviewed");
+  it("says nothing about a check that cannot run without a map image", () => {
+    expect(imageCheck({ ...complete, audit_decision: null, cog_path: null })).toBeNull();
   });
 });
 
 describe("attention and summary", () => {
   it("asks for attention only where the details change what the contributor should rely on", () => {
-    const review = reviewStatus(complete);
-    expect(needsAttention(processingStatus(complete, emptyQueue), review)).toBe(false);
-    expect(needsAttention(processingStatus({ ...complete, has_error: true }, emptyQueue), review)).toBe(true);
-    expect(needsAttention(processingStatus(complete, { state: "loading" }), review)).toBe(false);
+    const check = imageCheck(complete);
+    expect(needsAttention(processingStatus(complete, emptyQueue), check)).toBe(false);
+    expect(needsAttention(processingStatus({ ...complete, has_error: true }, emptyQueue), check)).toBe(true);
+    expect(needsAttention(processingStatus(complete, { state: "loading" }), check)).toBe(false);
     expect(
-      needsAttention(processingStatus(complete, emptyQueue), reviewStatus({ ...complete, final_assessment: "exclude_completely" })),
+      needsAttention(processingStatus(complete, emptyQueue), imageCheck({ ...complete, audit_decision: "exclude" })),
     ).toBe(true);
-    expect(
-      needsAttention(processingStatus(complete, emptyQueue), reviewStatus({ ...complete, deadwood_quality: "bad" })),
-    ).toBe(false);
   });
 
-  it("never promises a retry, a follow-up, or that the review covered the failed run", () => {
+  it("never promises a retry or a follow-up", () => {
     const summary = statusSummary(
       { ...complete, has_error: true, error_stage: "deadwood_treecover_combined_v2" },
       emptyQueue,
     );
     expect(summary.headline).toContain("stopped during combined AI analysis");
-    expect(summary.headline).toContain("A quality review was recorded on 9 Aug 2026.");
     expect(summary.next).toContain("include dataset 12");
     for (const banned of ["retry", "working on it", "will follow up", "No action"]) {
       expect(`${summary.headline} ${summary.next}`.toLowerCase()).not.toContain(banned.toLowerCase());
@@ -188,8 +157,9 @@ describe("attention and summary", () => {
   });
 
   it("explains exclusion without naming who can fix it", () => {
-    const summary = statusSummary({ ...complete, final_assessment: "exclude_completely" }, emptyQueue);
-    expect(summary.headline).toContain("excluded it from the public map on 9 Aug 2026; it stays in your account");
-    expect(summary.next).toBe("The review findings below explain what a reviewer flagged.");
+    const summary = statusSummary({ ...complete, audit_decision: "exclude" }, emptyQueue);
+    expect(summary.headline).toContain("did not pass the quality check, so it is not on the public map");
+    expect(summary.headline).toContain("It stays in your account.");
+    expect(summary.next).toBeNull();
   });
 });

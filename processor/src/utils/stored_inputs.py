@@ -17,7 +17,7 @@ from shapely.geometry import shape
 from shared.logger import logger
 from shared.logging import LogContext
 from shared.models import Cog
-from shared.pagination import fetch_all_rows
+from shared.pagination import iter_pages_by_id
 from shared.settings import settings
 
 from .ssh import pull_file_from_storage_server
@@ -28,8 +28,9 @@ NO_ORTHO_HASH = 'dataset has no ortho with a sha256; run the ortho stage first'
 
 def select_aoi(aois: list[dict]) -> dict | None:
 	"""The AOI to work in: an auditor's AOI before the predicted one, newest
-	first; whole-image AOIs mean "no AOI"."""
-	usable = [a for a in aois if a.get('geometry') and not a.get('is_whole_image')]
+	first; whole-image AOIs and empty ones (the model found no usable area) mean
+	"no AOI", so the stages read the whole ortho."""
+	usable = [a for a in aois if (a.get('geometry') or {}).get('coordinates') and not a.get('is_whole_image')]
 	if not usable:
 		return None
 	usable.sort(key=lambda a: a.get('created_at') or '', reverse=True)
@@ -108,7 +109,7 @@ def stored_cog(client, dataset_id: int) -> Cog:
 
 
 def ortho_sha256(client, dataset_id: int) -> str:
-	"""The hash of the dataset's ortho: what an audit run's crops and images are stored under."""
+	"""The hash of the dataset's ortho: what an audit run judged (its inputs)."""
 	rows = client.table(settings.orthos_table).select('sha256').eq('dataset_id', dataset_id).execute().data
 	if not rows or not rows[0].get('sha256'):
 		raise ValueError(NO_ORTHO_HASH)
@@ -142,12 +143,10 @@ def read_geometry(value):
 def tile_rows(client, dataset_id: int) -> list[dict]:
 	"""The dataset's CLIP tiles (none before the embedding stage has run): id, pixel window
 	and the footprint as shapely."""
-	rows = fetch_all_rows(
-		lambda: (
-			client.table(settings.tile_embeddings_table)
-			.select('id,pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry')
-			.eq('dataset_id', dataset_id)
-			.order('id')
-		)
+	# Page by id through the (dataset_id, id) index. Ordered by id with only the dataset index,
+	# Postgres walked the primary key through other datasets' tiles.
+	pages = iter_pages_by_id(
+		lambda select: client.table(settings.tile_embeddings_table).select(select).eq('dataset_id', dataset_id),
+		'id,pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry',
 	)
-	return [{**row, 'geometry': read_geometry(row['geometry'])} for row in rows]
+	return [{**row, 'geometry': read_geometry(row['geometry'])} for page in pages for row in page]

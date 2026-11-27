@@ -1,4 +1,4 @@
-/** The few things an auditor reads off an orthophoto's technical metadata (v2_orthos.ortho_info,
+/** The few things an auditor reads off the map image's technical metadata (v2_cogs.cog_info,
  * as rio-cogeo reports it). Every fact is optional: older rows lack some keys. */
 export interface IImageFact {
   label: string;
@@ -19,8 +19,8 @@ function crsName(wkt: unknown): string | null {
   return match ? match[2] : null;
 }
 
-export function imageFacts(orthoInfo: unknown): IImageFact[] {
-  const info = record(orthoInfo);
+export function imageFacts(cogInfo: unknown): IImageFact[] {
+  const info = record(cogInfo);
   const profile = record(info.Profile);
   const geo = record(info.GEO);
   const facts: IImageFact[] = [];

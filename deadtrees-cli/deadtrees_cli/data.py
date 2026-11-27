@@ -35,6 +35,7 @@ from shared.upload_duplicates import (
 	reject_duplicate_upload,
 )
 from shared.logger import logger
+from shared.upload_validation import ensure_processable_upload
 
 # Python exits 1 on an uncaught exception and Fire exits 2 on a usage error, so
 # neither can mean "not uploaded".
@@ -203,12 +204,16 @@ class DataCommands:
 	):
 		"""Upload a dataset to the API
 
-		Raises DuplicateUploadError, before any bytes are sent, when the file is
+		Raises UnprocessableUploadError, before signing in or sending any bytes, when
+		the file breaks a rule the API would reject it for once uploaded (a ZIP without
+		usable photos or GPS positions, a GeoTIFF without a CRS). Raises
+		DuplicateUploadError, also before any bytes are sent, when the file is
 		already on the platform, unless allow_duplicate explicitly uploads it as a
 		new dataset anyway.
 		"""
-		token = self._ensure_auth()
 		file_path = Path(file_path)
+		ensure_processable_upload(file_path)
+		token = self._ensure_auth()
 		if not allow_duplicate:
 			reject_duplicate_upload(file_path, token)
 

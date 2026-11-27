@@ -72,8 +72,6 @@ interface BaseMapProps {
 
 	// Skip interaction handlers (when editing polygon corrections)
 	skipInteractions?: boolean;
-	// Allow rendering predictions even when audited as poor
-	allowBadQualityLayers?: boolean;
 	// Override which label ID to display (for auditor model variant switching)
 	deadwoodLabelIdOverride?: number | null;
 	forestCoverLabelIdOverride?: number | null;
@@ -103,7 +101,6 @@ export default function BaseMap({
 	onApproveCorrection,
 	onRevertCorrection,
 	skipInteractions = false,
-	allowBadQualityLayers = false,
 	deadwoodLabelIdOverride,
 	forestCoverLabelIdOverride,
 }: BaseMapProps) {
@@ -186,9 +183,6 @@ export default function BaseMap({
 		getDeadwoodVisible,
 		getForestCoverVisible,
 		opacity: layerOpacity,
-		deadwoodQuality: data?.deadwood_quality,
-		forestCoverQuality: data?.forest_cover_quality,
-		allowBadQualityLayers,
 	});
 
 	// Store layer refs for external access

@@ -1,10 +1,18 @@
-"""The judge prompt, answer parsing, and how several judges' answers combine.
+"""The judge prompt and answer parsing.
 
 Prompt v5 = the DT-1272 benchmark prompt v4 (failure modes m1-m7, no m8, lying wood never
 deadwood) with an area % next to each mode's likelihood, because adding the model's size to the
 likelihood ranked the reviewer's major crops better on the gold set (plan, session 4). Model
 calls are not made here: a backend is any function (prompt, images) -> answer text, so the
 subscription worker (DT-1482) and the benchmark harness share the same prompt and parser.
+
+Prompt v6 (DT-1560) adds each layer's share of the crop: a crop the forest fills shows a gold
+frame and tint without an inner edge, which the judges took for "no gold". It also splits gaps
+between crowns that the forest covers (m9, common in forest cover; Janusch, 16 Nov 2026) from
+non-tree areas marked as forest (m6); gaps alone make the forest layer minor at most
+(Janusch, 18 Nov 2026).
+
+Prompt v7 adds the verdict ambiguous, as reviewers answer it.
 """
 
 from __future__ import annotations
@@ -16,9 +24,9 @@ from typing import Callable, Sequence
 
 from PIL import Image
 
-PROMPT_VERSION = 'pq-v5'
+PROMPT_VERSION = 'pq-v7'
 LAYERS = ('deadwood', 'forest')
-VERDICTS = ('ok', 'minor', 'major')
+VERDICTS = ('ok', 'minor', 'major', 'ambiguous')
 MODES = {
 	'deadwood': {
 		'm1_dead_missed': 'Dead trees missed: clearly visible standing dead or dying trees (grey, white, burnt or brown), or large dead parts of crowns, have no blue.',
@@ -29,7 +37,8 @@ MODES = {
 	},
 	'forest': {
 		'm5_fc_trees_missed': 'Trees missed: clearly visible tree canopy has no gold.',
-		'm6_fc_on_non_trees': 'Non-trees marked as forest: gold covers shrubs, crops, grass, bare ground or roofs, or fills open gaps between crowns.',
+		'm6_fc_on_non_trees': 'Non-trees marked as forest: gold covers areas without trees, such as shrubs, fields, grass, bare ground, roads or roofs, outside the stand.',
+		'm9_fc_gaps_filled': 'Gaps not identified: gold also covers the open gaps between crowns inside a stand, where ground, grass or shadow shows between the trees.',
 		'm7_fc_artifact': 'Processing artifact in the forest layer: straight tile seams, rectangular holes or blocks, or the gold cut off or missing.',
 	},
 }
@@ -41,8 +50,11 @@ _MODE_JSON = {
 }
 
 PROMPT = f"""Aerial drone image crop, about 51 m by 51 m at about 5 cm per pixel. Image 1 is raw RGB,
-Image 2 the DEADWOOD prediction (blue fill with outline), Image 3 the FOREST prediction (gold).
+Image 2 the DEADWOOD prediction (blue fill with outline), Image 3 the FOREST prediction (gold
+fill with outline). A layer that reaches the crop border is outlined along the border too, so a
+crop the forest fills completely shows a gold frame and a gold tint everywhere.
 Darkened areas are outside the area of interest; ignore them.
+{{cover}}
 
 Rules: deadwood means standing dead trees and dead parts of standing trees (grey, white, brown
 or burnt crowns and branches); lying trunks, logs and debris are never deadwood. Forest means
@@ -56,15 +68,20 @@ raw image region by region, list the errors you see, then give the verdict for t
 - "minor": errors exist, but together they would not noticeably change the satellite cover here.
 - "major": all errors in this layer together would noticeably bias the satellite cover here, so
   this layer should be excluded.
-Count overlapping errors once.
+- "ambiguous": no one could reliably tell what is right here, e.g. the shrub to tree transition or
+  an unusual kind of dieback. Use it only then, not when you are merely unsure.
+Count overlapping errors once. Gaps between crowns that the forest covers (m9) are recorded but
+make the forest layer at most "minor": they never make it "major" on their own, so judge "major"
+only from the other forest errors.
 For each error type below, give its likelihood, 0 to 100, that the error is clearly present in the
 layer, and area_pct, the share of the whole crop it affects (0 if absent):
 {_MODE_LINES}
-Also give major_likelihood, 0 to 100, that the layer has a major error.
+Also give major_likelihood, 0 to 100, that the layer has a major error, and a summary: one
+sentence for data users on how well the layer fits the image, without pixel positions.
 
 Return only JSON: {{"assessable": true|false,
- "deadwood": {{"errors": ["..."], "modes": {_MODE_JSON['deadwood']}, "verdict": "ok|minor|major", "major_likelihood": n}},
- "forest": {{"errors": ["..."], "modes": {_MODE_JSON['forest']}, "verdict": "ok|minor|major", "major_likelihood": n}}}}"""
+ "deadwood": {{"errors": ["..."], "modes": {_MODE_JSON['deadwood']}, "verdict": "ok|minor|major|ambiguous", "major_likelihood": n, "summary": "..."}},
+ "forest": {{"errors": ["..."], "modes": {_MODE_JSON['forest']}, "verdict": "ok|minor|major|ambiguous", "major_likelihood": n, "summary": "..."}}}}"""
 
 Backend = Callable[[str, Sequence[Image.Image]], str]
 
@@ -79,6 +96,8 @@ class LayerAnswer:
 	major_likelihood: float
 	modes: dict = field(default_factory=dict)  # mode -> {'likelihood': float, 'area_pct': float}
 	errors: list = field(default_factory=list)
+	# one sentence for data users, without pixel positions (the dataset page shows it)
+	summary: str = ''
 
 	@property
 	def area_pct(self) -> float:
@@ -134,6 +153,7 @@ def parse(judge: str, text: str) -> Answer:
 			major_likelihood=_number(v.get('major_likelihood'), f'{layer} major_likelihood'),
 			modes=modes,
 			errors=[str(e)[:200] for e in (v.get('errors') if isinstance(v.get('errors'), list) else [])][:10],
+			summary=str(v.get('summary') or '').strip()[:300],
 		)
 	assessable = values.get('assessable', True)
 	if isinstance(assessable, str):
@@ -141,27 +161,30 @@ def parse(judge: str, text: str) -> Answer:
 	return Answer(judge=judge, assessable=bool(assessable), layers=layers, raw=text)
 
 
-def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: int = 1) -> Answer:
-	"""One judge on one crop; a malformed answer is retried, then raised."""
+def cover_line(cover: dict | None) -> str:
+	"""The layers' shares of the crop, measured on the masks the overlays are drawn from."""
+	if not cover:
+		return ''
+	return (
+		f'Measured on the predictions: deadwood covers {round(cover["deadwood"] * 100)}% of the crop, '
+		f'forest covers {round(cover["forest"] * 100)}%.'
+	)
+
+
+def prompt_for(cover: dict | None = None) -> str:
+	"""The prompt with the crop's measured layer shares."""
+	return PROMPT.replace('{cover}', cover_line(cover))
+
+
+def ask(judge: str, backend: Backend, images: Sequence[Image.Image], retries: int = 1, cover: dict | None = None) -> Answer:
+	"""One judge on one crop; a malformed answer is retried, then raised. `cover` holds each
+	layer's share of the crop (0-1), stated in the prompt."""
 	last = None
+	prompt = prompt_for(cover)
 	for _ in range(retries + 1):
-		text = backend(PROMPT, images)
+		text = backend(prompt, images)
 		try:
 			return parse(judge, text)
 		except AnswerError as e:
 			last = e
 	raise last
-
-
-def combined(answers: Sequence[Answer], layer: str) -> dict:
-	"""The judges' answers for one layer, averaged: what the dataset rule reads. A judge that
-	could not assess the crop does not count, whatever likelihood the reply format made it give."""
-	present = [a.layers[layer] for a in answers if a.assessable]
-	if not present:
-		return {'major_likelihood': None, 'area_pct': None, 'judges': 0}
-	n = len(present)
-	return {
-		'major_likelihood': sum(a.major_likelihood for a in present) / n,
-		'area_pct': sum(a.area_pct for a in present) / n,
-		'judges': n,
-	}

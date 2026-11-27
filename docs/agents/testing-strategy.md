@@ -253,5 +253,5 @@ This suite is intentionally opt-in and local-only. It creates unique local
 auditor and reporter Auth users, grants the auditor `can_audit`, seeds an
 auditable dataset with a local COG, opens the real audit page, acknowledges a
 user-reported flag through the `update_flag_status` RPC, draws an AOI, saves the
-audit, and asserts real local side effects in `dataset_audit`, `v2_aois`,
+audit, and asserts real local side effects in `audit.dataset_human_reviews`, `v2_aois`,
 `v2_statuses`, `dataset_flags`, and `dataset_flag_status_history`.

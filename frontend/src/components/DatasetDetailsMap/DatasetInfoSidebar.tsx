@@ -1,34 +1,23 @@
-import { Typography, Tooltip, Tag, Popover } from "antd";
-import { EnvironmentOutlined, CheckCircleOutlined, ExclamationCircleOutlined, WarningOutlined, ClockCircleOutlined } from "@ant-design/icons";
+import { Typography, Tooltip, Tag } from "antd";
+import { EnvironmentOutlined } from "@ant-design/icons";
 import type { IDataset } from "../../types/dataset";
-import type { PhenologyMetadata } from "../../types/phenology";
 import countryList from "../../utils/countryList";
 import { formatGroundResolution, formatOrthoFileSize, isGeonadirDataset, getTruncatedAuthorDisplay } from "../../utils/datasetUtils";
 import { sanitizeText } from "../../utils/textUtils";
 import PublicationLink from "../PublicationLink";
-import PhenologyBar from "../PhenologyBar/PhenologyBar";
 import DatasetNavigation from "./DatasetNavigation";
 import { palette } from "../../theme/palette";
 import { getBiomeEmoji, getBiomeTagColor, truncateBiomeLabel } from "../../utils/biomeDisplay";
-import { useAcquisitionDateDecisions, useAcquisitionDateEstimate } from "../../hooks/useAcquisitionDateEstimate";
-import {
-  datasetDateSuggestion,
-  decisionDistribution,
-  describeModelType,
-  formatDateParts,
-  formatIsoDate,
-  modelSuggestedDecision,
-} from "../../utils/acquisitionDate";
-import { formatAcquisitionDate } from "../DatasetAudit/auditConstants";
-import AcquisitionDateEvidence from "../AcquisitionDate/AcquisitionDateEvidence";
 import DatasetAccessSection from "../DatasetAccess/DatasetAccessSection";
 import { useDatasetGroundResolution } from "../../hooks/useDatasets";
+import { InlineSkeleton } from "../SectionStates";
+import { InfoRow } from "../DatasetQuality/InfoRow";
+import AcquisitionDateRows from "../DatasetQuality/AcquisitionDateRows";
+import PhenologyRow from "../DatasetQuality/PhenologyRow";
+import { GeorefRow, PredictionQuality } from "../DatasetQuality/AuditFindings";
 
 interface DatasetInfoSidebarProps {
   dataset: IDataset;
-  phenologyData: PhenologyMetadata | null | undefined;
-  isPhenologyLoading: boolean;
-  auditInfo: AuditInfo | null | undefined;
   overlappingDatasets: IDataset[];
   isLoadingOverlapping: boolean;
 }
@@ -41,116 +30,12 @@ const ResolutionRow = ({ datasetId }: { datasetId: number }) => {
   return (
     <InfoRow label="Resolution" tooltip="Ground size of one pixel of the uploaded orthophoto.">
       {isLoading ? (
-        <div className="h-4 w-16 animate-pulse rounded bg-gray-200" />
+        <InlineSkeleton label="Loading resolution" className="h-4 w-16" />
       ) : (
         <Typography.Text data-testid="dataset-ground-resolution">{formatGroundResolution(gsdCm)}</Typography.Text>
       )}
     </InfoRow>
   );
-};
-
-const pad2 = (v: number) => String(v).padStart(2, "0");
-const isoOf = (y: number | null, m: number | null, d: number | null) => (y && m && d ? `${y}-${pad2(m)}-${pad2(d)}` : null);
-
-/** Acquisition date with its provenance: a date that came from an accepted
- * model suggestion is marked as such, with the reported date and the evidence;
- * a pending suggestion (month missing, or imagery contradicting the reported
- * date) is shown next to the reported date. */
-const AcquisitionDateRows = ({ dataset, dateText }: { dataset: IDataset; dateText: string }) => {
-  const { data: estimate } = useAcquisitionDateEstimate(dataset.id);
-  const { data: decisions } = useAcquisitionDateDecisions(dataset.id);
-  const applied = modelSuggestedDecision(decisions, dataset);
-  const appliedEvidence = decisionDistribution(applied);
-  const suggestion = applied ? null : datasetDateSuggestion(estimate, dataset);
-  const reportedIso = isoOf(Number(dataset.aquisition_year), Number(dataset.aquisition_month) || null, Number(dataset.aquisition_day) || null);
-
-  return (
-    <>
-      <InfoRow label="Acquisition Date" tooltip={applied ? undefined : "Date when the drone imagery was captured."}>
-        <Typography.Text strong>{dateText}</Typography.Text>
-        {applied && (
-          <Popover
-            trigger="click"
-            title="Date suggested by the date model"
-            content={
-              appliedEvidence ? (
-                <AcquisitionDateEvidence
-                  distribution={appliedEvidence}
-                  reportedLabel={formatDateParts(applied.reported_year, applied.reported_month, applied.reported_day)}
-                  reportedIso={isoOf(applied.reported_year, applied.reported_month, applied.reported_day)}
-                  reason={applied.evidence}
-                  modelLabel={`${applied.estimate_model_version}, accepted ${applied.source === "automatic" ? "automatically" : "in the audit"} on ${formatIsoDate(applied.decided_at.slice(0, 10))}`}
-                />
-              ) : null
-            }
-          >
-            <Tag color="gold" className="cursor-pointer" style={{ marginLeft: 6, marginRight: 0 }}>
-              model-suggested
-            </Tag>
-          </Popover>
-        )}
-      </InfoRow>
-      {applied && (
-        <InfoRow label="Reported Date" tooltip="The date given at upload, replaced by the model's suggestion.">
-          <Typography.Text type="secondary">
-            {formatDateParts(applied.reported_year, applied.reported_month, applied.reported_day)}
-            {" · "}
-            {applied.evidence.suggestion_reason === "missing_month" ? "incomplete" : "contradicted by the imagery"}
-          </Typography.Text>
-        </InfoRow>
-      )}
-      {estimate && suggestion && (
-        <InfoRow label="Suggested Date">
-          <Popover
-            trigger="click"
-            title="Suggestion of the date model"
-            content={
-              <AcquisitionDateEvidence
-                distribution={estimate}
-                reportedLabel={formatAcquisitionDate(dataset)}
-                reportedIso={reportedIso}
-                reason={estimate}
-                modelLabel={`${estimate.model_version}, ${describeModelType(estimate)}`}
-              />
-            }
-          >
-            <Typography.Text className="cursor-pointer">
-              {suggestion.reason === "mismatch" && <WarningOutlined style={{ color: palette.state.warning, marginRight: 4 }} />}~
-              {formatIsoDate(suggestion.date, { day: "numeric", month: "long", year: "numeric" })}{" "}
-              <Typography.Text type="secondary" underline>
-                why?
-              </Typography.Text>
-            </Typography.Text>
-          </Popover>
-        </InfoRow>
-      )}
-    </>
-  );
-};
-
-interface InfoRowProps {
-  label: string;
-  children: React.ReactNode;
-  tooltip?: string;
-}
-
-const InfoRow = ({ label, children, tooltip }: InfoRowProps) => {
-  const content = (
-    <div className={`flex justify-between items-center gap-4 rounded hover:bg-black/5 transition-colors px-1 -mx-1 ${tooltip ? "cursor-help" : ""}`}>
-      <Typography.Text className="text-gray-600 shrink-0">{label}</Typography.Text>
-      <div className="text-right min-w-0">{children}</div>
-    </div>
-  );
-
-  if (tooltip) {
-    return (
-      <Tooltip title={tooltip} placement="left">
-        {content}
-      </Tooltip>
-    );
-  }
-
-  return content;
 };
 
 // Section container with consistent styling
@@ -160,128 +45,10 @@ const Section = ({ children, className = "" }: { children: React.ReactNode; clas
   </div>
 );
 
-// === Audit Info Components ===
-
-const qualityConfig = {
-  great: { icon: "🟢", label: "Great" },
-  sentinel_ok: { icon: "🟡", label: "OK" },
-  bad: { icon: "🔴", label: "Poor" },
-};
-
-const assessmentConfig = {
-  no_issues: {
-    icon: <CheckCircleOutlined />,
-    bgColor: "bg-green-100",
-    textColor: "text-green-700",
-    label: "Quality Verified",
-    rowLabel: "Ready",
-    rowIcon: "🟢",
-  },
-  fixable_issues: {
-    icon: <ExclamationCircleOutlined />,
-    bgColor: "bg-yellow-100",
-    textColor: "text-yellow-700",
-    label: "Has Fixable Issues",
-    rowLabel: "Fixable",
-    rowIcon: "🟡",
-  },
-  exclude_completely: {
-    icon: <WarningOutlined />,
-    bgColor: "bg-red-100",
-    textColor: "text-red-700",
-    label: "Excluded from Analysis",
-    rowLabel: "Excluded",
-    rowIcon: "🔴",
-  },
-};
-
-const tooltips = {
-  forestCover: "Quality of the AI tree cover segmentation. Great = highly accurate boundaries.",
-  deadwood: "Quality of the AI deadwood cover detection. Great = dead trees accurately identified.",
-  finalAssessment: "Overall quality assessment. Ready = suitable for analysis, Fixable = has correctable issues, Excluded = not suitable.",
-};
-
-interface QualityValueProps {
-  quality: string | null | undefined;
-}
-
-const QualityValue = ({ quality }: QualityValueProps) => {
-  const config = quality ? qualityConfig[quality as keyof typeof qualityConfig] : null;
-  if (!config) return <Typography.Text className="text-gray-400">—</Typography.Text>;
-
-  return (
-    <span className="flex items-center gap-1.5">
-      <Typography.Text>{config.label}</Typography.Text>
-      <span>{config.icon}</span>
-    </span>
-  );
-};
-
-interface AuditSectionProps {
-  audit: AuditInfo | null | undefined;
-}
-
-const AuditSection = ({ audit }: AuditSectionProps) => {
-  // Show pending state
-  if (!audit || !audit.final_assessment) {
-    return (
-      <Section>
-        <div className="flex items-center gap-2 text-gray-500">
-          <ClockCircleOutlined className="animate-pulse" />
-          <Typography.Text strong>Audit Pending</Typography.Text>
-        </div>
-        <Typography.Text className="text-xs text-gray-400">
-          Quality information will appear here once reviewed.
-        </Typography.Text>
-      </Section>
-    );
-  }
-
-  const config = assessmentConfig[audit.final_assessment as keyof typeof assessmentConfig] || assessmentConfig.no_issues;
-
-  return (
-    <div className="rounded-2xl border border-gray-200/60 bg-white overflow-hidden shadow-sm">
-      {/* Colored header */}
-      <div className={`${config.bgColor} px-5 py-3 flex items-center gap-2 ${config.textColor}`}>
-        {config.icon}
-        <Typography.Text strong className={config.textColor}>
-          {config.label}
-        </Typography.Text>
-      </div>
-
-      {/* Content rows */}
-      <div className="p-5 space-y-3">
-        <InfoRow label="Tree cover prediction" tooltip={tooltips.forestCover}>
-          <QualityValue quality={audit.forest_cover_quality} />
-        </InfoRow>
-        <InfoRow label="Deadwood cover prediction" tooltip={tooltips.deadwood}>
-          <QualityValue quality={audit.deadwood_quality} />
-        </InfoRow>
-        <InfoRow label="Final Assessment" tooltip={tooltips.finalAssessment}>
-          <span className="flex items-center gap-1.5">
-            <Typography.Text>{config.rowLabel}</Typography.Text>
-            <span>{config.rowIcon}</span>
-          </span>
-        </InfoRow>
-      </div>
-    </div>
-  );
-};
-
-type AuditInfo = {
-  final_assessment: "no_issues" | "fixable_issues" | "exclude_completely" | "ready" | null;
-  forest_cover_quality: "great" | "sentinel_ok" | "bad" | null;
-  deadwood_quality: "great" | "sentinel_ok" | "bad" | null;
-  has_valid_phenology: boolean | null | undefined;
-};
-
 // === Main Sidebar Component ===
 
 export default function DatasetInfoSidebar({
   dataset,
-  phenologyData,
-  isPhenologyLoading,
-  auditInfo,
   overlappingDatasets,
   isLoadingOverlapping,
 }: DatasetInfoSidebarProps) {
@@ -346,6 +113,9 @@ export default function DatasetInfoSidebar({
             })}
           </Typography.Text>
         </InfoRow>
+
+        {/* Visibility and sharing (owner, grantees, private-data operators) */}
+        <DatasetAccessSection dataset={dataset} />
       </Section>
 
       {/* Environmental Context */}
@@ -359,36 +129,11 @@ export default function DatasetInfoSidebar({
           </Tag>
         </InfoRow>
 
-        <AcquisitionDateRows
-          dataset={dataset}
-          dateText={new Date(
-            Number(dataset.aquisition_year),
-            dataset.aquisition_month ? Number(dataset.aquisition_month) - 1 : 0,
-            dataset.aquisition_day ? Number(dataset.aquisition_day) : 1
-          ).toLocaleDateString("en-US", {
-            year: "numeric",
-            ...(dataset.aquisition_month && { month: "long" }),
-            ...(dataset.aquisition_day && { day: "numeric" }),
-          })}
-        />
+        <AcquisitionDateRows dataset={dataset} />
 
-        <InfoRow label="Phenology">
-          <div className="w-[180px]">
-            {isPhenologyLoading ? (
-              <div className="h-4 w-full animate-pulse rounded bg-gray-200" />
-            ) : phenologyData ? (
-              <PhenologyBar
-                phenologyData={phenologyData}
-                acquisitionYear={dataset.aquisition_year}
-                acquisitionMonth={dataset.aquisition_month}
-                acquisitionDay={dataset.aquisition_day}
-                showTooltips={true}
-              />
-            ) : (
-              <Typography.Text className="text-gray-500">Not available</Typography.Text>
-            )}
-          </div>
-        </InfoRow>
+        <PhenologyRow dataset={dataset} />
+
+        <GeorefRow datasetId={dataset.id} />
       </Section>
 
       {/* Technical Info */}
@@ -405,8 +150,6 @@ export default function DatasetInfoSidebar({
         <ResolutionRow datasetId={dataset.id} />
       </Section>
 
-      {/* Visibility and sharing (owner, grantees, private-data operators) */}
-      <DatasetAccessSection dataset={dataset} />
 
       {/* Additional Information */}
       {dataset.additional_information && (
@@ -435,8 +178,11 @@ export default function DatasetInfoSidebar({
         </Section>
       )}
 
-      {/* Audit Info */}
-      <AuditSection audit={auditInfo} />
+
+      {/* Audit of the predictions */}
+      <Section>
+        <PredictionQuality datasetId={dataset.id} />
+      </Section>
 
       {/* Navigation */}
       {dataset.id && (

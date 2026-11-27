@@ -1,17 +1,12 @@
 import { Button, Tag } from "antd";
+import { CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 import {
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  ExclamationCircleOutlined,
-  SyncOutlined,
-} from "@ant-design/icons";
-import {
+  imageCheck,
   needsAttention,
   processingStatus,
-  reviewStatus,
   type ContributorDataset,
+  type ImageCheck,
   type QueueState,
-  type ReviewOutcome,
 } from "./status";
 
 interface StatusCellProps {
@@ -21,28 +16,21 @@ interface StatusCellProps {
   onDetails?: (trigger: HTMLElement) => void;
 }
 
-function reviewIcon(review: ReviewOutcome) {
-  switch (review.kind) {
-    case "in_progress":
-      return <SyncOutlined spin />;
-    case "none":
-      return <ClockCircleOutlined />;
-    case "accepted":
-      return <CheckCircleOutlined />;
-    default:
-      return <ExclamationCircleOutlined />;
-  }
-}
+const CHECK_ICONS: Record<ImageCheck["kind"], React.ReactNode> = {
+  pending: <ClockCircleOutlined />,
+  accepted: <CheckCircleOutlined />,
+  excluded: <ExclamationCircleOutlined />,
+};
 
 /**
- * Two-line status: the processing outcome on top, the quality review below it.
+ * Two-line status: the processing outcome on top, the image quality check below it.
  * Slot order carries the distinction visually; the sr-only labels carry it for
  * assistive technology.
  */
 export default function StatusCell({ dataset, queue, onDetails }: StatusCellProps) {
   const processing = processingStatus(dataset, queue);
-  const review = reviewStatus(dataset);
-  const attention = needsAttention(processing, review);
+  const check = imageCheck(dataset);
+  const attention = needsAttention(processing, check);
   return (
     <div className="py-0.5" data-testid={`dataset-status-${dataset.id}`}>
       <div data-testid={`dataset-processing-${dataset.id}`}>
@@ -52,17 +40,19 @@ export default function StatusCell({ dataset, queue, onDetails }: StatusCellProp
         </Tag>
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-        <span
-          className="inline-flex items-center gap-1"
-          style={{ color: review.color }}
-          data-testid={`dataset-review-${dataset.id}`}
-        >
-          {reviewIcon(review)}
-          <span>
-            <span className="sr-only">Quality review: </span>
-            {review.label}
+        {check && (
+          <span
+            className="inline-flex items-center gap-1"
+            style={{ color: check.color }}
+            data-testid={`dataset-image-check-${dataset.id}`}
+          >
+            {CHECK_ICONS[check.kind]}
+            <span>
+              <span className="sr-only">Image quality: </span>
+              {check.label}
+            </span>
           </span>
-        </span>
+        )}
         {onDetails && (
           <Button
             type="link"

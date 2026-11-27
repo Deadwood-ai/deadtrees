@@ -1,240 +1,128 @@
-"""Open benchmark versions: operators add targets, auditors label them, truth carries over between versions."""
-
-from pathlib import Path
+"""Benchmarks are the in_benchmark tick on a person's review: operators draw random targets
+(audit.draw_target), label them with a plain insert and take them out again
+(audit.remove_benchmark_target). See docs/audit-checks.md, Benchmarks."""
 
 import psycopg
-import pytest
 
 from api.tests.db.test_acquisition_date_estimates import act_as, as_admin, create_dataset, create_user, db  # noqa: F401
-from api.tests.db.test_audit_checks import create_crop, create_off_grid_crop, create_operator, person_row
-
-MIGRATION = Path(__file__).parents[3] / 'supabase' / 'migrations' / '20261113150000_open_benchmark_versions.sql'
-
-
-def other_side(db, dataset):
-	"""The split the hash does not give the dataset, as a frozen set may have it."""
-	hashed = db.execute('SELECT audit.benchmark_split(%s)', (dataset,)).fetchone()[0]
-	return 'dev' if hashed == 'holdout' else 'holdout'
-
-
-def benchmark(db, check='prediction_quality', name='pq-gold-dt1272', version='v1'):
-	as_admin(db)
-	return db.execute(
-		'INSERT INTO audit.benchmarks(check_key,name,version) VALUES (%s,%s,%s) RETURNING id', (check, name, version)
-	).fetchone()[0]
+from api.tests.db.test_audit_checks import (
+	add_labels,
+	create_operator,
+	create_run,
+	dataset_judgement,
+	finish,
+	pq_run,
+	raises,
+	register_version,
+	tile_ids,
+	tile_judgement,
+)
 
 
-def freeze(db, benchmark_id):
-	as_admin(db)
-	db.execute('UPDATE audit.benchmarks SET frozen_at=now() WHERE id=%s', (benchmark_id,))
-
-
-def member(db, benchmark_id, dataset, crop=None, split=None):
-	as_admin(db)
-	db.execute(
-		'INSERT INTO audit.benchmark_members(benchmark_id,dataset_id,crop_id,split) VALUES (%s,%s,%s,%s)',
-		(benchmark_id, dataset, crop, split),
-	)
-
-
-def add(db, user, dataset, crop=None, check='prediction_quality'):
+def draw(db, user, benchmark, skipped=()):
 	act_as(db, user)
-	row = db.execute(
-		'SELECT benchmark_id, dataset_id, crop_id, split, id FROM audit.add_benchmark_target(%s,%s,%s)',
-		(check, dataset, crop),
-	).fetchone()
-	as_admin(db)
-	return row
-
-
-def test_operators_add_a_crop_to_the_open_version_on_its_datasets_side(db):
-	operator, owner = create_operator(db), create_user(db)
-	known, new = create_dataset(db, owner), create_dataset(db, owner)
-	frozen_side = other_side(db, known)
-	v1 = benchmark(db)
-	member(db, v1, known, create_off_grid_crop(db, known), frozen_side)
-	freeze(db, v1)
-	v2 = benchmark(db, version='v2')
-
-	crop, fresh = create_crop(db, known), create_crop(db, new)
-	# the dataset keeps the side the frozen set gave it, a new dataset gets the hash
-	assert add(db, operator, known, crop)[:4] == (v2, known, crop, frozen_side)
-	hashed = db.execute('SELECT audit.benchmark_split(%s)', (new,)).fetchone()[0]
-	assert add(db, operator, new, fresh)[:4] == (v2, new, fresh, hashed)
-	assert db.execute('SELECT crop_sets FROM audit.crops WHERE id=%s', (crop,)).fetchone() == (
-		['exclude', 'benchmark'],
-	)
-	# adding it again changes nothing and returns the same member
-	first = db.execute('SELECT id FROM audit.benchmark_members WHERE crop_id=%s', (crop,)).fetchone()[0]
-	assert add(db, operator, known, crop)[4] == first
-	assert db.execute('SELECT count(*) FROM audit.benchmark_members WHERE benchmark_id=%s', (v2,)).fetchone() == (2,)
-	assert db.execute('SELECT crop_sets FROM audit.crops WHERE id=%s', (crop,)).fetchone() == (
-		['exclude', 'benchmark'],
-	)
-
-
-def test_only_operators_add_and_only_to_an_open_version_of_matching_targets(db):
-	operator, auditor, owner = create_operator(db), create_user(db, can_audit=True), create_user(db)
-	dataset = create_dataset(db, owner)
-	crop = create_crop(db, dataset)
-	with pytest.raises(psycopg.errors.NoDataFound), db.transaction():
-		add(db, operator, dataset, crop)
-	benchmark(db)
-	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
-		add(db, auditor, dataset, crop)
-	add(db, operator, dataset, crop)
-	# a crop benchmark takes no whole datasets
-	with pytest.raises(psycopg.errors.CheckViolation), db.transaction():
-		add(db, operator, dataset)
-	# a crop belongs to its own dataset
-	with pytest.raises(psycopg.errors.ForeignKeyViolation), db.transaction():
-		add(db, operator, create_dataset(db, owner), crop)
-	# one open version per check: the next one waits until this one is frozen
-	with pytest.raises(psycopg.errors.UniqueViolation), db.transaction():
-		benchmark(db, version='v2')
-
-
-def test_datasets_join_the_open_dataset_evaluation_gold_set(db):
-	operator = create_operator(db)
-	dataset = create_dataset(db, create_user(db))
-	gold = db.execute(
-		"SELECT id FROM audit.benchmarks WHERE name='dataset-evaluation-gold' AND version='v1' AND frozen_at IS NULL"
-	).fetchone()[0]
-	hashed = db.execute('SELECT audit.benchmark_split(%s)', (dataset,)).fetchone()[0]
-	assert add(db, operator, dataset, check='dataset_evaluation')[:4] == (gold, dataset, None, hashed)
-
-
-def test_auditors_label_benchmark_crops_without_a_run_and_operators_alone_cannot(db):
-	auditor, operator, owner = create_user(db, can_audit=True), create_operator(db), create_user(db)
-	dataset = create_dataset(db, owner)
-	crop = create_crop(db, dataset)
-	benchmark(db)
-	add(db, operator, dataset, crop)
-	person_row(db, auditor, dataset, crop, 'major')
-	assert db.execute(
-		'SELECT verdict, run_id, imported_from FROM audit.latest_assessments WHERE crop_id=%s AND assessor_user_id=%s',
-		(crop, auditor),
-	).fetchone() == ('major', None, None)
-	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
-		person_row(db, operator, dataset, crop, 'ok')
-
-
-def seed_block():
-	"""The migration's v2 statement, run again on a database that has a v1."""
-	text = MIGRATION.read_text()
-	return text[text.index('with v1 as') : text.index('-- The dataset evaluation')]
-
-
-def test_v2_opens_with_v1s_crops_splits_and_truth(db):
-	auditor, owner = create_user(db, can_audit=True), create_user(db)
-	datasets = [create_dataset(db, owner) for _ in range(2)]
-	crops = [create_off_grid_crop(db, d) for d in datasets]
-	v1 = benchmark(db)
-	for dataset, crop in zip(datasets, crops):
-		member(db, v1, dataset, crop, other_side(db, dataset))
-		person_row(db, auditor, dataset, crop, 'minor')
-	freeze(db, v1)
-	db.execute(seed_block())
-	v2, frozen = db.execute(
-		"SELECT id, frozen_at FROM audit.benchmarks WHERE name='pq-gold-dt1272' AND version='v2'"
-	).fetchone()
-	assert frozen is None
-
-	def members(b):
-		return db.execute(
-			'SELECT dataset_id, crop_id, split FROM audit.benchmark_members WHERE benchmark_id=%s ORDER BY crop_id',
-			(b,),
-		).fetchall()
-
-	assert members(v2) == members(v1) and len(members(v2)) == 2
-	# truth is keyed by target, so the v1 answers are v2's truth too
-	assert db.execute(
-		'SELECT count(*) FROM audit.benchmark_members m JOIN audit.latest_assessments a ON a.crop_id = m.crop_id '
-		"WHERE m.benchmark_id=%s AND a.assessor_kind='person' AND a.imported_from IS NULL",
-		(v2,),
-	).fetchone() == (2,)
-	# a second run adds nothing
-	db.execute(seed_block())
-	assert len(members(v2)) == 2
-
-
-def remove(db, user, dataset, crop=None, check='prediction_quality'):
-	act_as(db, user)
-	rows = db.execute(
-		'SELECT dataset_id, crop_id, split FROM audit.remove_benchmark_target(%s,%s,%s) ORDER BY crop_id', (check, dataset, crop)
-	).fetchall()
+	rows = db.execute('SELECT dataset_id, tile_id FROM audit.draw_target(%s,%s)', (benchmark, list(skipped))).fetchall()
 	as_admin(db)
 	return rows
 
 
-def member_targets(db, benchmark_id):
-	return db.execute(
-		'SELECT dataset_id, crop_id FROM audit.benchmark_members WHERE benchmark_id=%s ORDER BY dataset_id, crop_id',
-		(benchmark_id,),
-	).fetchall()
+def label_tile(db, operator, dataset, tile_id, label, layer='deadwood', verdict='minor'):
+	act_as(db, operator)
+	db.execute(
+		'INSERT INTO audit.tile_human_reviews(dataset_id,tile_id,layer,prediction_label_id,verdict,in_benchmark) '
+		'VALUES (%s,%s,%s,%s,%s,true)',
+		(dataset, tile_id, layer, label, verdict),
+	)
+	as_admin(db)
 
 
-def test_operators_remove_a_crop_from_the_open_version_and_its_labels_stay(db):
-	operator, auditor, owner = create_operator(db), create_user(db, can_audit=True), create_user(db)
-	dataset = create_dataset(db, owner)
-	v1 = benchmark(db)
-	kept, dropped = create_crop(db, dataset), create_crop(db, dataset, x0=512)
-	for crop in (kept, dropped):
-		member(db, v1, dataset, crop)
-	freeze(db, v1)
-	v2 = benchmark(db, version='v2')
-	for crop in (kept, dropped):
-		add(db, operator, dataset, crop)
-	person_row(db, auditor, dataset, dropped, 'major')
-
-	split = db.execute('SELECT split FROM audit.benchmark_members WHERE benchmark_id=%s AND crop_id=%s', (v2, dropped)).fetchone()[0]
-	assert remove(db, operator, dataset, dropped) == [(dataset, dropped, split)]
-	assert member_targets(db, v2) == [(dataset, kept)]
-	# the frozen version and the label are untouched
-	assert len(member_targets(db, v1)) == 2
-	assert db.execute('SELECT count(*) FROM audit.assessments WHERE crop_id=%s', (dropped,)).fetchone()[0] == 1
-	# removing it again removes nothing; adding it back gives it its side again
-	assert remove(db, operator, dataset, dropped) == []
-	assert add(db, operator, dataset, dropped)[3] == split
+def label_dataset(db, operator, dataset, decision='keep'):
+	act_as(db, operator)
+	db.execute(
+		"INSERT INTO audit.dataset_human_reviews(dataset_id,check_key,decision,in_benchmark) VALUES (%s,'dataset_evaluation',%s,true)",
+		(dataset, decision),
+	)
+	as_admin(db)
 
 
-def test_removing_a_dataset_from_a_crop_benchmark_removes_all_its_crops(db):
+def only(db, datasets, check):
+	"""Keep the draw to these datasets: every other dataset's current run of the check goes."""
+	as_admin(db)
+	db.execute('DELETE FROM audit.runs WHERE check_key=%s AND NOT dataset_id = ANY(%s)', (check, list(datasets)))
+
+
+def test_a_tile_benchmark_draws_unticked_tiles_with_a_call_on_its_layer(db):
 	operator, owner = create_operator(db), create_user(db)
-	dataset, other = create_dataset(db, owner), create_dataset(db, owner)
-	v2 = benchmark(db, version='v2')
-	crops = [create_crop(db, dataset, x0=512 * i) for i in range(2)]
-	for crop in crops:
-		add(db, operator, dataset, crop)
-	survivor = create_crop(db, other)
-	add(db, operator, other, survivor)
+	dataset, excluded = create_dataset(db, owner), create_dataset(db, owner)
+	labels = add_labels(db, dataset)
+	version = register_version(db, version='pq-draw')
+	run = pq_run(
+		db,
+		dataset,
+		version,
+		labels,
+		[
+			tile_judgement(1, 'deadwood', 'haiku-5.5', 'ok'),
+			tile_judgement(2, 'deadwood', 'haiku-5.5', 'major'),
+			tile_judgement(3, 'deadwood', 'haiku-5.5', 'not_assessable'),  # no call
+			tile_judgement(3, 'forest_cover', 'haiku-5.5', 'ok'),
+		],
+	)
+	pq_run(db, excluded, version, add_labels(db, excluded), [tile_judgement(1, 'deadwood', 'haiku-5.5', 'ok')])
+	db.execute("INSERT INTO audit.legacy_decisions(dataset_id,decision,decided_at) VALUES (%s,'exclude',now())", (excluded,))
+	only(db, (dataset, excluded), 'prediction_quality')
+	first, second, third = tile_ids(db, run)
 
-	assert [r[1] for r in remove(db, operator, dataset)] == sorted(crops)
-	assert member_targets(db, v2) == [(other, survivor)]
+	assert {draw(db, operator, 'deadwood')[0] for _ in range(10)} <= {(dataset, first), (dataset, second)}
+	assert draw(db, operator, 'deadwood', [first]) == [(dataset, second)]
+	assert draw(db, operator, 'forest_cover') == [(dataset, third)]
+	# a labeled target is ticked and not drawn again; when nothing is left there is no row
+	label_tile(db, operator, dataset, second, labels['deadwood'])
+	assert draw(db, operator, 'deadwood', [first]) == []
+	# taking it out again clears the tick; the label stays a review of the tile
+	act_as(db, operator)
+	assert db.execute('SELECT audit.remove_benchmark_target(%s,%s,%s)', ('deadwood', dataset, second)).fetchone() == (1,)
+	as_admin(db)
+	assert db.execute(
+		'SELECT verdict::text, in_benchmark FROM audit.tile_human_reviews WHERE tile_id=%s', (second,)
+	).fetchall() == [('minor', False)]
+	assert draw(db, operator, 'deadwood', [first]) == [(dataset, second)]
 
 
-def test_a_dataset_leaves_the_dataset_evaluation_gold_set(db):
+def test_the_dataset_benchmark_draws_datasets_with_a_current_evaluation(db):
 	operator, owner = create_operator(db), create_user(db)
-	dataset = create_dataset(db, owner)
-	gold = db.execute(
-		"SELECT id FROM audit.benchmarks WHERE name='dataset-evaluation-gold' AND version='v1' AND frozen_at IS NULL"
-	).fetchone()[0]
-	add(db, operator, dataset, check='dataset_evaluation')
-	assert [r[:2] for r in remove(db, operator, dataset, check='dataset_evaluation')] == [(dataset, None)]
-	assert (dataset, None) not in member_targets(db, gold)
+	first, second, unevaluated = (create_dataset(db, owner) for _ in range(3))
+	version = register_version(db, 'dataset_evaluation', 'de-draw')
+	for dataset in (first, second):
+		finish(
+			db,
+			create_run(db, dataset, version, check='dataset_evaluation'),
+			dataset_judgements=[dataset_judgement('haiku-5.5', 'ok')],
+		)
+	only(db, (first, second), 'dataset_evaluation')
+	assert {draw(db, operator, 'dataset_evaluation')[0] for _ in range(10)} <= {(first, None), (second, None)}
+	assert draw(db, operator, 'dataset_evaluation', [first]) == [(second, None)]
+	# the operator's label is also the dataset's review
+	label_dataset(db, operator, second, 'exclude')
+	assert draw(db, operator, 'dataset_evaluation', [first]) == []
+	assert db.execute('SELECT decision::text, source FROM audit.evaluation_decisions WHERE dataset_id=%s', (second,)).fetchone() == (
+		'exclude',
+		'reviewer',
+	)
+	act_as(db, operator)
+	assert db.execute('SELECT audit.remove_benchmark_target(%s,%s)', ('dataset_evaluation', second)).fetchone() == (1,)
+	assert db.execute('SELECT audit.remove_benchmark_target(%s,%s)', ('dataset_evaluation', unevaluated)).fetchone() == (0,)
+	as_admin(db)
+	assert db.execute(
+		'SELECT decision::text, in_benchmark FROM audit.current_dataset_human_reviews WHERE dataset_id=%s', (second,)
+	).fetchone() == ('exclude', False)
 
 
-def test_only_operators_remove_and_only_from_an_open_version(db):
-	operator, auditor, owner = create_operator(db), create_user(db, can_audit=True), create_user(db)
-	dataset = create_dataset(db, owner)
-	crop = create_off_grid_crop(db, dataset)
-	v1 = benchmark(db)
-	member(db, v1, dataset, crop)
-	freeze(db, v1)
-	# no open version: nothing to remove from, and the frozen one stays
-	with pytest.raises(psycopg.errors.NoDataFound), db.transaction():
-		remove(db, operator, dataset, crop)
-	benchmark(db, version='v2')
-	add(db, operator, dataset, crop)
-	with pytest.raises(psycopg.errors.InsufficientPrivilege), db.transaction():
-		remove(db, auditor, dataset, crop)
-	assert member_targets(db, v1) == [(dataset, crop)]
+def test_only_operators_draw_and_remove_targets(db):
+	auditor, operator, dataset = create_user(db, can_audit=True), create_operator(db), create_dataset(db, create_user(db))
+	act_as(db, auditor)
+	raises(db, psycopg.errors.InsufficientPrivilege, "SELECT * FROM audit.draw_target('deadwood','{}')")
+	raises(db, psycopg.errors.InsufficientPrivilege, "SELECT audit.remove_benchmark_target('dataset_evaluation',%s)", (dataset,))
+	act_as(db, operator)
+	raises(db, psycopg.errors.InvalidParameterValue, "SELECT * FROM audit.draw_target('georef','{}')")
+	raises(db, psycopg.errors.InvalidParameterValue, "SELECT audit.remove_benchmark_target('deadwood',%s)", (dataset,))
