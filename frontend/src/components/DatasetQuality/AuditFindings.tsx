@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Popover, Tag, Typography } from "antd";
 import { DownOutlined, InfoCircleOutlined, RightOutlined } from "@ant-design/icons";
+import { useDatasetAOI } from "../../hooks/useDatasetAudit";
 import { useDatasetAuditSummary } from "../../hooks/useDatasetAuditSummary";
 import { cropReasoning, georefFinding, predictionFinding } from "../../utils/datasetAuditSummary";
 import type { ICropReasoning } from "../../types/auditChecks";
@@ -16,6 +17,26 @@ export const GeorefRow = ({ datasetId }: { datasetId: number }) => {
         <InlineSkeleton label="Loading georeferencing" className="h-4 w-16" />
       ) : (
         <Typography.Text data-testid="dataset-audit-georef">{georefFinding(summary) ?? <Pending />}</Typography.Text>
+      )}
+    </InfoRow>
+  );
+};
+
+/** The area of interest: set, or empty because the AOI model found no usable area. Pending
+ * while there is none yet. */
+export const AoiRow = ({ datasetId }: { datasetId: number }) => {
+  const { data: aoi, isLoading } = useDatasetAOI(datasetId);
+  return (
+    <InfoRow
+      label="Area of interest"
+      tooltip="The part of the orthophoto good enough to analyse. A model draws it and auditors correct it; it is empty when the model found no usable area."
+    >
+      {isLoading ? (
+        <InlineSkeleton label="Loading area of interest" className="h-4 w-16" />
+      ) : (
+        <Typography.Text type={aoi?.noUsableArea ? "warning" : undefined} data-testid="dataset-aoi">
+          {!aoi ? <Pending /> : aoi.noUsableArea ? "Empty: no usable area found" : "Set"}
+        </Typography.Text>
       )}
     </InfoRow>
   );

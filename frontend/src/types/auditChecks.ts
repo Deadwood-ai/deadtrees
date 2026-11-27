@@ -192,6 +192,8 @@ export interface IAuditDatasetResult {
   aoi_created_at: string | null;
   aoi_source: string | null;
   aoi_model_version: string | null;
+  /** the AOI is empty: the model found no usable area */
+  aoi_empty: boolean;
   georef_status: GeorefStatus | null;
   georef_offset_m: number | null;
   georef_source: "reviewer" | "check" | null;

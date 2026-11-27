@@ -14,7 +14,7 @@ import { InlineSkeleton } from "../SectionStates";
 import { InfoRow } from "../DatasetQuality/InfoRow";
 import AcquisitionDateRows from "../DatasetQuality/AcquisitionDateRows";
 import PhenologyRow from "../DatasetQuality/PhenologyRow";
-import { GeorefRow, PredictionQuality } from "../DatasetQuality/AuditFindings";
+import { AoiRow, GeorefRow, PredictionQuality } from "../DatasetQuality/AuditFindings";
 
 interface DatasetInfoSidebarProps {
   dataset: IDataset;
@@ -134,6 +134,8 @@ export default function DatasetInfoSidebar({
         <PhenologyRow dataset={dataset} />
 
         <GeorefRow datasetId={dataset.id} />
+
+        <AoiRow datasetId={dataset.id} />
       </Section>
 
       {/* Technical Info */}

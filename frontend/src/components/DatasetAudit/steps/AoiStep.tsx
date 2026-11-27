@@ -1,5 +1,4 @@
 import type { ComponentProps } from "react";
-import { useDatasetAOI } from "../../../hooks/useDatasetAudit";
 import type { IAuditDatasetResult } from "../../../types/auditChecks";
 import AuditAOICard from "../AuditAOICard";
 
@@ -19,8 +18,7 @@ interface AoiStepProps {
 /** Step 2: the area of interest as stored (exists, created, source, model version), and its
  * editing on the map. A dataset whose processing finished without an AOI needs one drawn. */
 export default function AoiStep({ result, editor }: AoiStepProps) {
-	const { data: aoi } = useDatasetAOI(result?.dataset_id);
-	const exists = !result?.aoi_exists ? "No" : aoi?.noUsableArea ? "Empty: the model found no usable area" : "Yes";
+	const exists = !result?.aoi_exists ? "No" : result.aoi_empty ? "Empty: the model found no usable area" : "Yes";
 	const rows: [string, string][] = [
 		["Exists", exists],
 		["Created", day(result?.aoi_created_at)],

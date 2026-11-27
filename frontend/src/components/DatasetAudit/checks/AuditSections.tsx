@@ -61,7 +61,7 @@ export default function AuditSections({ dataset, checks, checksFailed, onRetryCh
 	const answered: ReviewItem[] = [...reviewAnswers(draft, dataset.id, result).answered, ...(hasAOI ? (["aoi"] as const) : [])];
 	const openItems = openReviewItems(result?.review_required, answered);
 	// the step badges show your answers on the page, and an AOI drawn here, before Save
-	const shown = result && withDraft({ ...result, aoi_exists: result.aoi_exists || hasAOI }, draft);
+	const shown = result && withDraft({ ...result, aoi_exists: result.aoi_exists || hasAOI, aoi_empty: result.aoi_empty && !hasAOI }, draft);
 	const checksRun = Object.keys(checks?.checks ?? {}) as AuditCheckKey[];
 	const toggle = (id: AuditSectionId) => setView({ section: view.section === id ? null : id, cropId: null, mapOnly: false });
 	const predictionBody = (id: "forest" | "deadwood") => {
