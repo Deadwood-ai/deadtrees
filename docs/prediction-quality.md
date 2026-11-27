@@ -48,7 +48,7 @@ outside the AOI is darkened).
 
 ## Answers
 
-Prompt `pq-v7` (version v2, render `overlay-v2`): per layer the judge lists the errors it
+Prompt `pq-v7` (versions v2 and v3, render `overlay-v2`): per layer the judge lists the errors it
 sees and gives a verdict, a major likelihood, per failure mode a likelihood and the
 affected area, and a one-sentence summary for data users. A judge that cannot assess the
 tile at all (`assessable: false`) is stored as `not_assessable` on both layers; `ambiguous`
@@ -64,6 +64,10 @@ Version v2 (DT-1560): in v1 a forest prediction that filled the tile showed only
 gold tint with no edge, and the judges claimed most of the tile as trees missed. v2
 outlines each layer along the tile border too, draws the forest with a stronger fill and a
 3-pixel outline, and states each layer's measured share of the tile in the prompt.
+
+Version v3 (DT-1634) judges with Haiku alone. Haiku already decided every call; Luna was
+stored and shown beside it. Luna on the Codex login answers one tile at a time (DT-1536),
+about 18 s a call, which made a run take minutes per dataset.
 
 ## What a run stores
 
@@ -94,7 +98,7 @@ and usage-limit errors reach the worker, which pauses instead of failing the run
 The database works out one call per tile and layer of the run that counts
 (`audit.tile_calls`): a person's tile review on the same prediction if there is one,
 otherwise the deciding judge's verdict under the version's active rules (rules-v1
-`{"decider": "haiku"}`; Luna is stored and shown, not counted). A `not_assessable` answer
+`{"decider": "haiku"}`; in v2 Luna is stored and shown, not counted). A `not_assessable` answer
 gives no call, and an ambiguous tile counts for no side. `audit.dataset_outcomes` counts
 the calls per layer (total, major, minor, ok). A layer never needs review on its own
 dataset. New rules apply to every dataset at once, without model calls.
