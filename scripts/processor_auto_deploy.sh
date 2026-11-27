@@ -84,6 +84,50 @@ processor_asset_mount_matches() {
 	[ -n "${mounted_assets}" ] && python3 "${ASSET_PREFLIGHT_SCRIPT}" --mount-matches "${mounted_assets}"
 }
 
+# Image IDs behind the processor: the one its container runs and the one the
+# image tag points at. A rebuild moves the tag to the new image, and recreating
+# the container releases the old one, so after a deploy both are left untagged.
+processor_image_ids() {
+	local container_id
+	local image_name
+
+	container_id="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" ps -q processor 2>/dev/null || true)"
+	if [ -n "${container_id}" ]; then
+		docker inspect "${container_id}" --format '{{.Image}}' 2>/dev/null || true
+	fi
+	image_name="$(docker compose "${PROCESSOR_COMPOSE_FILES[@]}" config --images processor 2>/dev/null || true)"
+	if [ -n "${image_name}" ]; then
+		docker image inspect "${image_name}" --format '{{.Id}}' 2>/dev/null || true
+	fi
+}
+
+# Remove the images the processor used before this deploy. Docker is shared on
+# some hosts, so this never prunes: it removes only these IDs, only once they
+# are untagged, and Docker itself refuses while any container still uses one.
+# Cleanup is best effort and never fails a deploy that already activated.
+remove_previous_processor_images() {
+	local previous_ids="$1"
+	local current_ids
+	local image_id
+	local tag_count
+
+	current_ids="$(processor_image_ids)"
+	for image_id in $(printf '%s\n' "${previous_ids}" | sort -u); do
+		if printf '%s\n' "${current_ids}" | grep -qxF "${image_id}"; then
+			continue
+		fi
+		tag_count="$(docker image inspect "${image_id}" --format '{{len .RepoTags}}' 2>/dev/null || true)"
+		if [ "${tag_count}" != "0" ]; then
+			continue
+		fi
+		if docker image rm "${image_id}" >> "${LOG_FILE}" 2>&1; then
+			log "Removed previous processor image ${image_id}"
+		else
+			log "Kept previous processor image ${image_id} because Docker refused to remove it"
+		fi
+	done
+}
+
 recreate_processor_for_assets() {
 	drain_set=1
 	waiting_for_drain=1
@@ -248,6 +292,7 @@ fi
 
 require_clean_checkout
 log_processor_compose_files
+previous_image_ids="$(processor_image_ids)"
 docker compose "${PROCESSOR_COMPOSE_FILES[@]}" build processor >> "${LOG_FILE}" 2>&1
 python3 "${STATUS_SCRIPT}" clear-ack >> "${LOG_FILE}" 2>&1
 PROCESSOR_RELEASE_SHA="${deployed_sha}" docker compose "${PROCESSOR_COMPOSE_FILES[@]}" up -d --force-recreate processor >> "${LOG_FILE}" 2>&1
@@ -261,6 +306,7 @@ python3 "${STATUS_SCRIPT}" record-worker-id >> "${LOG_FILE}" 2>&1
 
 printf '%s\n' "${deployed_sha}" > "${ACTIVATED_SHA_FILE}.tmp"
 mv "${ACTIVATED_SHA_FILE}.tmp" "${ACTIVATED_SHA_FILE}"
+remove_previous_processor_images "${previous_image_ids}"
 
 # A long drain can outlast several merges. Clearing the drain now would let the
 # worker claim another long task on this already outdated release, so keep the

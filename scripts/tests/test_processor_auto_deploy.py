@@ -66,6 +66,18 @@ class DeployHarness:
 		self.wait_hook_marker = tmp_path / "wait-hook-ran"
 		self.waiter_fd_log = tmp_path / "waiter-fd.log"
 		self.unhealthy_marker = self.control_dir / "loop-unhealthy.json"
+		# Image IDs the fake Docker tracks: the one the container runs, the one
+		# the processor tag points at, images tagged elsewhere, and images
+		# Docker refuses to remove.
+		self.container_image = tmp_path / "container-image"
+		self.tag_image = tmp_path / "tag-image"
+		self.tagged_images = tmp_path / "tagged-images"
+		self.refused_images = tmp_path / "refused-images"
+		self.build_count = tmp_path / "build-count"
+		self.container_image.write_text("sha256:old\n")
+		self.tag_image.write_text("sha256:old\n")
+		self.tagged_images.write_text("")
+		self.refused_images.write_text("")
 
 		run("git", "init", "--bare", "--initial-branch=main", str(self.origin), cwd=tmp_path)
 		run("git", "init", "--initial-branch=main", str(self.seed), cwd=tmp_path)
@@ -158,7 +170,27 @@ class DeployHarness:
 			f"  if [ -e {self.docker_running} ]; then echo processor-container-id; fi\n"
 			"  exit 0\n"
 			"fi\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' config --images processor'; then\n"
+			"  echo deadtrees-processor\n"
+			"  exit 0\n"
+			"fi\n"
+			"if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then\n"
+			"  if [ \"$3\" = deadtrees-processor ]; then\n"
+			f"    cat {self.tag_image}\n"
+			"    exit 0\n"
+			"  fi\n"
+			f"  if grep -qxF \"$3\" {self.tag_image} {self.tagged_images}; then echo 1; else echo 0; fi\n"
+			"  exit 0\n"
+			"fi\n"
+			"if [ \"$1\" = image ] && [ \"$2\" = rm ]; then\n"
+			f"  if grep -qxF \"$3\" {self.refused_images}; then exit 1; fi\n"
+			"  exit 0\n"
+			"fi\n"
 			"if [ \"$1\" = inspect ]; then\n"
+			"  if echo \"$*\" | grep -q '\\.Image'; then\n"
+			f"    if [ -e {self.docker_running} ]; then cat {self.container_image}; fi\n"
+			"    exit 0\n"
+			"  fi\n"
 			"  if echo \"$*\" | grep -q '\\.Mounts'; then\n"
 			f"    cat {self.asset_mount}\n"
 			"    exit 0\n"
@@ -175,12 +207,17 @@ class DeployHarness:
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' up '; then\n"
 			f"  touch {self.docker_running}\n"
+			f"  cp {self.tag_image} {self.container_image}\n"
 			f"  printf '%s' \"${{PROCESSOR_ASSETS_DIR:-{(self.worktree / 'assets').resolve()}}}\" > {self.asset_mount}\n"
 			"fi\n"
 			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' build ' && "
 			f"[ -n \"${{PROCESSOR_TEST_BUILD_FAIL_ONCE:-}}\" ] && [ ! -e {self.build_failed_once} ]; then\n"
 			f"  touch {self.build_failed_once}\n"
 			"  exit 1\n"
+			"fi\n"
+			"if [ \"$1\" = compose ] && echo \"$@\" | grep -q ' build '; then\n"
+			f"  echo x >> {self.build_count}\n"
+			f"  echo \"sha256:build-$(wc -l < {self.build_count} | tr -d ' ')\" > {self.tag_image}\n"
 			"fi\n"
 			"exit 0\n",
 		)
@@ -703,6 +740,51 @@ class ProcessorAutoDeployTest(unittest.TestCase):
 			self.assertNotEqual(result.returncode, 0)
 			self.assertTrue((harness.worktree / ".local" / "processor-deploy-paused").exists())
 			self.assertFalse((harness.worktree / ".local" / "processor-activated-sha").exists())
+
+	def test_successful_deploy_removes_the_images_it_replaced(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			# A failed earlier attempt can leave the tag on an image the
+			# container never ran, so both previous images must go.
+			harness.container_image.write_text("sha256:running\n")
+			harness.push_change("new release\n")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			docker_log = harness.docker_log.read_text()
+			self.assertIn("image rm sha256:old\n", docker_log)
+			self.assertIn("image rm sha256:running\n", docker_log)
+			self.assertNotIn("image rm sha256:build-1", docker_log)
+			self.assertNotIn("image prune", docker_log)
+			self.assertIn("Removed previous processor image sha256:old", (harness.worktree / "auto-deploy.log").read_text())
+
+	def test_image_cleanup_keeps_tagged_images_and_never_fails_the_deploy(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.container_image.write_text("sha256:tagged-elsewhere\n")
+			harness.tagged_images.write_text("sha256:tagged-elsewhere\n")
+			harness.refused_images.write_text("sha256:old\n")
+			harness.push_change("new release\n")
+
+			result = harness.run_deploy()
+
+			self.assertEqual(result.returncode, 0, result.stderr)
+			self.assertNotIn("image rm sha256:tagged-elsewhere", harness.docker_log.read_text())
+			deploy_log = (harness.worktree / "auto-deploy.log").read_text()
+			self.assertIn("Kept previous processor image sha256:old", deploy_log)
+			self.assertIn("Deployment complete", deploy_log)
+
+	def test_failed_activation_keeps_the_previous_image(self) -> None:
+		with tempfile.TemporaryDirectory() as tmp_dir:
+			harness = DeployHarness(Path(tmp_dir))
+			harness.push_change("never becomes ready\n")
+			harness.env["PROCESSOR_TEST_STARTUP_WAIT_RC"] = "4"
+
+			result = harness.run_deploy()
+
+			self.assertNotEqual(result.returncode, 0)
+			self.assertNotIn("image rm", harness.docker_log.read_text())
 
 	def test_paused_deploy_does_not_apply_new_remote_sha_until_resumed(self) -> None:
 		with tempfile.TemporaryDirectory() as tmp_dir:
