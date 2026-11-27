@@ -17,7 +17,7 @@ from shapely.geometry import shape
 from shared.logger import logger
 from shared.logging import LogContext
 from shared.models import Cog
-from shared.pagination import fetch_all_rows
+from shared.pagination import iter_pages_by_id
 from shared.settings import settings
 
 from .ssh import pull_file_from_storage_server
@@ -143,12 +143,14 @@ def read_geometry(value):
 def tile_rows(client, dataset_id: int) -> list[dict]:
 	"""The dataset's CLIP tiles (none before the embedding stage has run): id, pixel window
 	and the footprint as shapely."""
-	rows = fetch_all_rows(
+	# Page after the last id, through the (dataset_id, id) index. Ordered by id with only the
+	# dataset index, Postgres walked the primary key through other datasets' tiles, and the first
+	# page of a dataset of 53 000 tiles ran past the statement timeout.
+	pages = iter_pages_by_id(
 		lambda: (
 			client.table(settings.tile_embeddings_table)
 			.select('id,pixel_x0,pixel_y0,pixel_x1,pixel_y1,geometry')
 			.eq('dataset_id', dataset_id)
-			.order('id')
 		)
 	)
-	return [{**row, 'geometry': read_geometry(row['geometry'])} for row in rows]
+	return [{**row, 'geometry': read_geometry(row['geometry'])} for page in pages for row in page]
