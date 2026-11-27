@@ -509,8 +509,15 @@ test.describe("auditor local write flows", () => {
       .eq("label_data", "deadwood")
       .single();
     expect(labelError).toBeNull();
-    const polygonCount = 1005;
-    const rows = Array.from({ length: polygonCount }, (_, i) => {
+    // Earlier tests in this file may have saved polygons into the same label.
+    const { count: existing, error: countError } = await adminClient
+      .from("v2_deadwood_geometries")
+      .select("id", { count: "exact", head: true })
+      .eq("label_id", label!.id)
+      .eq("is_deleted", false);
+    expect(countError).toBeNull();
+    const seeded = 1005;
+    const rows = Array.from({ length: seeded }, (_, i) => {
       const x = 8 + (i % 40) * 0.0001;
       const y = 48 + Math.floor(i / 40) * 0.0001;
       const d = 0.00005;
@@ -519,9 +526,11 @@ test.describe("auditor local write flows", () => {
         geometry: `SRID=4326;POLYGON((${x} ${y},${x + d} ${y},${x + d} ${y + d},${x} ${y + d},${x} ${y}))`,
       };
     });
+    const seededIds: number[] = [];
     for (let i = 0; i < rows.length; i += 500) {
-      const { error } = await adminClient.from("v2_deadwood_geometries").insert(rows.slice(i, i + 500));
+      const { data, error } = await adminClient.from("v2_deadwood_geometries").insert(rows.slice(i, i + 500)).select("id");
       expect(error).toBeNull();
+      seededIds.push(...data!.map((row) => row.id));
     }
 
     try {
@@ -536,11 +545,13 @@ test.describe("auditor local write flows", () => {
       await installAuditorSession(page);
       await openPredictionEditor(page);
       await expect(page.getByText("Editing deadwood cover", { exact: true })).toBeVisible();
-      await expect.poll(() => loaded, { timeout: 20_000 }).toBe(polygonCount);
+      await expect.poll(() => loaded, { timeout: 20_000 }).toBe((existing ?? 0) + seeded);
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
     } finally {
-      const { error } = await adminClient.from("v2_deadwood_geometries").delete().eq("label_id", label!.id);
-      expect(error).toBeNull();
+      for (let i = 0; i < seededIds.length; i += 500) {
+        const { error } = await adminClient.from("v2_deadwood_geometries").delete().in("id", seededIds.slice(i, i + 500));
+        expect(error).toBeNull();
+      }
     }
   });
 
