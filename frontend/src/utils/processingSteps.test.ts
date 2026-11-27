@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateProcessingProgress,
   isDatasetProcessingComplete,
+  processingToast,
   type DatasetProgress,
 } from "./processingSteps";
 
@@ -196,3 +197,25 @@ describe("processing step completion", () => {
   });
 });
 
+describe("processing toast", () => {
+  const done: DatasetProgress = { ...completeCore, is_combined_model_done: true };
+
+  it("says complete when a stage the uploader sees finishes the processing", () => {
+    expect(processingToast({ current_status: "deadwood_treecover_combined_segmentation", has_error: false }, done)).toBe("complete");
+  });
+
+  it("says nothing after an audit-only run, an idle update or the first update the session sees", () => {
+    expect(processingToast({ current_status: "georef_check", has_error: false }, done)).toBeNull();
+    expect(processingToast({ current_status: "doy_estimation", has_error: false }, done)).toBeNull();
+    expect(processingToast({ current_status: "idle", has_error: false }, done)).toBeNull();
+    expect(processingToast(undefined, done)).toBeNull();
+  });
+
+  it("says failed for a new error, not for an audit stage's or one already seen", () => {
+    const failed = { ...done, has_error: true };
+    expect(processingToast({ current_status: "cog_processing", has_error: false }, { ...failed, current_status: "cog_processing" })).toBe("failed");
+    expect(processingToast({ current_status: "georef_check", has_error: false }, failed)).toBeNull();
+    expect(processingToast({ current_status: "idle", has_error: false }, { ...failed, current_status: "georef_check" })).toBeNull();
+    expect(processingToast({ current_status: "idle", has_error: true }, failed)).toBeNull();
+  });
+});
