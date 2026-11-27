@@ -124,6 +124,29 @@ export function isDatasetProcessingComplete(dataset: DatasetProgress): boolean {
   );
 }
 
+/** Stages that only add evidence for the audit (shared/notifications AUDIT_ONLY_TASKS): their
+ * runs change nothing the uploader sees, so they toast nothing. */
+const AUDIT_ONLY_STATUSES = new Set(["georef_check", "doy_estimation", "audit_in_progress"]);
+
+/** What the session last saw of a dataset's status. */
+export interface SeenStatus {
+  current_status?: string;
+  has_error?: boolean;
+}
+
+/** The toast a status update earns the owner: "complete" when a stage the uploader sees just
+ * finished the processing, "failed" when an error is new and not an audit stage's, else null.
+ * `previous` is the status this session saw last (undefined before the first update): the
+ * update's own old row holds only its key, so it cannot tell. */
+export function processingToast(previous: SeenStatus | undefined, next: DatasetProgress): "complete" | "failed" | null {
+  const ranUserStage = !!previous?.current_status && previous.current_status !== "idle" && !AUDIT_ONLY_STATUSES.has(previous.current_status);
+  if (next.has_error) {
+    const auditStage = AUDIT_ONLY_STATUSES.has(previous?.current_status ?? "") || AUDIT_ONLY_STATUSES.has(next.current_status ?? "");
+    return previous && !previous.has_error && !auditStage ? "failed" : null;
+  }
+  return ranUserStage && isDatasetProcessingComplete(next) ? "complete" : null;
+}
+
 export function calculateProcessingProgress(dataset: DatasetProgress): {
   currentStep: number;
   totalSteps: number;

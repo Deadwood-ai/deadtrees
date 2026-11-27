@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./useSupabase";
 import { useAuth } from "./useAuthProvider";
 import { useProcessingNotification } from "./useProcessingNotification";
-import { isDatasetProcessingComplete } from "../utils/processingSteps";
+import { isDatasetProcessingComplete, processingToast, type SeenStatus } from "../utils/processingSteps";
 
 interface StatusPayloadData {
   dataset_id: number;
@@ -27,6 +27,8 @@ export function useDatasetSubscription() {
   const { session } = useAuth();
   const queryClient = useQueryClient();
   const { showProcessingCompleteNotification, showProcessingErrorNotification } = useProcessingNotification();
+  // each dataset's status as this session last saw it: an update's old row holds only its key
+  const seen = useRef(new Map<number, SeenStatus>());
 
   useEffect(() => {
     const channel = supabase
@@ -40,12 +42,13 @@ export function useDatasetSubscription() {
         },
         async (payload) => {
           const statusData = payload.new as StatusPayloadData;
-          const oldStatusData = payload.old as StatusPayloadData;
 
           // Get dataset info from the dataset_id
           if (!statusData?.dataset_id) {
             return;
           }
+          const previous = seen.current.get(statusData.dataset_id);
+          seen.current.set(statusData.dataset_id, { current_status: statusData.current_status, has_error: statusData.has_error });
 
           try {
             // Fetch the dataset info to get user_id and file_name
@@ -68,19 +71,9 @@ export function useDatasetSubscription() {
               return;
             }
 
-            // Helper function to check if processing is complete
-            const isProcessingComplete = (data: StatusPayloadData | null): boolean => {
-              if (!data) return false;
-              return isDatasetProcessingComplete({ ...data, file_name: datasetInfo.file_name });
-            };
-
-            // Check if processing just completed (was incomplete before, now complete)
-            const wasProcessingComplete = isProcessingComplete(oldStatusData);
-            const isNowProcessingComplete = isProcessingComplete(statusData);
-
-            // Check if processing just failed
-            const hadError = oldStatusData && oldStatusData.has_error;
-            const hasErrorNow = statusData && statusData.has_error;
+            const isNowProcessingComplete = isDatasetProcessingComplete({ ...statusData, file_name: datasetInfo.file_name });
+            // complete after a stage the uploader sees, or a new error: not an audit-only run
+            const toast = processingToast(previous, { ...statusData, file_name: datasetInfo.file_name });
 
             // Refresh account rows, any open status panel and its audit findings together.
             await Promise.all([
@@ -89,13 +82,10 @@ export function useDatasetSubscription() {
               queryClient.invalidateQueries({ queryKey: ["dataset-audit-summary", statusData.dataset_id] }),
             ]);
 
-            // Show completion notification if processing just completed
-            if (!wasProcessingComplete && isNowProcessingComplete) {
+            if (toast === "complete") {
               showProcessingCompleteNotification(datasetInfo.file_name || "Dataset", statusData.dataset_id);
             }
-
-            // Show error notification if processing just failed
-            if (!hadError && hasErrorNow) {
+            if (toast === "failed") {
               showProcessingErrorNotification(datasetInfo.file_name || "Dataset", statusData.dataset_id);
             }
 
