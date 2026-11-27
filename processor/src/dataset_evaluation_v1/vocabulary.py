@@ -7,7 +7,8 @@ CHECK_KEY = 'dataset_evaluation'
 VERDICTS = {'keep': 'ok', 'fix': 'minor', 'exclude': 'major', 'unsure': 'not_assessable'}
 
 # Exclude reasons (the audit's fixed list). Georeferencing and season are decided by their
-# own checks and duplicates are refused at upload, so the models never name them.
+# own checks and duplicates are refused at upload, so the models never name them; imagery
+# without trees is usable (v4), so only a person excludes for no_trees.
 REASONS = (
 	'blurry',
 	'duplicate',
@@ -20,10 +21,10 @@ REASONS = (
 	'too_dark',
 	'other',
 )
-MODEL_REASONS = ('blurry', 'no_trees', 'artifacts', 'not_rgb', 'broken_ortho', 'too_dark', 'other')
+MODEL_REASONS = ('blurry', 'artifacts', 'not_rgb', 'broken_ortho', 'too_dark', 'other')
 
 # Flags with a 0-100 likelihood; every key names a problem.
-EXCLUDE_FLAGS = ('blurry', 'not_rgb', 'no_trees', 'broken_ortho', 'too_dark', 'artifacts')
+EXCLUDE_FLAGS = ('blurry', 'not_rgb', 'broken_ortho', 'too_dark', 'artifacts')
 FIX_FLAGS = ('cog_issue', 'thumbnail_issue', 'reprocess')
 FLAGS = EXCLUDE_FLAGS + FIX_FLAGS
 

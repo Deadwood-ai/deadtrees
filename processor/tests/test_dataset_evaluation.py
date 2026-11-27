@@ -314,7 +314,6 @@ def answer(verdict='keep', likelihood=5, reason='none', **flags):
 			'flags': {
 				'blurry': 0,
 				'not_rgb': 0,
-				'no_trees': 0,
 				'broken_ortho': 0,
 				'too_dark': 0,
 				'artifacts': 0,
@@ -483,7 +482,10 @@ def test_the_prompt_lists_only_the_reasons_the_models_decide():
 	assert 'Images 2 to 5 are 4 samples' in prompt
 	assert 'Image 6' not in prompt and 'Judge the whole orthophoto' in prompt
 	assert 'area of interest' not in prompt and 'AOI' not in prompt
-	assert '"reason": "blurry | no_trees | artifacts | not_rgb | broken_ortho | too_dark | other | none"' in prompt
+	# imagery without trees is usable (v4): a person may exclude it, the models do not
+	# (the leaf state may still say no_trees: it describes, it does not exclude)
+	assert '"no_trees": <0-100>' not in prompt and 'Not a reason to exclude: few or no trees' in prompt
+	assert '"reason": "blurry | artifacts | not_rgb | broken_ortho | too_dark | other | none"' in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +593,7 @@ def test_the_handler_uploads_the_images_and_returns_the_rows_to_store(cog, tmp_p
 	uploaded, refreshed = [], []
 	ctx = SimpleNamespace(
 		run={'id': 7, 'dataset_id': 42},
-		version={'version': 'v3', 'config': {}},
+		version={'version': 'v4', 'config': {}},
 		client=client,
 		token='t',
 		judges={
@@ -632,14 +634,14 @@ def test_the_tiles_are_read_a_page_at_a_time_after_the_last_id(monkeypatch):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize('earlier', ['v1', 'v2'])
+@pytest.mark.parametrize('earlier', ['v1', 'v2', 'v3'])
 def test_a_run_of_an_earlier_version_is_not_judged_by_this_code(earlier):
-	"""Version 1 judged inside the AOI and version 2 had the duplicate check: their runs must not
-	get this code's answers under their name."""
+	"""Version 1 judged inside the AOI, version 2 had the duplicate check and version 3 excluded
+	imagery without trees: their runs must not get this code's answers under their name."""
 	ctx = SimpleNamespace(
 		run={'id': 7, 'dataset_id': 42}, version={'version': earlier, 'config': {}}, client=None, token='t'
 	)
-	with pytest.raises(ValueError, match=f'the run is of version {earlier}; this code judges v3'):
+	with pytest.raises(ValueError, match=f'the run is of version {earlier}; this code judges v4'):
 		handler.handle(ctx)
 
 
@@ -650,7 +652,7 @@ def test_the_handler_is_registered():
 	assert worker.HANDLERS['dataset_evaluation'] == 'processor.src.dataset_evaluation_v1.handler'
 	handlers, missing = worker.load_handlers()
 	evaluation = handlers['dataset_evaluation']
-	assert not missing and evaluation.VERSION == 'v3' and not hasattr(evaluation, 'recompute')
+	assert not missing and evaluation.VERSION == 'v4' and not hasattr(evaluation, 'recompute')
 	# what is asked is the version; how the answers turn into keep or exclude, its rules
 	assert (evaluation.RULES, evaluation.RULES_CONFIG) == ('rules-v1', {'decider': 'haiku', 'band_major_at': 90})
 	assert not {'duplicates', 'phash', 'rules', 'rule_config'} & set(evaluation.CONFIG)
