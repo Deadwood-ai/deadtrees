@@ -17,7 +17,7 @@ const typing = (target: EventTarget | null) =>
  * cannot move on to another target while it asks. */
 const inDialog = (target: EventTarget | null) => target instanceof HTMLElement && !!target.closest('[role="dialog"]');
 
-/** Enter and Space on a focused button press that button. */
+/** Enter and Space on a focused button press that button; with Ctrl or Cmd they are shortcuts. */
 const onButton = (target: EventTarget | null) => target instanceof HTMLElement && !!target.closest("button");
 
 /** The keys that mean something else with Shift held. */
@@ -34,7 +34,7 @@ function keyName(event: KeyboardEvent): string {
  * part of the page passes the keys it answers while it is active: the steps Enter, Shift+Enter
  * and Ctrl+S, step 1 K and X, the crop review its own keys. Keys are ignored while you type
  * in a field (except Ctrl+S) or in a dialog, and Enter or Space on a focused button press that
- * button. */
+ * button (Ctrl+Enter stays a shortcut). */
 export function useAuditShortcuts(keys: AuditKeyMap, active: boolean) {
 	const current = useRef(keys);
 	current.current = keys;
@@ -44,7 +44,7 @@ export function useAuditShortcuts(keys: AuditKeyMap, active: boolean) {
 			const name = keyName(event);
 			if (inDialog(event.target)) return;
 			if (!name.startsWith("mod+") && (event.altKey || typing(event.target))) return;
-			if ((event.key === "Enter" || event.key === " ") && onButton(event.target)) return;
+			if ((name === "Enter" || name === " ") && onButton(event.target)) return;
 			const action = current.current[name];
 			if (!action) return;
 			event.preventDefault();
