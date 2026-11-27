@@ -40,9 +40,18 @@ compose` commands. The script:
 3. waits until the host worker has no active claimed queue row;
 4. fast-forwards the checkout to the exact `origin/main` SHA fetched before draining;
 5. rebuilds `processor`;
-6. force-recreates the processor container; and
-7. clears the drain request after the new container is running; and
-8. records the successfully activated SHA under `.local/`.
+6. force-recreates the processor container;
+7. records the successfully activated SHA under `.local/` once the new container
+   is running;
+8. removes the processor images the previous container and tag used; and
+9. clears the drain request.
+
+The rebuild reuses the image tag, so without step 8 every deploy would leave a
+full untagged processor image behind. Docker is shared on some hosts, so the
+script never prunes: it removes only those image IDs, only once they are
+untagged and no container uses them, and a refused removal is logged without
+failing the deploy. A deploy that fails after its rebuild can still leave the
+image it replaced behind. The BuildKit build cache is not touched.
 
 If the script fails after setting the drain request, it intentionally leaves the
 drain file in place and creates `.local/processor-deploy-paused`, so the worker
