@@ -83,6 +83,10 @@ services:
       ODM_AUTO_BOUNDARY: "true"
       ODM_SKY_REMOVAL: "true"
       ODM_MAX_NADIR_DEVIATION_DEGREES: "40"
+      # ODM --max-concurrency per pass; pass 1 is clamped to PROCESSOR_CPU_LIMIT.
+      ODM_RECONSTRUCTION_MAX_CONCURRENCY: ${ODM_RECONSTRUCTION_MAX_CONCURRENCY:-16}
+      ODM_ORTHOPHOTO_MAX_CONCURRENCY: ${ODM_ORTHOPHOTO_MAX_CONCURRENCY:-2}
+      PROCESSOR_CPU_LIMIT: ${PROCESSOR_CPU_LIMIT:-30}
       # Service role key for accessing auth.users (user email lookup)
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       # Linear integration for processing failure notifications

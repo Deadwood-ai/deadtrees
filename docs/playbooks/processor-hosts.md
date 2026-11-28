@@ -117,6 +117,24 @@ processor gets GPU1.
 - The crontab keeps a commented-out legacy launcher
   (`.local/processor/auto_deploy_processor.sh`). Do not re-enable it.
 
+## ODM Concurrency Per Host
+
+ODM runs in two passes, and each pass gets its own `--max-concurrency`:
+
+- **Pass 1 (reconstruction):** `ODM_RECONSTRUCTION_MAX_CONCURRENCY`, default 16. Feature
+  extraction and matching scale with cores. The value is clamped to the host's
+  `PROCESSOR_CPU_LIMIT`, and the ODM container is capped at twice the concurrency or
+  `PROCESSOR_CPU_LIMIT`, whichever is lower. A shared host with a small CPU limit
+  therefore gets a lower value on its own.
+- **Pass 2 (texturing, orthophoto):** `ODM_ORTHOPHOTO_MAX_CONCURRENCY`, default 2, with
+  no CPU cap. Past out-of-memory kills happened in this pass, and more concurrency
+  barely speeds it up.
+
+Override either value in the host's `.env`. Measured on Geos in Nov 2026 with the
+production flags: at 16, pass 1 took about a third of the time it took at 2 on 698
+images. At 32 it was no faster than at 16 on 1,998 images, because reconstruction is
+mostly single-threaded. Real memory stayed under 27 GB.
+
 ## PRs That Add Or Change A Required Asset
 
 Before it starts or resumes the worker, every host runs
