@@ -17,17 +17,19 @@ jobs:
     name: supabase-migrate
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The production database login lives only in this environment. It is
+    # limited to main and waits for a maintainer's approval before each run.
+    environment: production
     permissions:
       contents: read
-    env:
-      PGSSLMODE: disable
-      SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v3
+        uses: supabase/setup-cli@689adcfb80d947100a1eab127289b97d1fb07b13 # v3.2.0
         with:
           version: 2.40.7
 
@@ -35,4 +37,7 @@ jobs:
         run: supabase --version
 
       - name: Apply production migrations
+        env:
+          PGSSLMODE: disable
+          SUPABASE_DB_URL_PROD: ${{ secrets.SUPABASE_DB_URL_PROD }}
         run: supabase migration up --db-url "$SUPABASE_DB_URL_PROD"
