@@ -478,6 +478,26 @@ def test_the_summary_tells_the_owner_why_a_dataset_was_excluded_and_nothing_else
 	assert 'internal note' not in str(summary) and str(auditor) not in str(summary)
 
 
+def test_only_the_owner_and_audit_readers_learn_why_a_public_dataset_was_excluded(db):
+	auditor, owner, other = create_user(db, can_audit=True), create_user(db), create_user(db)
+	dataset = create_dataset(db, owner)
+	evaluation(db, dataset, 'major')
+
+	def summary():
+		return db.execute('SELECT public.get_dataset_audit_summary(%s)', (dataset,)).fetchone()[0]
+
+	act_as(db, owner)
+	assert summary()['evaluation_reason'] == 'blurry'
+	act_as(db, auditor)
+	assert summary()['evaluation_reason'] == 'blurry'
+	# anyone else still sees the public outcome, but not the reason (DT-1628)
+	for act in (lambda: act_as_anon(db), lambda: act_as(db, other)):
+		act()
+		seen = summary()
+		assert seen['evaluation_decision'] == 'exclude'
+		assert seen['evaluation_reason'] is None
+
+
 def test_only_audit_readers_see_the_results(db):
 	user, auditor, dataset = create_user(db), create_user(db, can_audit=True), create_dataset(db, create_user(db))
 	legacy(db, dataset, 'exclude')
