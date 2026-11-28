@@ -24,6 +24,9 @@ from processor.src.process_odm import (
 	_analyze_extracted_files,
 	_extract_exif_from_images,
 	_build_odm_command,
+	_reconstruction_pass_resources,
+	_run_odm_pass,
+	_with_max_concurrency,
 	_filter_reconstruction_by_orientation,
 	_metadata_off_nadir_degrees,
 	_drop_metadata_obliques,
@@ -729,3 +732,87 @@ def test_other_odm_failures_and_a_second_crash_are_not_retried():
 
 	assert _seam_leveling_retry_command(command, 'texturing_skip_global_seam_leveling: False\nKilled') is None
 	assert _seam_leveling_retry_command(retried, TEXRECON_SEAM_LEVELING_CRASH) is None
+
+
+@pytest.mark.unit
+def test_build_odm_command_uses_the_orthophoto_concurrency(monkeypatch):
+	"""The base command carries the pass-2 limit; pass 1 swaps in its own."""
+	monkeypatch.setattr(settings, 'DEV_MODE', False)
+	monkeypatch.setattr(settings, 'ODM_ORTHOPHOTO_MAX_CONCURRENCY', 2)
+
+	command, _, _ = _build_odm_command()
+
+	assert command[command.index('--max-concurrency') + 1] == '2'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+	('configured', 'cpu_limit', 'expected'),
+	[
+		(16, 30, (16, 30)),  # processing server: 16 processes, up to 30 CPUs
+		(16, 64, (16, 32)),  # deepl1: twice the concurrency, the benchmark ratio
+		(16, 8, (8, 8)),  # small shared host: never more than its own CPU cap
+		(16, 0.5, (1, 1)),
+		(0, 30, (1, 2)),
+	],
+)
+def test_reconstruction_pass_resources_stay_within_the_host_cpu_limit(monkeypatch, configured, cpu_limit, expected):
+	monkeypatch.setattr(settings, 'ODM_RECONSTRUCTION_MAX_CONCURRENCY', configured)
+	monkeypatch.setattr(settings, 'PROCESSOR_CPU_LIMIT', cpu_limit)
+
+	assert _reconstruction_pass_resources() == expected
+
+
+@pytest.mark.unit
+def test_with_max_concurrency_replaces_only_the_limit():
+	command = ['--fast-orthophoto', '--max-concurrency', '2', '--orthophoto-resolution', '1.0']
+
+	assert _with_max_concurrency(command, 16) == [
+		'--fast-orthophoto',
+		'--max-concurrency',
+		'16',
+		'--orthophoto-resolution',
+		'1.0',
+	]
+	assert command[2] == '2'  # the orthophoto pass keeps its own value
+	assert _with_max_concurrency(['--fast-orthophoto'], 16) == ['--fast-orthophoto']
+
+
+class _FakeOdmContainer:
+	def wait(self, timeout=None):
+		return {'StatusCode': 0}
+
+	def logs(self):
+		return b'done'
+
+
+class _FakeContainers:
+	def __init__(self):
+		self.calls = []
+
+	def run(self, **kwargs):
+		self.calls.append(kwargs)
+		return _FakeOdmContainer()
+
+
+class _FakeDockerClient:
+	def __init__(self):
+		self.containers = _FakeContainers()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('cpus', 'expected_nano_cpus'), [(30, 30_000_000_000), (None, None)])
+def test_run_odm_pass_caps_cpus_only_when_asked(monkeypatch, cpus, expected_nano_cpus):
+	import processor.src.process_odm as process_odm_module
+
+	monkeypatch.setattr(process_odm_module, '_wait_for_container', lambda container, label: container.wait())
+	client = _FakeDockerClient()
+
+	_, exit_status, _ = _run_odm_pass(
+		client, ['--max-concurrency', '16'], 'odm_processing_1', {}, 1, 'token', pass_name='reconstruction', cpus=cpus
+	)
+
+	assert exit_status == 0
+	run_kwargs = client.containers.calls[0]
+	assert run_kwargs.get('nano_cpus') == expected_nano_cpus
+	assert run_kwargs['mem_limit'] == '100g'

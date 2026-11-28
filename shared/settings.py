@@ -224,6 +224,14 @@ class Settings(BaseSettings):
 	# largest successful ODM ortho is 8.25 Gpx (9510), while 9654 (5.4 km² at fine GSD) ran out at 100 GB (DT-915).
 	# Kept just above that so every mission that has rendered before keeps its resolution.
 	ODM_MAX_ORTHO_PIXELS: float = 8.5e9
+	# ODM --max-concurrency per pass. Pass 1 (OpenSfM features and matching) scales with cores and
+	# stayed under 27 GB at 16 on 698 and 1,998 images (Geos benchmark, 11-27); 32 gave no gain because
+	# reconstruction is mostly single-threaded. Pass 2 (texturing, orthophoto) gains little and is where
+	# the old out-of-memory kills happened, so it keeps 2. Pass 1 is clamped to PROCESSOR_CPU_LIMIT.
+	ODM_RECONSTRUCTION_MAX_CONCURRENCY: int = 16
+	ODM_ORTHOPHOTO_MAX_CONCURRENCY: int = 2
+	# This host's processor CPU cap (docker-compose.processor.yaml); pass 1 never asks for more.
+	PROCESSOR_CPU_LIMIT: float = 30
 
 	# Linear integration for processing failure notifications
 	LINEAR_ENABLED: bool = False

@@ -121,15 +121,24 @@ def _build_odm_command() -> tuple[list[str], str, str]:
 		resolution = '50.0'  # 50cm/pixel for fast testing
 		odm_command.extend(['--fast-orthophoto'])
 	else:
-		# --max-concurrency 2: limits parallel threads to ~2x image_MP GB peak RAM
-		# (default 4 causes OOM on large datasets: 655 images × 12MP × 4 threads ≈ 120GB+)
+		# --max-concurrency: the orthophoto-pass value. The reconstruction pass swaps in its own
+		# (_reconstruction_pass_resources); pass 2 stays low because texturing and the ortho
+		# writeout are where ODM ran out of memory.
 		# --matcher-neighbors 0: pair images by triangulation instead of the N nearest GPS
 		# neighbours. With dense along-track capture (e.g. DJI L3 left/right pairs), N nearest
 		# neighbours never reach the adjacent flight line, so strips are not tied together and
 		# the ortho shows ghosted/duplicated features.
 		resolution = '1.0'  # 1cm/pixel for production quality
 		odm_command.extend(
-			['--fast-orthophoto', '--feature-quality', 'high', '--matcher-neighbors', '0', '--max-concurrency', '2']
+			[
+				'--fast-orthophoto',
+				'--feature-quality',
+				'high',
+				'--matcher-neighbors',
+				'0',
+				'--max-concurrency',
+				str(settings.ODM_ORTHOPHOTO_MAX_CONCURRENCY),
+			]
 		)
 
 	if settings.ODM_AUTO_BOUNDARY:
@@ -221,6 +230,26 @@ def _with_budgeted_ortho_resolution(
 	)
 	command = [*odm_command[:index], f'{resolution_cm:g}', *odm_command[index + 1 :]]
 	return command, reduced_resolution_note(resolution_cm, extent)
+
+
+def _reconstruction_pass_resources() -> tuple[int, int]:
+	"""Return ``(max_concurrency, cpus)`` for ODM pass 1 on this host.
+
+	Both stay within ``PROCESSOR_CPU_LIMIT``, so shared hosts keep their share. The CPU cap is
+	twice the concurrency, the ratio the benchmark ran with: feature extraction keeps more
+	cores busy than its process count.
+	"""
+	cpu_limit = max(1, int(settings.PROCESSOR_CPU_LIMIT))
+	concurrency = max(1, min(settings.ODM_RECONSTRUCTION_MAX_CONCURRENCY, cpu_limit))
+	return concurrency, min(2 * concurrency, cpu_limit)
+
+
+def _with_max_concurrency(odm_command: list[str], concurrency: int) -> list[str]:
+	"""Return ``odm_command`` with ``--max-concurrency`` set to ``concurrency``; a command without it is unchanged."""
+	if '--max-concurrency' not in odm_command:
+		return list(odm_command)
+	index = odm_command.index('--max-concurrency') + 1
+	return [*odm_command[:index], str(concurrency), *odm_command[index + 1 :]]
 
 
 def _seam_leveling_retry_command(odm_command: list[str], stdout_logs: str) -> list[str] | None:
@@ -817,9 +846,18 @@ def _update_camera_metadata(dataset_id: int, exif_metadata: dict, token: str):
 
 
 def _run_odm_pass(
-	client, odm_command: list[str], volume_name: str, resource_labels: dict, dataset_id: int, token: str, pass_name: str
+	client,
+	odm_command: list[str],
+	volume_name: str,
+	resource_labels: dict,
+	dataset_id: int,
+	token: str,
+	pass_name: str,
+	cpus: int | None = None,
 ):
 	"""Run one ODM container over the shared volume and wait for it.
+
+	``cpus`` caps the container's CPU time; None leaves it uncapped.
 
 	Returns ``(container, exit_status, stdout_logs)``. The container is left in
 	place (remove=False) so a failure can be inspected and persisted as forensics.
@@ -852,6 +890,7 @@ def _run_odm_pass(
 			mem_limit='100g',
 			memswap_limit='100g',
 			oom_score_adj=500,
+			**({'nano_cpus': int(cpus * 1e9)} if cpus else {}),
 			remove=False,
 			detach=True,
 			name=f'dt-odm-pipeline-d{dataset_id}-{pass_name}-{int(time.time())}',
@@ -1073,8 +1112,25 @@ def _run_odm_container(images_dir: Path, output_dir: Path, token: str, dataset_i
 			# oblique shots can be dropped from the reconstruction before anything is
 			# undistorted, meshed or textured. Pass 2 resumes from the edited state.
 			create_file_on_shared_volume(volume_name, f'{project_name}/{STOP_AFTER_RECONSTRUCTION_FLAG}', dataset_id)
+			reconstruction_concurrency, reconstruction_cpus = _reconstruction_pass_resources()
+			reconstruction_command = _with_max_concurrency(odm_command, reconstruction_concurrency)
+			# DEV_MODE commands carry no concurrency limit; leave those runs uncapped as before.
+			concurrency_limited = '--max-concurrency' in odm_command
+			if concurrency_limited:
+				logger.info(
+					f'ODM reconstruction pass: --max-concurrency {reconstruction_concurrency}, '
+					f'capped at {reconstruction_cpus} CPUs',
+					LogContext(category=LogCategory.ODM, token=token, dataset_id=dataset_id),
+				)
 			odm_container, exit_status, stdout_logs = _run_odm_pass(
-				client, odm_command, volume_name, resource_labels, dataset_id, token, pass_name='reconstruction'
+				client,
+				reconstruction_command,
+				volume_name,
+				resource_labels,
+				dataset_id,
+				token,
+				pass_name='reconstruction',
+				cpus=reconstruction_cpus if concurrency_limited else None,
 			)
 			if exit_status == 0:
 				odm_container.remove(force=True)
